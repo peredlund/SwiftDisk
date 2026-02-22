@@ -299,6 +299,7 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
         uint64_t remaining = run_bytes;
 
         while (remaining > 0) {
+            // Read bounded by chunk size and by remaining bytes in this run extent.
             size_t to_read = static_cast<size_t>(std::min<uint64_t>(chunk_size, remaining));
             LARGE_INTEGER offset;
             offset.QuadPart = static_cast<LONGLONG>(run_offset + (run_bytes - remaining));
@@ -317,6 +318,7 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
                 uint8_t* record_ptr = buffer.data() + i * record_size;
                 callback(record_ptr, record_size, record_index++);
             }
+            // Keep only trailing partial record bytes for the next iteration.
             carry = total % record_size;
             if (carry > 0) {
                 // Preserve incomplete record bytes for the next read.

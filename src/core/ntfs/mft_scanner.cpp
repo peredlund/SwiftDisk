@@ -85,9 +85,12 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
                 stats.records_no_name++;
                 if (!parsed.is_dir && parsed.size > 0) {
                     if (parsed.base_frn != 0 && parsed.base_frn != parsed.frn) {
+                        // Extension record for a base file: merge using max to avoid
+                        // double counting overlapping size metadata across segments.
                         if (Node* existing = tree->GetNodeMutable(parsed.base_frn)) {
                             existing->size = std::max(existing->size, parsed.size);
                         } else {
+                            // Base record may appear later in scan order; store pending merge.
                             auto& pending = pending_sizes[parsed.base_frn];
                             pending = std::max(pending, parsed.size);
                         }

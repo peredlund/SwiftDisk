@@ -95,6 +95,8 @@ bool ApplyFixup(uint8_t* record, size_t record_size, uint16_t usa_offset, uint16
         return false;
     }
 
+    // USA layout: entry 0 is the expected sector trailer signature,
+    // entries 1..N are the original trailer words to restore.
     auto* usa = reinterpret_cast<uint16_t*>(record + usa_offset);
     uint16_t usa_value = usa[0];
 
@@ -206,17 +208,23 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
 
         if (attr->type == kAttrTypeFileName && attr->non_resident == 0) {
             auto* resident = reinterpret_cast<AttrHeaderResident*>(attr);
+            // Validate that resident payload lies fully inside this attribute.
             if (resident->value_offset + resident->value_length <= attr->length) {
                 auto* name_attr = reinterpret_cast<FileNameAttr*>(
                     reinterpret_cast<uint8_t*>(attr) + resident->value_offset);
+                // FILE_NAME uses a flexible trailing UTF-16 name buffer.
                 size_t name_bytes = static_cast<size_t>(name_attr->name_length) * sizeof(wchar_t);
                 size_t name_available = resident->value_length;
+                // `FileNameAttr` declares `name[1]`; subtract one wchar to get fixed part size.
                 if (sizeof(FileNameAttr) - sizeof(wchar_t) + name_bytes <= name_available) {
+                    // Prefer Win32-style names over DOS/other namespaces.
                     uint8_t score = NamePreference(name_attr->name_type);
                     if (score > best_name_score) {
                         best_name_score = score;
                         best_name.assign(name_attr->name, name_attr->name + name_attr->name_length);
+                        // Parent reference packs FRN + sequence; low 48 bits are the FRN.
                         parent_frn = name_attr->parent_ref & 0x0000FFFFFFFFFFFFULL;
+                        // Keep FILE_NAME real size as fallback when DATA size is missing here.
                         name_real_size = name_attr->real_size;
                     }
                 }
@@ -301,13 +309,17 @@ bool ExtractMftDataRuns(uint8_t* record, size_t record_size, uint32_t bytes_per_
                 int64_t current_lcn = 0;
                 size_t index = 0;
                 while (index < run_bytes) {
+                    // Runlist header byte: low nibble = length field size,
+                    // high nibble = offset field size.
                     uint8_t header_byte = run_ptr[index++];
                     if (header_byte == 0) {
+                        // Zero header marks end-of-runlist terminator.
                         break;
                     }
                     uint8_t len_size = header_byte & 0x0F;
                     uint8_t off_size = (header_byte >> 4) & 0x0F;
                     if (len_size == 0 || index + len_size + off_size > run_bytes) {
+                        // Malformed runlist entry: stop parsing this attribute.
                         break;
                     }
 
@@ -325,6 +337,7 @@ bool ExtractMftDataRuns(uint8_t* record, size_t record_size, uint32_t bytes_per_
                         // NTFS encodes run offsets as signed deltas from prior LCN.
                         int64_t sign_mask = 1LL << (off_size * 8 - 1);
                         if (raw_offset & static_cast<uint64_t>(sign_mask)) {
+                            // Sign-extend variable-width negative offsets to 64-bit.
                             int64_t extend_mask = -1LL << (off_size * 8);
                             run_offset = static_cast<int64_t>(raw_offset) | extend_mask;
                         } else {
@@ -332,6 +345,7 @@ bool ExtractMftDataRuns(uint8_t* record, size_t record_size, uint32_t bytes_per_
                         }
                     }
 
+                    // Non-resident DATA run offsets are relative to previous run LCN.
                     current_lcn += run_offset;
                     runs->push_back({current_lcn, run_length});
                 }
