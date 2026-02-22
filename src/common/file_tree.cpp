@@ -5,56 +5,75 @@
 
 namespace space_scanner {
 
+/**
+ Inserts or replaces a node and updates parent-child indices.
+ 
+ Parameters:
+   node: Node to insert.
+ 
+ Returns: Inserted node id.
+ **/
 uint64_t FileTree::AddNode(const Node& node) {
-    nodes_[node.id] = node;
+    m_nodes[node.id] = node;
     if (node.parent_id != 0 && node.parent_id != node.id) {
-        children_[node.parent_id].push_back(node.id);
+        m_children[node.parent_id].push_back(node.id);
     }
     return node.id;
 }
 
 const Node* FileTree::GetNode(uint64_t id) const {
-    auto it = nodes_.find(id);
-    if (it == nodes_.end()) {
+    auto it = m_nodes.find(id);
+    if (it == m_nodes.end()) {
         return nullptr;
     }
     return &it->second;
 }
 
 Node* FileTree::GetNodeMutable(uint64_t id) {
-    auto it = nodes_.find(id);
-    if (it == nodes_.end()) {
+    auto it = m_nodes.find(id);
+    if (it == m_nodes.end()) {
         return nullptr;
     }
     return &it->second;
 }
 
 size_t FileTree::NodeCount() const {
-    return nodes_.size();
+    return m_nodes.size();
 }
 
 void FileTree::SetRootId(uint64_t id) {
-    root_id_ = id;
+    m_root_id = id;
 }
 
 uint64_t FileTree::RootId() const {
-    return root_id_;
+    return m_root_id;
 }
 
+/**
+ Computes node depth relative to the configured root.
+ Uses memoization to avoid repeated parent-chain traversals during
+ depth-based sorting and aggregation.
+ 
+ Parameters:
+   id: Node id to evaluate.
+   cache: Depth memoization map.
+ 
+ Returns: Depth value, where root-like nodes are depth 0.
+ **/
 size_t FileTree::GetDepth(uint64_t id, std::unordered_map<uint64_t, size_t>& cache) const {
     auto cached = cache.find(id);
     if (cached != cache.end()) {
         return cached->second;
     }
 
-    auto it = nodes_.find(id);
-    if (it == nodes_.end()) {
+    auto it = m_nodes.find(id);
+    if (it == m_nodes.end()) {
         cache[id] = 0;
         return 0;
     }
 
     const Node& node = it->second;
-    if (node.parent_id == 0 || node.parent_id == node.id || node.id == root_id_) {
+    if (node.parent_id == 0 || node.parent_id == node.id || node.id == m_root_id) {
         cache[id] = 0;
         return 0;
     }
@@ -64,11 +83,16 @@ size_t FileTree::GetDepth(uint64_t id, std::unordered_map<uint64_t, size_t>& cac
     return depth;
 }
 
+/**
+ Finalizes the tree by aggregating child sizes into parents.
+ Nodes are processed deepest-first so each parent receives already
+ aggregated child totals.
+ **/
 void FileTree::Finalize() {
     std::unordered_map<uint64_t, size_t> depth_cache;
     std::vector<uint64_t> ids;
-    ids.reserve(nodes_.size());
-    for (const auto& entry : nodes_) {
+    ids.reserve(m_nodes.size());
+    for (const auto& entry : m_nodes) {
         ids.push_back(entry.first);
     }
 
@@ -77,28 +101,33 @@ void FileTree::Finalize() {
     });
 
     for (uint64_t id : ids) {
-        auto it = nodes_.find(id);
-        if (it == nodes_.end()) {
+        auto it = m_nodes.find(id);
+        if (it == m_nodes.end()) {
             continue;
         }
         const Node& node = it->second;
         if (node.parent_id == 0 || node.parent_id == node.id) {
             continue;
         }
-        auto parent_it = nodes_.find(node.parent_id);
-        if (parent_it == nodes_.end()) {
+        auto parent_it = m_nodes.find(node.parent_id);
+        if (parent_it == m_nodes.end()) {
             continue;
         }
         parent_it->second.size += node.size;
     }
 
-    path_cache_.clear();
+    m_path_cache.clear();
 }
 
+/**
+ Computes global and root-reachable statistics for the current tree.
+ 
+ Returns: Filled TreeStats structure.
+ **/
 FileTree::TreeStats FileTree::ComputeStats() const {
     TreeStats stats;
 
-    for (const auto& entry : nodes_) {
+    for (const auto& entry : m_nodes) {
         const Node& node = entry.second;
         if (node.is_dir) {
             stats.dir_count++;
@@ -111,11 +140,11 @@ FileTree::TreeStats FileTree::ComputeStats() const {
         }
     }
 
-    if (root_id_ != 0 && nodes_.find(root_id_) != nodes_.end()) {
+    if (m_root_id != 0 && m_nodes.find(m_root_id) != m_nodes.end()) {
         std::vector<uint64_t> stack;
-        stack.push_back(root_id_);
+        stack.push_back(m_root_id);
         std::unordered_set<uint64_t> visited;
-        visited.reserve(nodes_.size());
+        visited.reserve(m_nodes.size());
 
         while (!stack.empty()) {
             uint64_t current = stack.back();
@@ -123,8 +152,8 @@ FileTree::TreeStats FileTree::ComputeStats() const {
             if (!visited.insert(current).second) {
                 continue;
             }
-            auto it = nodes_.find(current);
-            if (it == nodes_.end()) {
+            auto it = m_nodes.find(current);
+            if (it == m_nodes.end()) {
                 continue;
             }
             const Node& node = it->second;
@@ -132,8 +161,8 @@ FileTree::TreeStats FileTree::ComputeStats() const {
                 stats.reachable_file_count++;
                 stats.reachable_file_size += node.size;
             } else {
-                auto child_it = children_.find(current);
-                if (child_it != children_.end()) {
+                auto child_it = m_children.find(current);
+                if (child_it != m_children.end()) {
                     for (uint64_t child : child_it->second) {
                         if (visited.find(child) == visited.end()) {
                             stack.push_back(child);
@@ -154,10 +183,18 @@ FileTree::TreeStats FileTree::ComputeStats() const {
     return stats;
 }
 
+/**
+ Returns the largest nodes by current size value.
+ 
+ Parameters:
+   n: Maximum number of nodes to return.
+ 
+ Returns: Nodes sorted by descending size.
+ **/
 std::vector<const Node*> FileTree::TopN(size_t n) const {
     std::vector<const Node*> nodes;
-    nodes.reserve(nodes_.size());
-    for (const auto& entry : nodes_) {
+    nodes.reserve(m_nodes.size());
+    for (const auto& entry : m_nodes) {
         nodes.push_back(&entry.second);
     }
 
@@ -171,9 +208,17 @@ std::vector<const Node*> FileTree::TopN(size_t n) const {
     return nodes;
 }
 
+/**
+ Builds and caches a path by walking parent links to the root.
+ 
+ Parameters:
+   id: Node id to render.
+ 
+ Returns: Path string for the node, if ancestry can be resolved.
+ **/
 std::wstring FileTree::BuildPath(uint64_t id) const {
-    auto cached = path_cache_.find(id);
-    if (cached != path_cache_.end()) {
+    auto cached = m_path_cache.find(id);
+    if (cached != m_path_cache.end()) {
         return cached->second;
     }
 
@@ -181,8 +226,8 @@ std::wstring FileTree::BuildPath(uint64_t id) const {
     uint64_t current = id;
     size_t guard = 0;
     while (current != 0 && guard < 1024) {
-        auto it = nodes_.find(current);
-        if (it == nodes_.end()) {
+        auto it = m_nodes.find(current);
+        if (it == m_nodes.end()) {
             break;
         }
         const Node& node = it->second;
@@ -193,9 +238,9 @@ std::wstring FileTree::BuildPath(uint64_t id) const {
             break;
         }
         current = node.parent_id;
-        if (current == root_id_) {
-            auto root_it = nodes_.find(current);
-            if (root_it != nodes_.end() && !root_it->second.name.empty()) {
+        if (current == m_root_id) {
+            auto root_it = m_nodes.find(current);
+            if (root_it != m_nodes.end() && !root_it->second.name.empty()) {
                 parts.push_back(root_it->second.name);
             }
             break;
@@ -211,7 +256,7 @@ std::wstring FileTree::BuildPath(uint64_t id) const {
         path.append(*it);
     }
 
-    path_cache_[id] = path;
+    m_path_cache[id] = path;
     return path;
 }
 

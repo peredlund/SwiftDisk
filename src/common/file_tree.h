@@ -15,6 +15,11 @@ struct Node {
     uint64_t size = 0;
 };
 
+/**
+ Stores and aggregates file system nodes by id.
+ Maintains parent-child relationships, computes aggregate sizes,
+ and provides path/stat/top-N queries.
+ **/
 class FileTree {
 public:
     struct TreeStats {
@@ -44,10 +49,10 @@ public:
 private:
     size_t GetDepth(uint64_t id, std::unordered_map<uint64_t, size_t>& cache) const;
 
-    uint64_t root_id_ = 0;
-    std::unordered_map<uint64_t, Node> nodes_;
-    std::unordered_map<uint64_t, std::vector<uint64_t>> children_;
-    mutable std::unordered_map<uint64_t, std::wstring> path_cache_;
+    uint64_t m_root_id = 0;
+    std::unordered_map<uint64_t, Node> m_nodes;
+    std::unordered_map<uint64_t, std::vector<uint64_t>> m_children;
+    mutable std::unordered_map<uint64_t, std::wstring> m_path_cache;
 };
 
 } // namespace space_scanner

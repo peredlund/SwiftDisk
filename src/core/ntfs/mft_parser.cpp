@@ -77,6 +77,19 @@ struct FileNameAttr {
 };
 #pragma pack(pop)
 
+/**
+ Applies NTFS update-sequence fixups for a raw FILE record.
+ Restores the trailing word of each sector before attribute parsing.
+ 
+ Parameters:
+   record: Mutable record bytes.
+   record_size: Record byte count.
+   usa_offset: Offset to update sequence array.
+   usa_count: Number of entries in update sequence array.
+   bytes_per_sector: Sector size used for trailer restoration.
+ 
+ Returns: true if fixup was applied or already present, otherwise false.
+ **/
 bool ApplyFixup(uint8_t* record, size_t record_size, uint16_t usa_offset, uint16_t usa_count, uint32_t bytes_per_sector) {
     if (usa_offset + usa_count * sizeof(uint16_t) > record_size) {
         return false;
@@ -105,6 +118,14 @@ bool ApplyFixup(uint8_t* record, size_t record_size, uint16_t usa_offset, uint16
     return ok;
 }
 
+/**
+ Ranks FILE_NAME namespaces for display name selection.
+ 
+ Parameters:
+   name_type: NTFS file name namespace value.
+ 
+ Returns: Higher score for preferred namespaces.
+ **/
 uint8_t NamePreference(uint8_t name_type) {
     switch (name_type) {
         case 3: // Win32 & DOS
@@ -122,6 +143,19 @@ uint8_t NamePreference(uint8_t name_type) {
 
 } // namespace
 
+/**
+ Parses one FILE record and extracts core node metadata.
+ Pulls name, parent FRN, base FRN, in-use flags, and primary stream size.
+ 
+ Parameters:
+   record: Mutable record bytes.
+   record_size: Record byte count.
+   bytes_per_sector: Sector size used for fixup validation.
+   frn: File record number associated with this record.
+   out: Destination parsed record.
+ 
+ Returns: true if the record signature/shape is parseable, otherwise false.
+ **/
 bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sector, uint64_t frn, ParsedRecord* out) {
     if (!record || record_size < sizeof(FileRecordHeader) || !out) {
         return false;
@@ -189,6 +223,7 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
             }
         } else if (attr->type == kAttrTypeData) {
             if (attr->name_length == 0) {
+                // Only unnamed $DATA is counted as file primary content size.
                 if (attr->non_resident == 0) {
                     auto* resident = reinterpret_cast<AttrHeaderResident*>(attr);
                     data_size = std::max<uint64_t>(data_size, resident->value_length);
@@ -215,6 +250,19 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
     return true;
 }
 
+/**
+ Extracts unnamed non-resident $DATA runs from an MFT record.
+ Used for MFT record 0 to stream physical $MFT bytes efficiently.
+ 
+ Parameters:
+   record: Mutable record bytes.
+   record_size: Record byte count.
+   bytes_per_sector: Sector size used for fixup validation.
+   runs: Destination run list.
+   data_size: Optional logical data size output.
+ 
+ Returns: true when at least one data run is decoded.
+ **/
 bool ExtractMftDataRuns(uint8_t* record, size_t record_size, uint32_t bytes_per_sector, std::vector<DataRun>* runs, uint64_t* data_size) {
     if (!record || record_size < sizeof(FileRecordHeader) || !runs) {
         return false;
@@ -274,6 +322,7 @@ bool ExtractMftDataRuns(uint8_t* record, size_t record_size, uint32_t bytes_per_
                         for (uint8_t i = 0; i < off_size; ++i) {
                             raw_offset |= static_cast<uint64_t>(run_ptr[index++]) << (i * 8);
                         }
+                        // NTFS encodes run offsets as signed deltas from prior LCN.
                         int64_t sign_mask = 1LL << (off_size * 8 - 1);
                         if (raw_offset & static_cast<uint64_t>(sign_mask)) {
                             int64_t extend_mask = -1LL << (off_size * 8);

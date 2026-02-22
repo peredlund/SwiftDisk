@@ -13,6 +13,14 @@ namespace space_scanner::ntfs {
 
 namespace {
 
+/**
+ Builds a raw volume device path from a drive letter.
+ 
+ Parameters:
+   drive_letter: Drive letter, e.g. 'C'.
+ 
+ Returns: Device path in \\.\X: form.
+ **/
 std::wstring BuildVolumePath(wchar_t drive_letter) {
     std::wstring path = L"\\\\.\\";
     path.push_back(drive_letter);
@@ -20,6 +28,14 @@ std::wstring BuildVolumePath(wchar_t drive_letter) {
     return path;
 }
 
+/**
+ Builds a root directory path from a drive letter.
+ 
+ Parameters:
+   drive_letter: Drive letter, e.g. 'C'.
+ 
+ Returns: Root path in X:\ form.
+ **/
 std::wstring BuildRootPath(wchar_t drive_letter) {
     std::wstring path;
     path.push_back(drive_letter);
@@ -36,12 +52,12 @@ NtfsVolume::~NtfsVolume() {
 }
 
 NtfsVolume::NtfsVolume(NtfsVolume&& other) noexcept {
-    handle_ = other.handle_;
-    info_ = other.info_;
-    is_ntfs_ = other.is_ntfs_;
-    volume_path_ = std::move(other.volume_path_);
-    other.handle_ = nullptr;
-    other.is_ntfs_ = false;
+    m_handle = other.m_handle;
+    m_info = other.m_info;
+    m_is_ntfs = other.m_is_ntfs;
+    m_volume_path = std::move(other.m_volume_path);
+    other.m_handle = nullptr;
+    other.m_is_ntfs = false;
 }
 
 NtfsVolume& NtfsVolume::operator=(NtfsVolume&& other) noexcept {
@@ -49,38 +65,48 @@ NtfsVolume& NtfsVolume::operator=(NtfsVolume&& other) noexcept {
         return *this;
     }
     Close();
-    handle_ = other.handle_;
-    info_ = other.info_;
-    is_ntfs_ = other.is_ntfs_;
-    volume_path_ = std::move(other.volume_path_);
-    other.handle_ = nullptr;
-    other.is_ntfs_ = false;
+    m_handle = other.m_handle;
+    m_info = other.m_info;
+    m_is_ntfs = other.m_is_ntfs;
+    m_volume_path = std::move(other.m_volume_path);
+    other.m_handle = nullptr;
+    other.m_is_ntfs = false;
     return *this;
 }
 
+/**
+ Opens the volume in read-only mode and reads NTFS geometry metadata.
+ 
+ Parameters:
+   drive_letter: Volume letter to open.
+ 
+ Returns: true when open and metadata queries succeed.
+ **/
 bool NtfsVolume::Open(wchar_t drive_letter) {
     Close();
 
-    volume_path_ = BuildVolumePath(drive_letter);
-    open_access_ = GENERIC_READ;
-    handle_ = CreateFileW(
-        volume_path_.c_str(),
-        open_access_,
+    m_volume_path = BuildVolumePath(drive_letter);
+    m_open_access = GENERIC_READ;
+    // Read-only raw volume handle; allows direct MFT access without file enumeration.
+    m_handle = CreateFileW(
+        m_volume_path.c_str(),
+        m_open_access,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr,
         OPEN_EXISTING,
         FILE_FLAG_SEQUENTIAL_SCAN,
         nullptr);
 
-    if (handle_ == INVALID_HANDLE_VALUE) {
-        handle_ = nullptr;
+    if (m_handle == INVALID_HANDLE_VALUE) {
+        m_handle = nullptr;
         return false;
     }
 
     NTFS_VOLUME_DATA_BUFFER volume_data = {};
     DWORD bytes_returned = 0;
+    // Pull low-level NTFS geometry needed for MFT parsing.
     if (!DeviceIoControl(
-            handle_,
+            m_handle,
             FSCTL_GET_NTFS_VOLUME_DATA,
             nullptr,
             0,
@@ -92,10 +118,10 @@ bool NtfsVolume::Open(wchar_t drive_letter) {
         return false;
     }
 
-    info_.bytes_per_sector = volume_data.BytesPerSector;
-    info_.bytes_per_cluster = volume_data.BytesPerCluster;
-    info_.bytes_per_file_record = volume_data.BytesPerFileRecordSegment;
-    info_.mft_valid_data_length = static_cast<uint64_t>(volume_data.MftValidDataLength.QuadPart);
+    m_info.bytes_per_sector = volume_data.BytesPerSector;
+    m_info.bytes_per_cluster = volume_data.BytesPerCluster;
+    m_info.bytes_per_file_record = volume_data.BytesPerFileRecordSegment;
+    m_info.mft_valid_data_length = static_cast<uint64_t>(volume_data.MftValidDataLength.QuadPart);
 
     wchar_t fs_name[MAX_PATH] = {};
     if (GetVolumeInformationW(
@@ -107,54 +133,64 @@ bool NtfsVolume::Open(wchar_t drive_letter) {
             nullptr,
             fs_name,
             static_cast<DWORD>(std::size(fs_name)))) {
-        info_.fs_name = fs_name;
-        is_ntfs_ = (_wcsicmp(fs_name, L"NTFS") == 0);
+        m_info.fs_name = fs_name;
+        m_is_ntfs = (_wcsicmp(fs_name, L"NTFS") == 0);
     } else {
-        is_ntfs_ = false;
+        m_is_ntfs = false;
     }
 
     return true;
 }
 
 void NtfsVolume::Close() {
-    if (handle_) {
-        CloseHandle(static_cast<HANDLE>(handle_));
-        handle_ = nullptr;
+    if (m_handle) {
+        CloseHandle(static_cast<HANDLE>(m_handle));
+        m_handle = nullptr;
     }
-    info_ = {};
-    is_ntfs_ = false;
-    open_access_ = 0;
-    volume_path_.clear();
+    m_info = {};
+    m_is_ntfs = false;
+    m_open_access = 0;
+    m_volume_path.clear();
 }
 
 bool NtfsVolume::IsOpen() const {
-    return handle_ != nullptr;
+    return m_handle != nullptr;
 }
 
 bool NtfsVolume::IsNtfs() const {
-    return is_ntfs_;
+    return m_is_ntfs;
 }
 
 bool NtfsVolume::IsReadOnlyAccess() const {
-    return open_access_ == GENERIC_READ;
+    return m_open_access == GENERIC_READ;
 }
 
 const VolumeInfo& NtfsVolume::Info() const {
-    return info_;
+    return m_info;
 }
 
+/**
+ Reads a single FILE record by FRN using FSCTL_GET_NTFS_FILE_RECORD.
+ 
+ Parameters:
+   frn: File record number.
+   out_record: Destination buffer.
+ 
+ Returns: true when a non-empty record is returned.
+ **/
 bool NtfsVolume::ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record) {
-    if (!handle_ || !out_record) {
+    if (!m_handle || !out_record) {
         return false;
     }
 
+    // FSCTL_GET_NTFS_FILE_RECORD fetches one FILE record by reference number.
     NTFS_FILE_RECORD_INPUT_BUFFER input = {};
     input.FileReferenceNumber.QuadPart = static_cast<LONGLONG>(frn);
 
-    std::vector<uint8_t> buffer(sizeof(NTFS_FILE_RECORD_OUTPUT_BUFFER) + info_.bytes_per_file_record);
+    std::vector<uint8_t> buffer(sizeof(NTFS_FILE_RECORD_OUTPUT_BUFFER) + m_info.bytes_per_file_record);
     DWORD bytes_returned = 0;
     if (!DeviceIoControl(
-            handle_,
+            m_handle,
             FSCTL_GET_NTFS_FILE_RECORD,
             &input,
             sizeof(input),
@@ -174,6 +210,15 @@ bool NtfsVolume::ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record) 
     return true;
 }
 
+/**
+ Loads MFT data runs by parsing MFT record 0.
+ 
+ Parameters:
+   runs: Destination data-run list.
+   data_size: Optional MFT logical size output.
+ 
+ Returns: true on successful run extraction.
+ **/
 bool NtfsVolume::GetMftDataRuns(std::vector<DataRun>* runs, uint64_t* data_size) {
     if (!runs) {
         return false;
@@ -184,11 +229,22 @@ bool NtfsVolume::GetMftDataRuns(std::vector<DataRun>* runs, uint64_t* data_size)
         return false;
     }
 
-    return ExtractMftDataRuns(record.data(), record.size(), info_.bytes_per_sector, runs, data_size);
+    return ExtractMftDataRuns(record.data(), record.size(), m_info.bytes_per_sector, runs, data_size);
 }
 
+/**
+ Streams MFT bytes via run list and emits fixed-size FILE records.
+ Reads run extents sequentially and preserves partial record tails
+ between chunk reads.
+ 
+ Parameters:
+   callback: Record callback invoked per decoded record.
+   out_records: Optional output for logical record count.
+ 
+ Returns: true on successful full enumeration.
+ **/
 bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* out_records) {
-    if (!handle_ || !callback) {
+    if (!m_handle || !callback) {
         return false;
     }
 
@@ -198,29 +254,32 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
         return false;
     }
 
-    const uint32_t record_size = info_.bytes_per_file_record;
+    const uint32_t record_size = m_info.bytes_per_file_record;
     if (record_size == 0) {
         return false;
     }
 
     const size_t base_chunk = 8 * 1024 * 1024;
+    // Keep reads aligned to full file-record boundaries.
     size_t chunk_size = (base_chunk / record_size) * record_size;
     if (chunk_size == 0) {
         chunk_size = record_size;
     }
 
+    // Extra record-sized tail stores carry-over bytes between chunk reads.
     std::vector<uint8_t> buffer(chunk_size + record_size);
     size_t carry = 0;
     uint64_t record_index = 0;
 
-    uint64_t mft_limit = info_.mft_valid_data_length;
+    uint64_t mft_limit = m_info.mft_valid_data_length;
     if (mft_limit == 0 && mft_data_size > 0) {
         mft_limit = mft_data_size;
     }
     uint64_t remaining_mft_bytes = mft_limit;
     for (const auto& run : runs) {
         if (run.length == 0 || run.lcn <= 0) {
-            uint64_t run_bytes = run.length * static_cast<uint64_t>(info_.bytes_per_cluster);
+            // Sparse/invalid run: skip physical read but keep logical record index aligned.
+            uint64_t run_bytes = run.length * static_cast<uint64_t>(m_info.bytes_per_cluster);
             record_index += run_bytes / record_size;
             if (remaining_mft_bytes > 0) {
                 if (run_bytes >= remaining_mft_bytes) {
@@ -232,23 +291,23 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
             continue;
         }
 
-        uint64_t run_bytes = run.length * static_cast<uint64_t>(info_.bytes_per_cluster);
+        uint64_t run_bytes = run.length * static_cast<uint64_t>(m_info.bytes_per_cluster);
         if (remaining_mft_bytes > 0) {
             run_bytes = std::min(run_bytes, remaining_mft_bytes);
         }
-        uint64_t run_offset = static_cast<uint64_t>(run.lcn) * info_.bytes_per_cluster;
+        uint64_t run_offset = static_cast<uint64_t>(run.lcn) * m_info.bytes_per_cluster;
         uint64_t remaining = run_bytes;
 
         while (remaining > 0) {
             size_t to_read = static_cast<size_t>(std::min<uint64_t>(chunk_size, remaining));
             LARGE_INTEGER offset;
             offset.QuadPart = static_cast<LONGLONG>(run_offset + (run_bytes - remaining));
-            if (!SetFilePointerEx(static_cast<HANDLE>(handle_), offset, nullptr, FILE_BEGIN)) {
+            if (!SetFilePointerEx(static_cast<HANDLE>(m_handle), offset, nullptr, FILE_BEGIN)) {
                 return false;
             }
 
             DWORD bytes_read = 0;
-            if (!ReadFile(static_cast<HANDLE>(handle_), buffer.data() + carry, static_cast<DWORD>(to_read), &bytes_read, nullptr)) {
+            if (!ReadFile(static_cast<HANDLE>(m_handle), buffer.data() + carry, static_cast<DWORD>(to_read), &bytes_read, nullptr)) {
                 return false;
             }
 
@@ -260,6 +319,7 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
             }
             carry = total % record_size;
             if (carry > 0) {
+                // Preserve incomplete record bytes for the next read.
                 std::memmove(buffer.data(), buffer.data() + records * record_size, carry);
             }
 

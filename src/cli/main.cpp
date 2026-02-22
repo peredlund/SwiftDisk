@@ -28,6 +28,16 @@ void PrintUsage() {
     std::wcout << L"  --top N          Number of entries to list (default 20)\n";
 }
 
+/**
+ Parses CLI arguments for scan mode and options.
+ 
+ Parameters:
+   argc: Argument count.
+   argv: Argument array.
+   options: Parsed output options.
+ 
+ Returns: true when required scan options are present.
+ **/
 bool ParseArgs(int argc, wchar_t* argv[], Options* options) {
     if (argc < 2 || wcscmp(argv[1], L"scan") != 0) {
         return false;
@@ -48,6 +58,14 @@ bool ParseArgs(int argc, wchar_t* argv[], Options* options) {
     return options->volume != 0 || !options->path.empty();
 }
 
+/**
+ Converts a byte count to a human-readable IEC string.
+ 
+ Parameters:
+   bytes: Raw byte count.
+ 
+ Returns: Formatted size string with binary units.
+ **/
 std::wstring HumanizeBytes(uint64_t bytes) {
     const wchar_t* units[] = {L"B", L"KiB", L"MiB", L"GiB", L"TiB"};
     double value = static_cast<double>(bytes);
@@ -63,6 +81,15 @@ std::wstring HumanizeBytes(uint64_t bytes) {
 
 } // namespace space_scanner
 
+/**
+ CLI entry point that runs NTFS or directory scan and prints summary.
+ 
+ Parameters:
+   argc: Argument count.
+   argv: Argument array.
+ 
+ Returns: Process exit code.
+ **/
 int wmain(int argc, wchar_t* argv[]) {
     using namespace space_scanner;
 

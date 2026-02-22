@@ -4,6 +4,9 @@
 
 namespace space_scanner {
 
+/**
+ Lightweight monotonic stopwatch for elapsed wall time.
+ **/
 class Stopwatch {
 public:
     Stopwatch();
@@ -12,8 +15,7 @@ public:
     double ElapsedSeconds() const;
 
 private:
-    std::chrono::steady_clock::time_point start_;
+    std::chrono::steady_clock::time_point m_start;
 };
 
 } // namespace space_scanner
-

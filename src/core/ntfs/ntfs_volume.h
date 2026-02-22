@@ -17,6 +17,9 @@ struct VolumeInfo {
     std::wstring fs_name;
 };
 
+/**
+ Provides low-level NTFS volume access for MFT scanning.
+ **/
 class NtfsVolume {
 public:
     NtfsVolume();
@@ -42,11 +45,11 @@ private:
     bool ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record);
     bool GetMftDataRuns(std::vector<DataRun>* runs, uint64_t* data_size);
 
-    void* handle_ = nullptr;
-    VolumeInfo info_;
-    bool is_ntfs_ = false;
-    uint32_t open_access_ = 0;
-    std::wstring volume_path_;
+    void* m_handle = nullptr;
+    VolumeInfo m_info;
+    bool m_is_ntfs = false;
+    uint32_t m_open_access = 0;
+    std::wstring m_volume_path;
 };
 
 } // namespace space_scanner::ntfs

@@ -7,6 +7,14 @@
 
 namespace space_scanner {
 
+/**
+ Normalizes the root path used for display and traversal.
+ 
+ Parameters:
+   path: Input path.
+ 
+ Returns: Path without a trailing separator (except drive root forms).
+ **/
 static std::wstring NormalizeRootName(std::wstring path) {
     if (path.size() > 3 && (path.back() == L'\\' || path.back() == L'/')) {
         path.pop_back();
@@ -14,6 +22,17 @@ static std::wstring NormalizeRootName(std::wstring path) {
     return path;
 }
 
+/**
+ Scans a directory tree using Win32 enumeration APIs.
+ Builds a FileTree where file sizes come from directory entry metadata.
+ 
+ Parameters:
+   root_path: Root path to scan.
+   tree: Destination file tree.
+   out_root_id: Optional output for assigned root id.
+ 
+ Returns: true on success, otherwise false.
+ **/
 bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_root_id) {
     if (!tree || root_path.empty()) {
         return false;

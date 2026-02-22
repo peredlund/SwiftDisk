@@ -9,6 +9,19 @@
 
 namespace space_scanner::ntfs {
 
+/**
+ Scans an NTFS volume by enumerating and parsing MFT records.
+ Builds a FileTree keyed by FRN and merges extension-record sizes back
+ to base records using non-additive max semantics.
+ 
+ Parameters:
+   drive_letter: Volume letter to scan.
+   tree: Destination file tree.
+   error: Optional error message output.
+   out_stats: Optional scan statistics output.
+ 
+ Returns: true on success, otherwise false.
+ **/
 bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, MftScanStats* out_stats) {
     if (!tree) {
         if (error) {
