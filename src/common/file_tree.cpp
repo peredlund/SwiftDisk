@@ -13,12 +13,14 @@ namespace space_scanner {
  
  Returns: Inserted node id.
  **/
-uint64_t FileTree::AddNode(const Node& node) {
-    m_nodes[node.id] = node;
-    if (node.parent_id != 0 && node.parent_id != node.id) {
-        m_children[node.parent_id].push_back(node.id);
+uint64_t FileTree::AddNode(Node node) {
+    const uint64_t node_id = node.id;
+    const uint64_t parent_id = node.parent_id;
+    m_nodes.insert_or_assign(node_id, std::move(node));
+    if (parent_id != 0 && parent_id != node_id) {
+        m_children[parent_id].push_back(node_id);
     }
-    return node.id;
+    return node_id;
 }
 
 const Node* FileTree::GetNode(uint64_t id) const {
@@ -39,6 +41,12 @@ Node* FileTree::GetNodeMutable(uint64_t id) {
 
 size_t FileTree::NodeCount() const {
     return m_nodes.size();
+}
+
+void FileTree::Reserve(size_t node_count) {
+    m_nodes.reserve(node_count);
+    m_children.reserve(node_count);
+    m_path_cache.reserve(node_count);
 }
 
 void FileTree::SetRootId(uint64_t id) {

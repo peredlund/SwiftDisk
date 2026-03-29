@@ -33,10 +33,11 @@ public:
         uint64_t unreachable_file_size = 0;
     };
 
-    uint64_t AddNode(const Node& node);
+    uint64_t AddNode(Node node);
     const Node* GetNode(uint64_t id) const;
     Node* GetNodeMutable(uint64_t id);
     size_t NodeCount() const;
+    void Reserve(size_t node_count);
 
     void SetRootId(uint64_t id);
     uint64_t RootId() const;

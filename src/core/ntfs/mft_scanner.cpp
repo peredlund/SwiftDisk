@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cwchar>
+#include <limits>
 #include <unordered_map>
 #include <utility>
 
@@ -125,6 +126,13 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
 
     stats.mft_valid_data_length = volume.Info().mft_valid_data_length;
     stats.bytes_per_file_record = volume.Info().bytes_per_file_record;
+    if (stats.bytes_per_file_record > 0 && stats.mft_valid_data_length > 0) {
+        const uint64_t estimated_records = stats.mft_valid_data_length / stats.bytes_per_file_record;
+        const size_t reserve_count = static_cast<size_t>(std::min<uint64_t>(
+            estimated_records + 1,
+            static_cast<uint64_t>(std::numeric_limits<size_t>::max())));
+        tree->Reserve(reserve_count);
+    }
 
     constexpr uint64_t kRootFrn = 5;
     Node root_node;
@@ -187,7 +195,7 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
             node.name = std::move(parsed.name);
             node.is_dir = parsed.is_dir;
             node.size = parsed.size;
-            tree->AddNode(node);
+            tree->AddNode(std::move(node));
             stats.records_added++;
 
             auto pending = pending_sizes.find(node.id);
@@ -294,7 +302,7 @@ bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* er
             copy.parent_id = 0;
             copy.name = normalized_root;
         }
-        tree->AddNode(copy);
+        tree->AddNode(std::move(copy));
 
         const std::vector<uint64_t>* child_ids = full_tree.GetChildIds(node_id);
         if (!child_ids) {
