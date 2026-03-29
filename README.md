@@ -13,6 +13,25 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
+## Generate Visual Studio 2026 Solution
+Use the Visual Studio 2026 CMake generator to create a `.sln` file and Visual Studio project files in the `build` directory:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64
+```
+
+Then build from the command line:
+
+```powershell
+cmake --build build --config Release
+```
+
+Or open the generated solution in Visual Studio 2026:
+
+```powershell
+cmake --open build
+```
+
 ## Run
 ```powershell
 build\Release\space_scanner_cli.exe scan --volume C

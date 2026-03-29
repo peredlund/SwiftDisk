@@ -43,6 +43,7 @@ public:
 
     void Finalize();
     TreeStats ComputeStats() const;
+    std::vector<const Node*> GetAllNodes() const;
     std::vector<const Node*> TopN(size_t n) const;
     std::wstring BuildPath(uint64_t id) const;
 

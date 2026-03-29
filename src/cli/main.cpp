@@ -1,14 +1,18 @@
 #include <windows.h>
 
+#include <filesystem>
+#include <fstream>
 #include <cwchar>
 #include <iostream>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "common/file_tree.h"
 #include "common/stopwatch.h"
 #include "core/dir_scanner.h"
+#include "core/ntfs/validation.h"
 #include "core/ntfs/mft_scanner.h"
 
 namespace space_scanner {
@@ -17,6 +21,10 @@ struct Options {
     wchar_t volume = 0;
     std::wstring path;
     size_t top = 20;
+    bool validate = false;
+    size_t validate_sample = 128;
+    size_t validate_edge_limit = 4096;
+    std::wstring json_out;
 };
 
 void PrintUsage() {
@@ -26,6 +34,12 @@ void PrintUsage() {
     std::wcout << L"  space_scanner_cli.exe scan --path C:\\\\Users\n";
     std::wcout << L"Options:\n";
     std::wcout << L"  --top N          Number of entries to list (default 20)\n";
+    std::wcout << L"  --validate       Compare sampled MFT results against Win32 metadata\n";
+    std::wcout << L"  --validate-sample N\n";
+    std::wcout << L"                   Number of files to sample during validation (default 128)\n";
+    std::wcout << L"  --validate-edge-limit N\n";
+    std::wcout << L"                   Number of entries to inspect for edge cases (default 4096)\n";
+    std::wcout << L"  --json-out PATH  Write machine-readable scan report to JSON\n";
 }
 
 /**
@@ -50,6 +64,16 @@ bool ParseArgs(int argc, wchar_t* argv[], Options* options) {
             options->path = argv[++i];
         } else if (wcscmp(argv[i], L"--top") == 0 && i + 1 < argc) {
             options->top = static_cast<size_t>(_wtoi(argv[++i]));
+        } else if (wcscmp(argv[i], L"--validate") == 0) {
+            options->validate = true;
+        } else if (wcscmp(argv[i], L"--validate-sample") == 0 && i + 1 < argc) {
+            options->validate = true;
+            options->validate_sample = static_cast<size_t>(_wtoi(argv[++i]));
+        } else if (wcscmp(argv[i], L"--validate-edge-limit") == 0 && i + 1 < argc) {
+            options->validate = true;
+            options->validate_edge_limit = static_cast<size_t>(_wtoi(argv[++i]));
+        } else if (wcscmp(argv[i], L"--json-out") == 0 && i + 1 < argc) {
+            options->json_out = argv[++i];
         } else if (wcscmp(argv[i], L"--help") == 0 || wcscmp(argv[i], L"-h") == 0) {
             return false;
         }
@@ -79,6 +103,235 @@ std::wstring HumanizeBytes(uint64_t bytes) {
     return buffer;
 }
 
+std::string Utf8FromWide(const std::wstring& value) {
+    if (value.empty()) {
+        return {};
+    }
+
+    int size = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    if (size <= 0) {
+        return {};
+    }
+
+    std::string utf8(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), utf8.data(), size, nullptr, nullptr);
+    return utf8;
+}
+
+std::string EscapeJson(const std::string& value) {
+    std::ostringstream escaped;
+    for (unsigned char ch : value) {
+        switch (ch) {
+            case '\"': escaped << "\\\""; break;
+            case '\\': escaped << "\\\\"; break;
+            case '\b': escaped << "\\b"; break;
+            case '\f': escaped << "\\f"; break;
+            case '\n': escaped << "\\n"; break;
+            case '\r': escaped << "\\r"; break;
+            case '\t': escaped << "\\t"; break;
+            default:
+                if (ch < 0x20) {
+                    escaped << "\\u";
+                    constexpr char kHex[] = "0123456789abcdef";
+                    escaped << "00" << kHex[(ch >> 4) & 0x0F] << kHex[ch & 0x0F];
+                } else {
+                    escaped << static_cast<char>(ch);
+                }
+                break;
+        }
+    }
+    return escaped.str();
+}
+
+void AppendJsonString(std::ostringstream& json, const std::wstring& value) {
+    json << '"' << EscapeJson(Utf8FromWide(value)) << '"';
+}
+
+void AppendJsonString(std::ostringstream& json, const std::string& value) {
+    json << '"' << EscapeJson(value) << '"';
+}
+
+void AppendJsonTopEntries(std::ostringstream& json, const FileTree& tree, size_t top_count) {
+    auto top = tree.TopN(top_count);
+    json << "[\n";
+    for (size_t i = 0; i < top.size(); ++i) {
+        const Node* node = top[i];
+        json << "    {\n";
+        json << "      \"id\": " << node->id << ",\n";
+        json << "      \"path\": ";
+        AppendJsonString(json, tree.BuildPath(node->id));
+        json << ",\n";
+        json << "      \"size\": " << node->size << ",\n";
+        json << "      \"is_dir\": " << (node->is_dir ? "true" : "false") << "\n";
+        json << "    }";
+        if (i + 1 != top.size()) {
+            json << ",";
+        }
+        json << "\n";
+    }
+    json << "  ]";
+}
+
+void AppendJsonMftStats(std::ostringstream& json, const ntfs::MftScanStats& stats) {
+    json << "  \"mft_stats\": {\n";
+    json << "    \"records_read\": " << stats.records_read << ",\n";
+    json << "    \"records_parsed\": " << stats.records_parsed << ",\n";
+    json << "    \"records_in_use\": " << stats.records_in_use << ",\n";
+    json << "    \"records_added\": " << stats.records_added << ",\n";
+    json << "    \"records_parse_failed\": " << stats.records_parse_failed << ",\n";
+    json << "    \"records_no_name\": " << stats.records_no_name << ",\n";
+    json << "    \"records_no_name_with_size\": " << stats.records_no_name_with_size << ",\n";
+    json << "    \"records_no_name_size\": " << stats.records_no_name_size << ",\n";
+    json << "    \"extension_size_records\": " << stats.extension_size_records << ",\n";
+    json << "    \"extension_size_total\": " << stats.extension_size_total << ",\n";
+    json << "    \"extension_missing_base_records\": " << stats.extension_missing_base_records << ",\n";
+    json << "    \"extension_missing_base_total\": " << stats.extension_missing_base_total << ",\n";
+    json << "    \"mft_valid_data_length\": " << stats.mft_valid_data_length << ",\n";
+    json << "    \"bytes_per_file_record\": " << stats.bytes_per_file_record << "\n";
+    json << "  }";
+}
+
+void AppendJsonValidation(std::ostringstream& json, const ntfs::ValidationReport& report) {
+    json << "  \"validation\": {\n";
+    json << "    \"sample_size_requested\": " << report.sample_size_requested << ",\n";
+    json << "    \"sample_file_candidates\": " << report.sample_file_candidates << ",\n";
+    json << "    \"sampled_files_checked\": " << report.sampled_files_checked << ",\n";
+    json << "    \"sampled_files_with_comparable_ids\": " << report.sampled_files_with_comparable_ids << ",\n";
+    json << "    \"missing_paths\": " << report.missing_paths << ",\n";
+    json << "    \"size_mismatches\": " << report.size_mismatches << ",\n";
+    json << "    \"parent_mismatches\": " << report.parent_mismatches << ",\n";
+    json << "    \"name_mismatches\": " << report.name_mismatches << ",\n";
+    json << "    \"type_mismatches\": " << report.type_mismatches << ",\n";
+    json << "    \"frn_mismatches\": " << report.frn_mismatches << ",\n";
+    json << "    \"attribute_list_extension_records\": " << report.attribute_list_extension_records << ",\n";
+    json << "    \"attribute_list_extension_bytes\": " << report.attribute_list_extension_bytes << ",\n";
+    json << "    \"edge_cases\": {\n";
+    json << "      \"entries_inspected\": " << report.edge_cases.entries_inspected << ",\n";
+    json << "      \"hard_link_entries\": " << report.edge_cases.hard_link_entries << ",\n";
+    json << "      \"sparse_entries\": " << report.edge_cases.sparse_entries << ",\n";
+    json << "      \"compressed_entries\": " << report.edge_cases.compressed_entries << ",\n";
+    json << "      \"reparse_entries\": " << report.edge_cases.reparse_entries << ",\n";
+    json << "      \"ads_entries\": " << report.edge_cases.ads_entries << ",\n";
+
+    auto append_examples = [&](const char* name, const std::vector<std::wstring>& examples, bool trailing_comma) {
+        json << "      \"" << name << "\": [";
+        for (size_t i = 0; i < examples.size(); ++i) {
+            if (i != 0) {
+                json << ", ";
+            }
+            AppendJsonString(json, examples[i]);
+        }
+        json << "]";
+        if (trailing_comma) {
+            json << ",";
+        }
+        json << "\n";
+    };
+
+    append_examples("hard_link_examples", report.edge_cases.hard_link_examples, true);
+    append_examples("sparse_examples", report.edge_cases.sparse_examples, true);
+    append_examples("compressed_examples", report.edge_cases.compressed_examples, true);
+    append_examples("reparse_examples", report.edge_cases.reparse_examples, true);
+    append_examples("ads_examples", report.edge_cases.ads_examples, false);
+    json << "    },\n";
+    json << "    \"mismatches\": [\n";
+    for (size_t i = 0; i < report.mismatches.size(); ++i) {
+        const ntfs::ValidationMismatch& mismatch = report.mismatches[i];
+        json << "      {\n";
+        json << "        \"frn\": " << mismatch.frn << ",\n";
+        json << "        \"path\": ";
+        AppendJsonString(json, mismatch.path);
+        json << ",\n";
+        json << "        \"field\": ";
+        AppendJsonString(json, mismatch.field);
+        json << ",\n";
+        json << "        \"expected\": ";
+        AppendJsonString(json, mismatch.expected);
+        json << ",\n";
+        json << "        \"actual\": ";
+        AppendJsonString(json, mismatch.actual);
+        json << "\n";
+        json << "      }";
+        if (i + 1 != report.mismatches.size()) {
+            json << ",";
+        }
+        json << "\n";
+    }
+    json << "    ]\n";
+    json << "  }";
+}
+
+bool WriteJsonReport(
+    const std::wstring& path,
+    const Options& options,
+    double elapsed_seconds,
+    const FileTree& tree,
+    const FileTree::TreeStats& tree_stats,
+    const ntfs::MftScanStats& scan_stats,
+    const ntfs::ValidationReport* validation,
+    std::wstring* error) {
+    std::ostringstream json;
+    json.setf(std::ios::fixed);
+    json.precision(6);
+
+    json << "{\n";
+    json << "  \"scan_mode\": ";
+    AppendJsonString(json, options.volume != 0 ? "volume" : "path");
+    json << ",\n";
+    if (options.volume != 0) {
+        json << "  \"volume\": ";
+        AppendJsonString(json, std::wstring(1, options.volume));
+        json << ",\n";
+    } else {
+        json << "  \"path\": ";
+        AppendJsonString(json, options.path);
+        json << ",\n";
+    }
+    json << "  \"elapsed_seconds\": " << elapsed_seconds << ",\n";
+    json << "  \"node_count\": " << tree.NodeCount() << ",\n";
+    json << "  \"tree_stats\": {\n";
+    json << "    \"file_count\": " << tree_stats.file_count << ",\n";
+    json << "    \"dir_count\": " << tree_stats.dir_count << ",\n";
+    json << "    \"total_file_size\": " << tree_stats.total_file_size << ",\n";
+    json << "    \"reachable_file_count\": " << tree_stats.reachable_file_count << ",\n";
+    json << "    \"reachable_file_size\": " << tree_stats.reachable_file_size << ",\n";
+    json << "    \"zero_size_files\": " << tree_stats.zero_size_files << ",\n";
+    json << "    \"unreachable_file_count\": " << tree_stats.unreachable_file_count << ",\n";
+    json << "    \"unreachable_file_size\": " << tree_stats.unreachable_file_size << "\n";
+    json << "  },\n";
+    if (options.volume != 0) {
+        AppendJsonMftStats(json, scan_stats);
+        json << ",\n";
+    }
+    if (validation) {
+        AppendJsonValidation(json, *validation);
+        json << ",\n";
+    }
+    json << "  \"top_entries\": ";
+    AppendJsonTopEntries(json, tree, options.top);
+    json << "\n";
+    json << "}\n";
+
+    std::ofstream output(std::filesystem::path(path), std::ios::binary);
+    if (!output) {
+        if (error) {
+            *error = L"Failed to open JSON output file.";
+        }
+        return false;
+    }
+
+    std::string text = json.str();
+    output.write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (!output.good()) {
+        if (error) {
+            *error = L"Failed while writing JSON report.";
+        }
+        return false;
+    }
+
+    return true;
+}
+
 } // namespace space_scanner
 
 /**
@@ -100,15 +353,22 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     FileTree tree;
+    FileTree::TreeStats tree_stats;
     Stopwatch timer;
     bool ok = false;
     std::wstring error;
     ntfs::MftScanStats stats;
+    ntfs::ValidationReport validation_report;
+    bool has_validation_report = false;
 
     if (options.volume != 0) {
         std::wcout << L"Scanning NTFS MFT on volume " << options.volume << L": ...\n";
         ok = ntfs::ScanVolumeMft(options.volume, &tree, &error, &stats);
     } else {
+        if (options.validate) {
+            std::wcout << L"Validation mode currently requires --volume.\n";
+            return 1;
+        }
         std::wcout << L"Scanning directory " << options.path << L" ...\n";
         ok = ScanDirectory(options.path, &tree, nullptr);
         tree.Finalize();
@@ -120,10 +380,26 @@ int wmain(int argc, wchar_t* argv[]) {
         return 2;
     }
 
+    tree_stats = tree.ComputeStats();
+    if (options.validate && options.volume != 0) {
+        std::wcout << L"Running Win32 validation on sampled files ...\n";
+        ok = ntfs::ValidateVolumeWithWin32(
+            tree,
+            stats,
+            options.validate_sample,
+            options.validate_edge_limit,
+            &validation_report,
+            &error);
+        if (!ok) {
+            std::wcout << L"Validation failed: " << (error.empty() ? L"Unknown error." : error) << L"\n";
+            return 3;
+        }
+        has_validation_report = true;
+    }
+
     std::wcout << L"Scan complete in " << elapsed << L" seconds.\n";
     std::wcout << L"Nodes: " << tree.NodeCount() << L"\n";
     if (options.volume != 0) {
-        FileTree::TreeStats tree_stats = tree.ComputeStats();
         const Node* root = tree.GetNode(tree.RootId());
         std::wcout << L"MFT records read: " << stats.records_read << L"\n";
         if (stats.bytes_per_file_record > 0 && stats.mft_valid_data_length > 0) {
@@ -156,6 +432,25 @@ int wmain(int argc, wchar_t* argv[]) {
         std::wcout << L"Unreachable files: " << tree_stats.unreachable_file_count
                    << L" (" << HumanizeBytes(tree_stats.unreachable_file_size) << L")\n";
         std::wcout << L"Zero-size files: " << tree_stats.zero_size_files << L"\n";
+        if (has_validation_report) {
+            std::wcout << L"Validation sampled files: " << validation_report.sampled_files_checked
+                       << L" / " << validation_report.sample_file_candidates << L"\n";
+            std::wcout << L"Validation comparable IDs: " << validation_report.sampled_files_with_comparable_ids
+                       << L" / " << validation_report.sampled_files_checked << L"\n";
+            std::wcout << L"Validation mismatches: size=" << validation_report.size_mismatches
+                       << L" parent=" << validation_report.parent_mismatches
+                       << L" name=" << validation_report.name_mismatches
+                       << L" type=" << validation_report.type_mismatches
+                       << L" frn=" << validation_report.frn_mismatches
+                       << L" missing=" << validation_report.missing_paths << L"\n";
+            std::wcout << L"Edge cases inspected: " << validation_report.edge_cases.entries_inspected
+                       << L" hardlinks=" << validation_report.edge_cases.hard_link_entries
+                       << L" sparse=" << validation_report.edge_cases.sparse_entries
+                       << L" compressed=" << validation_report.edge_cases.compressed_entries
+                       << L" reparse=" << validation_report.edge_cases.reparse_entries
+                       << L" ads=" << validation_report.edge_cases.ads_entries
+                       << L" extension-records=" << validation_report.attribute_list_extension_records << L"\n";
+        }
     }
 
     auto top = tree.TopN(options.top);
@@ -163,6 +458,22 @@ int wmain(int argc, wchar_t* argv[]) {
     for (const Node* node : top) {
         std::wstring path = tree.BuildPath(node->id);
         std::wcout << HumanizeBytes(node->size) << L"  " << path << L"\n";
+    }
+
+    if (!options.json_out.empty()) {
+        if (!WriteJsonReport(
+                options.json_out,
+                options,
+                elapsed,
+                tree,
+                tree_stats,
+                stats,
+                has_validation_report ? &validation_report : nullptr,
+                &error)) {
+            std::wcout << L"Failed to write JSON report: " << (error.empty() ? L"Unknown error." : error) << L"\n";
+            return 4;
+        }
+        std::wcout << L"JSON report written to " << options.json_out << L"\n";
     }
 
     return 0;

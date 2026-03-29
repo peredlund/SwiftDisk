@@ -183,10 +183,19 @@ FileTree::TreeStats FileTree::ComputeStats() const {
     return stats;
 }
 
+std::vector<const Node*> FileTree::GetAllNodes() const {
+    std::vector<const Node*> nodes;
+    nodes.reserve(m_nodes.size());
+    for (const auto& entry : m_nodes) {
+        nodes.push_back(&entry.second);
+    }
+    return nodes;
+}
+
 /**
- Returns the largest nodes by current size value.
+Returns the largest nodes by current size value.
  
- Parameters:
+Parameters:
    n: Maximum number of nodes to return.
  
  Returns: Nodes sorted by descending size.

@@ -11,6 +11,7 @@ add_library(space_scanner_core
     src/core/dir_scanner.cpp
     src/core/ntfs/mft_parser.cpp
     src/core/ntfs/mft_scanner.cpp
+    src/core/ntfs/validation.cpp
     src/core/ntfs/ntfs_volume.cpp
 )
 
