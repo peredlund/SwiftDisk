@@ -192,6 +192,14 @@ std::vector<const Node*> FileTree::GetAllNodes() const {
     return nodes;
 }
 
+const std::vector<uint64_t>* FileTree::GetChildIds(uint64_t id) const {
+    auto it = m_children.find(id);
+    if (it == m_children.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
 /**
 Returns the largest nodes by current size value.
  

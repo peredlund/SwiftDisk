@@ -34,7 +34,8 @@ cmake --open build
 
 ## Run
 ```powershell
-build\Release\space_scanner_cli.exe scan --volume C
+build\Release\space_scanner_cli.exe scan --path C:\
+build\Release\space_scanner_cli.exe scan --path E:\Video
 ```
 
 Note: reading the NTFS MFT requires direct volume access and may need elevated privileges.

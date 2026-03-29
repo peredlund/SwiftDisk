@@ -4,10 +4,79 @@
 #include "core/ntfs/ntfs_volume.h"
 
 #include <algorithm>
+#include <cwchar>
 #include <unordered_map>
 #include <utility>
 
 namespace space_scanner::ntfs {
+
+namespace {
+
+std::wstring NormalizeScanPath(std::wstring path) {
+    std::replace(path.begin(), path.end(), L'/', L'\\');
+    if (!path.empty() && path.size() > 3 && path.back() == L'\\') {
+        path.pop_back();
+    }
+    if (path.size() == 3 && path[1] == L':' && path[2] == L'\\') {
+        path.pop_back();
+    }
+    if (path.size() >= 2 && path[1] == L':') {
+        path[0] = static_cast<wchar_t>(towupper(path[0]));
+    }
+    return path;
+}
+
+bool PathsEqualIgnoreCase(const std::wstring& left, const std::wstring& right) {
+    return _wcsicmp(left.c_str(), right.c_str()) == 0;
+}
+
+std::vector<std::wstring> SplitRelativePathComponents(const std::wstring& path) {
+    std::vector<std::wstring> components;
+    size_t index = 0;
+    while (index < path.size()) {
+        while (index < path.size() && path[index] == L'\\') {
+            ++index;
+        }
+        if (index >= path.size()) {
+            break;
+        }
+
+        size_t next = path.find(L'\\', index);
+        if (next == std::wstring::npos) {
+            components.push_back(path.substr(index));
+            break;
+        }
+
+        components.push_back(path.substr(index, next - index));
+        index = next + 1;
+    }
+    return components;
+}
+
+const Node* FindChildByName(const FileTree& tree, uint64_t parent_id, const std::wstring& name) {
+    const std::vector<uint64_t>* child_ids = tree.GetChildIds(parent_id);
+    if (!child_ids) {
+        return nullptr;
+    }
+
+    for (uint64_t child_id : *child_ids) {
+        const Node* child = tree.GetNode(child_id);
+        if (child && PathsEqualIgnoreCase(child->name, name)) {
+            return child;
+        }
+    }
+    return nullptr;
+}
+
+bool TryGetDriveLetterFromPath(const std::wstring& path, wchar_t* drive_letter) {
+    if (!drive_letter || path.size() < 2 || path[1] != L':') {
+        return false;
+    }
+    *drive_letter = static_cast<wchar_t>(towupper(path[0]));
+    return true;
+}
+
+} // namespace
 
 /**
  Scans an NTFS volume by enumerating and parsing MFT records.
@@ -147,6 +216,95 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
     }
 
     tree->Finalize();
+    if (out_stats) {
+        *out_stats = stats;
+    }
+    return true;
+}
+
+/**
+ Scans an NTFS path by reading the full volume MFT and then projecting
+ the requested subtree into the destination tree.
+ 
+ Parameters:
+   root_path: Directory or file path that should become the scan root.
+   tree: Destination file tree.
+   error: Optional error message output.
+   out_stats: Optional scan statistics output for the underlying volume scan.
+ 
+ Returns: true on success, otherwise false.
+ **/
+bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* error, MftScanStats* out_stats) {
+    if (!tree) {
+        if (error) {
+            *error = L"FileTree is null.";
+        }
+        return false;
+    }
+
+    std::wstring normalized_root = NormalizeScanPath(root_path);
+    wchar_t drive_letter = 0;
+    if (!TryGetDriveLetterFromPath(normalized_root, &drive_letter)) {
+        if (error) {
+            *error = L"Path must start with a drive letter.";
+        }
+        return false;
+    }
+
+    if (normalized_root == std::wstring(1, drive_letter) + L":") {
+        return ScanVolumeMft(drive_letter, tree, error, out_stats);
+    }
+
+    FileTree full_tree;
+    MftScanStats stats;
+    if (!ScanVolumeMft(drive_letter, &full_tree, error, &stats)) {
+        return false;
+    }
+
+    const Node* subtree_root = full_tree.GetNode(full_tree.RootId());
+    std::wstring relative_path = normalized_root.substr(2);
+    for (const std::wstring& component : SplitRelativePathComponents(relative_path)) {
+        if (!subtree_root) {
+            break;
+        }
+        subtree_root = FindChildByName(full_tree, subtree_root->id, component);
+    }
+
+    if (!subtree_root) {
+        if (error) {
+            *error = L"Requested path was not found in the NTFS tree.";
+        }
+        return false;
+    }
+
+    tree->SetRootId(subtree_root->id);
+    std::vector<uint64_t> stack;
+    stack.push_back(subtree_root->id);
+    while (!stack.empty()) {
+        uint64_t node_id = stack.back();
+        stack.pop_back();
+
+        const Node* node = full_tree.GetNode(node_id);
+        if (!node) {
+            continue;
+        }
+
+        Node copy = *node;
+        if (copy.id == subtree_root->id) {
+            copy.parent_id = 0;
+            copy.name = normalized_root;
+        }
+        tree->AddNode(copy);
+
+        const std::vector<uint64_t>* child_ids = full_tree.GetChildIds(node_id);
+        if (!child_ids) {
+            continue;
+        }
+        for (uint64_t child_id : *child_ids) {
+            stack.push_back(child_id);
+        }
+    }
+
     if (out_stats) {
         *out_stats = stats;
     }

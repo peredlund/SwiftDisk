@@ -18,7 +18,6 @@
 namespace space_scanner {
 
 struct Options {
-    wchar_t volume = 0;
     std::wstring path;
     size_t top = 20;
     bool validate = false;
@@ -27,10 +26,47 @@ struct Options {
     std::wstring json_out;
 };
 
+bool TryGetVolumeRoot(const std::wstring& path, std::wstring* volume_root) {
+    if (!volume_root || path.empty()) {
+        return false;
+    }
+
+    wchar_t buffer[MAX_PATH] = {};
+    DWORD length = GetVolumePathNameW(path.c_str(), buffer, static_cast<DWORD>(std::size(buffer)));
+    if (length == 0 || length >= std::size(buffer)) {
+        return false;
+    }
+
+    *volume_root = buffer;
+    return true;
+}
+
+bool IsNtfsPath(const std::wstring& path) {
+    std::wstring volume_root;
+    if (!TryGetVolumeRoot(path, &volume_root)) {
+        return false;
+    }
+
+    wchar_t file_system_name[MAX_PATH] = {};
+    if (!GetVolumeInformationW(
+            volume_root.c_str(),
+            nullptr,
+            0,
+            nullptr,
+            nullptr,
+            nullptr,
+            file_system_name,
+            static_cast<DWORD>(std::size(file_system_name)))) {
+        return false;
+    }
+
+    return _wcsicmp(file_system_name, L"NTFS") == 0;
+}
+
 void PrintUsage() {
     std::wcout << L"SpaceScanner CLI\n";
     std::wcout << L"Usage:\n";
-    std::wcout << L"  space_scanner_cli.exe scan --volume C\n";
+    std::wcout << L"  space_scanner_cli.exe scan --path C:\\\n";
     std::wcout << L"  space_scanner_cli.exe scan --path C:\\\\Users\n";
     std::wcout << L"Options:\n";
     std::wcout << L"  --top N          Number of entries to list (default 20)\n";
@@ -58,9 +94,7 @@ bool ParseArgs(int argc, wchar_t* argv[], Options* options) {
     }
 
     for (int i = 2; i < argc; ++i) {
-        if (wcscmp(argv[i], L"--volume") == 0 && i + 1 < argc) {
-            options->volume = argv[++i][0];
-        } else if (wcscmp(argv[i], L"--path") == 0 && i + 1 < argc) {
+        if (wcscmp(argv[i], L"--path") == 0 && i + 1 < argc) {
             options->path = argv[++i];
         } else if (wcscmp(argv[i], L"--top") == 0 && i + 1 < argc) {
             options->top = static_cast<size_t>(_wtoi(argv[++i]));
@@ -79,7 +113,7 @@ bool ParseArgs(int argc, wchar_t* argv[], Options* options) {
         }
     }
 
-    return options->volume != 0 || !options->path.empty();
+    return !options->path.empty();
 }
 
 /**
@@ -264,6 +298,7 @@ void AppendJsonValidation(std::ostringstream& json, const ntfs::ValidationReport
 bool WriteJsonReport(
     const std::wstring& path,
     const Options& options,
+    bool used_mft_scan,
     double elapsed_seconds,
     const FileTree& tree,
     const FileTree::TreeStats& tree_stats,
@@ -276,17 +311,14 @@ bool WriteJsonReport(
 
     json << "{\n";
     json << "  \"scan_mode\": ";
-    AppendJsonString(json, options.volume != 0 ? "volume" : "path");
+    AppendJsonString(json, "path");
     json << ",\n";
-    if (options.volume != 0) {
-        json << "  \"volume\": ";
-        AppendJsonString(json, std::wstring(1, options.volume));
-        json << ",\n";
-    } else {
-        json << "  \"path\": ";
-        AppendJsonString(json, options.path);
-        json << ",\n";
-    }
+    json << "  \"scan_backend\": ";
+    AppendJsonString(json, used_mft_scan ? "ntfs_mft" : "directory");
+    json << ",\n";
+    json << "  \"path\": ";
+    AppendJsonString(json, options.path);
+    json << ",\n";
     json << "  \"elapsed_seconds\": " << elapsed_seconds << ",\n";
     json << "  \"node_count\": " << tree.NodeCount() << ",\n";
     json << "  \"tree_stats\": {\n";
@@ -299,7 +331,7 @@ bool WriteJsonReport(
     json << "    \"unreachable_file_count\": " << tree_stats.unreachable_file_count << ",\n";
     json << "    \"unreachable_file_size\": " << tree_stats.unreachable_file_size << "\n";
     json << "  },\n";
-    if (options.volume != 0) {
+    if (used_mft_scan) {
         AppendJsonMftStats(json, scan_stats);
         json << ",\n";
     }
@@ -360,13 +392,15 @@ int wmain(int argc, wchar_t* argv[]) {
     ntfs::MftScanStats stats;
     ntfs::ValidationReport validation_report;
     bool has_validation_report = false;
+    bool used_mft_scan = false;
 
-    if (options.volume != 0) {
-        std::wcout << L"Scanning NTFS MFT on volume " << options.volume << L": ...\n";
-        ok = ntfs::ScanVolumeMft(options.volume, &tree, &error, &stats);
+    if (IsNtfsPath(options.path)) {
+        std::wcout << L"Scanning NTFS MFT subtree rooted at " << options.path << L" ...\n";
+        ok = ntfs::ScanPathMft(options.path, &tree, &error, &stats);
+        used_mft_scan = ok;
     } else {
         if (options.validate) {
-            std::wcout << L"Validation mode currently requires --volume.\n";
+            std::wcout << L"Validation mode currently requires an NTFS path scan.\n";
             return 1;
         }
         std::wcout << L"Scanning directory " << options.path << L" ...\n";
@@ -381,7 +415,7 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     tree_stats = tree.ComputeStats();
-    if (options.validate && options.volume != 0) {
+    if (options.validate && used_mft_scan) {
         std::wcout << L"Running Win32 validation on sampled files ...\n";
         ok = ntfs::ValidateVolumeWithWin32(
             tree,
@@ -399,7 +433,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
     std::wcout << L"Scan complete in " << elapsed << L" seconds.\n";
     std::wcout << L"Nodes: " << tree.NodeCount() << L"\n";
-    if (options.volume != 0) {
+    if (used_mft_scan) {
         const Node* root = tree.GetNode(tree.RootId());
         std::wcout << L"MFT records read: " << stats.records_read << L"\n";
         if (stats.bytes_per_file_record > 0 && stats.mft_valid_data_length > 0) {
@@ -464,6 +498,7 @@ int wmain(int argc, wchar_t* argv[]) {
         if (!WriteJsonReport(
                 options.json_out,
                 options,
+                used_mft_scan,
                 elapsed,
                 tree,
                 tree_stats,
