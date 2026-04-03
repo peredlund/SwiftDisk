@@ -44,3 +44,27 @@ if (MSVC)
 else()
     target_compile_options(space_scanner_cli PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+add_executable(space_scanner_gui WIN32
+    src/gui/main.cpp
+)
+
+target_link_libraries(space_scanner_gui PRIVATE
+    space_scanner_core
+    d2d1
+    dwrite
+    shell32
+)
+
+if (MSVC)
+    target_compile_options(space_scanner_gui PRIVATE /W4 /permissive- /EHsc)
+else()
+    target_compile_options(space_scanner_gui PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+target_compile_definitions(space_scanner_gui PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    UNICODE
+    _UNICODE
+)

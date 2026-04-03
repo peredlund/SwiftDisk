@@ -122,6 +122,72 @@ std::string HexColor(uint32_t rgb) {
     return stream.str();
 }
 
+uint32_t ParseHexColor(std::string_view value) {
+    if (value.size() != 7 || value[0] != '#') {
+        return 0x7A96BEu;
+    }
+
+    auto hex = [](char ch) -> uint32_t {
+        if (ch >= '0' && ch <= '9') {
+            return static_cast<uint32_t>(ch - '0');
+        }
+        if (ch >= 'a' && ch <= 'f') {
+            return static_cast<uint32_t>(10 + ch - 'a');
+        }
+        if (ch >= 'A' && ch <= 'F') {
+            return static_cast<uint32_t>(10 + ch - 'A');
+        }
+        return 0;
+    };
+
+    return (hex(value[1]) << 20) | (hex(value[2]) << 16) |
+           (hex(value[3]) << 12) | (hex(value[4]) << 8) |
+           (hex(value[5]) << 4) | hex(value[6]);
+}
+
+double SrgbToLinear(double channel) {
+    const double normalized = channel / 255.0;
+    if (normalized <= 0.04045) {
+        return normalized / 12.92;
+    }
+    return std::pow((normalized + 0.055) / 1.055, 2.4);
+}
+
+double RelativeLuminance(uint32_t rgb) {
+    const double red = SrgbToLinear(static_cast<double>((rgb >> 16) & 0xFFu));
+    const double green = SrgbToLinear(static_cast<double>((rgb >> 8) & 0xFFu));
+    const double blue = SrgbToLinear(static_cast<double>(rgb & 0xFFu));
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+double ContrastRatio(uint32_t left_rgb, uint32_t right_rgb) {
+    const double left = RelativeLuminance(left_rgb);
+    const double right = RelativeLuminance(right_rgb);
+    const double lighter = std::max(left, right);
+    const double darker = std::min(left, right);
+    return (lighter + 0.05) / (darker + 0.05);
+}
+
+struct TextPalette {
+    std::string primary;
+    std::string secondary;
+    std::string outline;
+    std::string plate;
+};
+
+TextPalette TextColorsForFill(std::string_view fill_color) {
+    const uint32_t rgb = ParseHexColor(fill_color);
+    constexpr uint32_t kLightPrimary = 0xF8FBFFu;
+    constexpr uint32_t kDarkPrimary = 0x102033u;
+
+    const double light_contrast = ContrastRatio(rgb, kLightPrimary);
+    const double dark_contrast = ContrastRatio(rgb, kDarkPrimary);
+    if (light_contrast >= dark_contrast) {
+        return {"#f8fbff", "#f8fbff", "#08111d", "#08111d"};
+    }
+    return {"#102033", "#102033", "#f8fbff", "#f8fbff"};
+}
+
 std::string ColorForItem(const LayoutItem& item, size_t depth) {
     if (item.is_aggregate) {
         return "#475569";
@@ -271,6 +337,11 @@ void EmitNodeRect(
     rect.label = item.label;
     rect.path = item.path;
     rect.fill_color = ColorForItem(item, depth);
+    const TextPalette palette = TextColorsForFill(rect.fill_color);
+    rect.label_text_color = palette.primary;
+    rect.secondary_text_color = palette.secondary;
+    rect.text_outline_color = palette.outline;
+    rect.text_plate_color = palette.plate;
     rects->push_back(std::move(rect));
 }
 
@@ -369,9 +440,9 @@ std::string TooltipText(const TreemapRect& rect, uint64_t root_size) {
 
 } // namespace
 
-std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, const TreemapLayoutOptions& options) {
+std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_id, const TreemapLayoutOptions& options) {
     std::vector<TreemapRect> rects;
-    const Node* root = tree.GetNode(tree.RootId());
+    const Node* root = tree.GetNode(root_id);
     if (!root) {
         return rects;
     }
@@ -405,6 +476,10 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, const TreemapL
 
     LayoutItemsRecursive(tree, root_children, 0, root_children.size(), 0, root_bounds, options, &rects);
     return rects;
+}
+
+std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, const TreemapLayoutOptions& options) {
+    return BuildTreemapLayout(tree, tree.RootId(), options);
 }
 
 bool WriteTreemapHtml(
@@ -538,13 +613,11 @@ bool WriteTreemapHtml(
     html << "      stroke: rgba(255, 255, 255, 0.85);\n";
     html << "    }\n";
     html << "    .tile-label {\n";
-    html << "      fill: rgba(245, 249, 255, 0.97);\n";
     html << "      font-size: 12px;\n";
     html << "      font-weight: 600;\n";
     html << "      pointer-events: none;\n";
     html << "    }\n";
     html << "    .tile-size {\n";
-    html << "      fill: rgba(226, 235, 255, 0.82);\n";
     html << "      font-size: 11px;\n";
     html << "      pointer-events: none;\n";
     html << "    }\n";
@@ -591,15 +664,24 @@ bool WriteTreemapHtml(
              << "\" width=\"" << FormatDouble(rect.width) << "\" height=\"" << FormatDouble(rect.height)
              << "\" rx=\"2\" ry=\"2\" fill=\"" << rect.fill_color << "\" />\n";
 
-        if (rect.width >= options.minimum_label_width && rect.height >= options.minimum_label_height) {
+        if (rect.width >= 56.0 && rect.height >= 18.0) {
             const double text_x = rect.x + 6.0;
-            const double label_y = rect.y + 16.0;
-            const double size_y = rect.y + 30.0;
+            const bool show_label = rect.width >= options.minimum_label_width && rect.height >= options.minimum_label_height;
+            const double plate_height = show_label ? 30.0 : 16.0;
+            const double label_y = rect.y + 14.0;
+            const double size_y = show_label ? rect.y + 28.0 : rect.y + 14.0;
             html << "            <g clip-path=\"url(#clip-" << index << ")\">\n";
-            html << "              <text class=\"tile-label\" x=\"" << FormatDouble(text_x)
-                 << "\" y=\"" << FormatDouble(label_y) << "\">" << label << "</text>\n";
-            html << "              <text class=\"tile-size\" x=\"" << FormatDouble(text_x)
-                 << "\" y=\"" << FormatDouble(size_y) << "\">" << size_label << "</text>\n";
+                html << "              <rect x=\"" << FormatDouble(rect.x + 2.0) << "\" y=\"" << FormatDouble(rect.y + 2.0)
+                     << "\" width=\"" << FormatDouble(std::max(0.0, rect.width - 4.0)) << "\" height=\"" << FormatDouble(plate_height)
+                     << "\" rx=\"2\" ry=\"2\" fill=\"" << rect.text_plate_color << "\" opacity=\"0.34\" />\n";
+                if (show_label) {
+                    html << "              <text class=\"tile-label\" fill=\"" << rect.label_text_color
+                         << "\" stroke=\"" << rect.text_outline_color << "\" stroke-width=\"2.2\" paint-order=\"stroke\" x=\"" << FormatDouble(text_x)
+                         << "\" y=\"" << FormatDouble(label_y) << "\">" << label << "</text>\n";
+                }
+                html << "              <text class=\"tile-size\" fill=\"" << rect.secondary_text_color
+                     << "\" stroke=\"" << rect.text_outline_color << "\" stroke-width=\"1.8\" paint-order=\"stroke\" x=\"" << FormatDouble(text_x)
+                     << "\" y=\"" << FormatDouble(size_y) << "\">" << size_label << "</text>\n";
             html << "            </g>\n";
         }
 

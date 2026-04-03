@@ -5,7 +5,7 @@ Open-source, commercial-friendly disk space analyzer for Windows. The long-term 
 ## Status
 - Core scanning engine and CLI are in place.
 - NTFS MFT scanning is implemented for local NTFS volumes.
-- GUI is planned (Win32 + Direct2D/DirectWrite).
+- GUI shell is now in place (Win32 + Direct2D/DirectWrite) with clickable treemap navigation and in-app path selection.
 
 ## Build (CLI)
 ```powershell
@@ -37,6 +37,7 @@ cmake --open build
 build\Release\space_scanner_cli.exe scan --path C:\
 build\Release\space_scanner_cli.exe scan --path E:\Video
 build\Release\space_scanner_cli.exe scan --path C:\ --treemap-out c:\temp\space-treemap.html
+build\Release\space_scanner_gui.exe --path C:\
 ```
 
 Note: reading the NTFS MFT requires direct volume access and may need elevated privileges.

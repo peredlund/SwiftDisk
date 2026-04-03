@@ -43,9 +43,14 @@ struct TreemapRect {
     std::wstring label;
     std::wstring path;
     std::string fill_color;
+    std::string label_text_color;
+    std::string secondary_text_color;
+    std::string text_outline_color;
+    std::string text_plate_color;
 };
 
 std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, const TreemapLayoutOptions& options);
+std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_id, const TreemapLayoutOptions& options);
 
 bool WriteTreemapHtml(
     const std::wstring& output_path,
