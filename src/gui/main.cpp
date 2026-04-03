@@ -170,6 +170,15 @@ bool PointInRect(const D2D1_RECT_F& rect, float x, float y) {
     return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
+RECT RectFToRect(const D2D1_RECT_F& rect) {
+    RECT result = {};
+    result.left = static_cast<LONG>(std::floor(rect.left));
+    result.top = static_cast<LONG>(std::floor(rect.top));
+    result.right = static_cast<LONG>(std::ceil(rect.right));
+    result.bottom = static_cast<LONG>(std::ceil(rect.bottom));
+    return result;
+}
+
 struct BreadcrumbStrip {
     uint64_t node_id = 0;
     D2D1_RECT_F rect = D2D1::RectF(0, 0, 0, 0);
@@ -203,7 +212,7 @@ public:
             0,
             window_class.lpszClassName,
             L"SpaceScanner",
-            WS_OVERLAPPEDWINDOW,
+            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             1440,
@@ -252,7 +261,7 @@ private:
                 if (m_hovered_index != -1 || m_hovered_breadcrumb_index != -1) {
                     m_hovered_index = -1;
                     m_hovered_breadcrumb_index = -1;
-                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                    InvalidateCanvas();
                 }
                 return 0;
             case WM_LBUTTONDOWN:
@@ -897,6 +906,11 @@ private:
         InvalidateRect(m_hwnd, nullptr, FALSE);
     }
 
+    void InvalidateCanvas() {
+        const RECT canvas_rect = RectFToRect(m_canvas_rect);
+        InvalidateRect(m_hwnd, &canvas_rect, FALSE);
+    }
+
     void UpdateCanvasRect() {
         RECT client = {};
         GetClientRect(m_hwnd, &client);
@@ -1005,6 +1019,9 @@ private:
         m_layout_options.max_rectangles = 20000;
         m_layout_options.max_children_per_directory = 256;
         m_layout_options.minimum_child_ratio = 0.0;
+        //m_layout_options.max_rectangles = 5000;
+        //m_layout_options.max_children_per_directory = 56;
+        //m_layout_options.minimum_child_ratio = 0.0015;
         m_rects = visualization::BuildTreemapLayout(*m_tree, m_view_root_id, m_layout_options);
     }
 
@@ -1048,7 +1065,7 @@ private:
         m_hovered_breadcrumb_index = hovered_breadcrumb;
         if (changed) {
             m_hovered_index = hovered;
-            InvalidateRect(m_hwnd, nullptr, FALSE);
+            InvalidateCanvas();
         }
 
         const bool breadcrumb_is_clickable =
