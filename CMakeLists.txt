@@ -57,6 +57,12 @@ target_link_libraries(space_scanner_gui PRIVATE
 )
 
 if (MSVC)
+    target_link_options(space_scanner_gui PRIVATE
+        "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
+    )
+endif()
+
+if (MSVC)
     target_compile_options(space_scanner_gui PRIVATE /W4 /permissive- /EHsc)
 else()
     target_compile_options(space_scanner_gui PRIVATE -Wall -Wextra -Wpedantic)

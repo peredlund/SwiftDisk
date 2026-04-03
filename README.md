@@ -40,7 +40,8 @@ build\Release\space_scanner_cli.exe scan --path C:\ --treemap-out c:\temp\space-
 build\Release\space_scanner_gui.exe --path C:\
 ```
 
-Note: reading the NTFS MFT requires direct volume access and may need elevated privileges.
+Note: `space_scanner_gui.exe` is built to request administrator privileges on launch, so Windows will show a UAC prompt when you start it.
+This is because reading the NTFS MFT requires direct volume access and need elevated privileges.
 This tool opens volumes read-only and refuses to scan if write access is requested.
 
 ## License
