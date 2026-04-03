@@ -13,6 +13,7 @@ add_library(space_scanner_core
     src/core/ntfs/mft_scanner.cpp
     src/core/ntfs/validation.cpp
     src/core/ntfs/ntfs_volume.cpp
+    src/visualization/treemap.cpp
 )
 
 target_include_directories(space_scanner_core PUBLIC

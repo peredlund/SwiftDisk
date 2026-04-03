@@ -36,6 +36,7 @@ cmake --open build
 ```powershell
 build\Release\space_scanner_cli.exe scan --path C:\
 build\Release\space_scanner_cli.exe scan --path E:\Video
+build\Release\space_scanner_cli.exe scan --path C:\ --treemap-out c:\temp\space-treemap.html
 ```
 
 Note: reading the NTFS MFT requires direct volume access and may need elevated privileges.
