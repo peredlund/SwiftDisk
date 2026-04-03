@@ -956,12 +956,15 @@ private:
             D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
 
-    void DrawTileTextLine(
+    void DrawTileTextLayout(
         const std::wstring& text,
         IDWriteTextFormat* format,
         const D2D1_RECT_F& bounds,
         ID2D1Brush* text_brush,
-        ID2D1Brush* outline_brush) {
+        ID2D1Brush* outline_brush,
+        DWRITE_TEXT_ALIGNMENT text_alignment = DWRITE_TEXT_ALIGNMENT_LEADING,
+        DWRITE_PARAGRAPH_ALIGNMENT paragraph_alignment = DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
+        DWRITE_WORD_WRAPPING word_wrapping = DWRITE_WORD_WRAPPING_NO_WRAP) {
         if (!format || !text_brush || !outline_brush || !m_dwrite_factory) {
             return;
         }
@@ -982,13 +985,35 @@ private:
 
         DWRITE_TRIMMING trimming = {};
         trimming.granularity = DWRITE_TRIMMING_GRANULARITY_CHARACTER;
-        layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-        layout->SetTrimming(&trimming, m_ellipsis_trimming_sign.Get());
+        layout->SetWordWrapping(word_wrapping);
+        layout->SetTextAlignment(text_alignment);
+        layout->SetParagraphAlignment(paragraph_alignment);
+        if (word_wrapping == DWRITE_WORD_WRAPPING_NO_WRAP) {
+            layout->SetTrimming(&trimming, m_ellipsis_trimming_sign.Get());
+        }
 
         const D2D1_POINT_2F shadow_origin = D2D1::Point2F(bounds.left + 1.0f, bounds.top + 1.0f);
         const D2D1_POINT_2F origin = D2D1::Point2F(bounds.left, bounds.top);
         m_render_target->DrawTextLayout(shadow_origin, layout.Get(), outline_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         m_render_target->DrawTextLayout(origin, layout.Get(), text_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
+
+    void DrawTileTextLine(
+        const std::wstring& text,
+        IDWriteTextFormat* format,
+        const D2D1_RECT_F& bounds,
+        ID2D1Brush* text_brush,
+        ID2D1Brush* outline_brush,
+        DWRITE_TEXT_ALIGNMENT text_alignment = DWRITE_TEXT_ALIGNMENT_LEADING) {
+        DrawTileTextLayout(
+            text,
+            format,
+            bounds,
+            text_brush,
+            outline_brush,
+            text_alignment,
+            DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
+            DWRITE_WORD_WRAPPING_NO_WRAP);
     }
 
     void DrawTreemap() {
@@ -1107,44 +1132,138 @@ private:
                 m_tile_text_outline_brush->SetColor(ParseHexColor(rect.text_outline_color, 0.78f));
                 m_tile_text_plate_brush->SetColor(ParseHexColor(rect.text_plate_color, 0.34f));
 
-                const bool show_label = tile_width >= 92.0f && tile_height >= 34.0f;
-                const float plate_height = show_label ? 30.0f : 16.0f;
-                const D2D1_ROUNDED_RECT plate_rect = D2D1::RoundedRect(
-                    D2D1::RectF(
-                        draw_rect.left + 2.0f,
-                        draw_rect.top + 2.0f,
-                        std::max(draw_rect.left + 4.0f, draw_rect.right - 2.0f),
-                        std::min(draw_rect.bottom - 2.0f, draw_rect.top + 2.0f + plate_height)),
-                    2.0f,
-                    2.0f);
-                m_render_target->FillRoundedRectangle(plate_rect, m_tile_text_plate_brush.Get());
+                const bool is_directory_header = rect.is_dir && !rect.is_aggregate;
+                const bool is_leaf_file = !rect.is_dir && !rect.is_aggregate;
+                const bool show_label = tile_width >= 92.0f && tile_height >= 34.0f && !is_directory_header;
+                if (!is_leaf_file) {
+                    const float plate_height = show_label ? 30.0f : 16.0f;
+                    const D2D1_ROUNDED_RECT plate_rect = D2D1::RoundedRect(
+                        D2D1::RectF(
+                            draw_rect.left + 2.0f,
+                            draw_rect.top + 2.0f,
+                            std::max(draw_rect.left + 4.0f, draw_rect.right - 2.0f),
+                            std::min(draw_rect.bottom - 2.0f, draw_rect.top + 2.0f + plate_height)),
+                        2.0f,
+                        2.0f);
+                    m_render_target->FillRoundedRectangle(plate_rect, m_tile_text_plate_brush.Get());
+                }
 
-                if (show_label) {
-                    const D2D1_RECT_F label_rect = D2D1::RectF(
+                if (is_directory_header) {
+                    const std::wstring size_text = HumanizeBytes(rect.size);
+                    const float size_column_width = std::clamp(54.0f + static_cast<float>(size_text.size()) * 4.8f, 72.0f, 112.0f);
+                    const D2D1_RECT_F name_rect = D2D1::RectF(
                         draw_rect.left + 6.0f,
-                        draw_rect.top + 3.0f,
-                        draw_rect.right - 4.0f,
-                        draw_rect.top + 17.0f);
+                        draw_rect.top + 2.0f,
+                        std::max(draw_rect.left + 12.0f, draw_rect.right - size_column_width - 6.0f),
+                        draw_rect.top + 16.0f);
+                    const D2D1_RECT_F header_size_rect = D2D1::RectF(
+                        std::max(draw_rect.left + 10.0f, draw_rect.right - size_column_width),
+                        draw_rect.top + 2.0f,
+                        draw_rect.right - 6.0f,
+                        draw_rect.top + 16.0f);
+
                     DrawTileTextLine(
+                        rect.label,
+                        m_small_format.Get(),
+                        name_rect,
+                        m_tile_text_brush.Get(),
+                        m_tile_text_outline_brush.Get(),
+                        DWRITE_TEXT_ALIGNMENT_LEADING);
+                    DrawTileTextLine(
+                        size_text,
+                        m_small_format.Get(),
+                        header_size_rect,
+                        m_tile_secondary_text_brush.Get(),
+                        m_tile_text_outline_brush.Get(),
+                        DWRITE_TEXT_ALIGNMENT_TRAILING);
+                } else if (tile_width >= 64.0f && tile_height >= 40.0f) {
+                    const std::wstring size_text = HumanizeBytes(rect.size);
+                    const float margin = 6.0f;
+                    const float size_height = 14.0f;
+                    const float gap = 2.0f;
+                    const float block_height = std::min(tile_height - 12.0f, 42.0f);
+                    const float block_top = draw_rect.top + std::max(4.0f, (tile_height - block_height) * 0.42f);
+                    const D2D1_RECT_F label_rect = D2D1::RectF(
+                        draw_rect.left + margin,
+                        block_top,
+                        draw_rect.right - margin,
+                        block_top + block_height - size_height - gap);
+                    const D2D1_RECT_F size_rect = D2D1::RectF(
+                        draw_rect.left + margin,
+                        block_top + block_height - size_height,
+                        draw_rect.right - margin,
+                        block_top + block_height);
+
+                    DrawTileTextLayout(
                         rect.label,
                         m_small_format.Get(),
                         label_rect,
                         m_tile_text_brush.Get(),
-                        m_tile_text_outline_brush.Get());
+                        m_tile_text_outline_brush.Get(),
+                        DWRITE_TEXT_ALIGNMENT_CENTER,
+                        DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+                        DWRITE_WORD_WRAPPING_NO_WRAP);
+                    DrawTileTextLayout(
+                        size_text,
+                        m_small_format.Get(),
+                        size_rect,
+                        m_tile_secondary_text_brush.Get(),
+                        m_tile_text_outline_brush.Get(),
+                        DWRITE_TEXT_ALIGNMENT_CENTER,
+                        DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
+                        DWRITE_WORD_WRAPPING_NO_WRAP);
+                } else {
+                    const std::wstring size_text = HumanizeBytes(rect.size);
+                    const bool can_show_label = tile_width >= 44.0f && tile_height >= 24.0f;
+                    const bool can_show_size = tile_width >= 32.0f && tile_height >= 14.0f;
+                    if (can_show_label && can_show_size) {
+                        const float block_height = std::min(tile_height - 4.0f, 22.0f);
+                        const float block_top = draw_rect.top + std::max(1.0f, (tile_height - block_height) * 0.5f);
+                        const D2D1_RECT_F label_rect = D2D1::RectF(
+                            draw_rect.left + 4.0f,
+                            block_top,
+                            draw_rect.right - 4.0f,
+                            block_top + 10.0f);
+                        const D2D1_RECT_F size_rect = D2D1::RectF(
+                            draw_rect.left + 4.0f,
+                            block_top + 10.0f,
+                            draw_rect.right - 4.0f,
+                            block_top + block_height);
+                        DrawTileTextLayout(
+                            rect.label,
+                            m_small_format.Get(),
+                            label_rect,
+                            m_tile_text_brush.Get(),
+                            m_tile_text_outline_brush.Get(),
+                            DWRITE_TEXT_ALIGNMENT_CENTER,
+                            DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+                            DWRITE_WORD_WRAPPING_NO_WRAP);
+                        DrawTileTextLayout(
+                            size_text,
+                            m_small_format.Get(),
+                            size_rect,
+                            m_tile_secondary_text_brush.Get(),
+                            m_tile_text_outline_brush.Get(),
+                            DWRITE_TEXT_ALIGNMENT_CENTER,
+                            DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+                            DWRITE_WORD_WRAPPING_NO_WRAP);
+                    } else if (can_show_size) {
+                        const D2D1_RECT_F size_rect = D2D1::RectF(
+                            draw_rect.left + 3.0f,
+                            draw_rect.top + 1.0f,
+                            draw_rect.right - 3.0f,
+                            draw_rect.bottom - 1.0f);
+                        DrawTileTextLayout(
+                            size_text,
+                            m_small_format.Get(),
+                            size_rect,
+                            m_tile_secondary_text_brush.Get(),
+                            m_tile_text_outline_brush.Get(),
+                            DWRITE_TEXT_ALIGNMENT_CENTER,
+                            DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+                            DWRITE_WORD_WRAPPING_NO_WRAP);
+                    }
                 }
-
-                const std::wstring size_text = HumanizeBytes(rect.size);
-                const D2D1_RECT_F size_rect = D2D1::RectF(
-                    draw_rect.left + 6.0f,
-                    draw_rect.top + (show_label ? 17.0f : 3.0f),
-                    draw_rect.right - 4.0f,
-                    draw_rect.top + (show_label ? 31.0f : 17.0f));
-                DrawTileTextLine(
-                    size_text,
-                    m_small_format.Get(),
-                    size_rect,
-                    m_tile_secondary_text_brush.Get(),
-                    m_tile_text_outline_brush.Get());
             }
         }
     }
