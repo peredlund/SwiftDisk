@@ -336,12 +336,12 @@ void EmitNodeRect(
     rect.is_aggregate = item.is_aggregate;
     rect.label = item.label;
     rect.path = item.path;
-    rect.fill_color = ColorForItem(item, depth);
-    const TextPalette palette = TextColorsForFill(rect.fill_color);
-    rect.label_text_color = palette.primary;
-    rect.secondary_text_color = palette.secondary;
-    rect.text_outline_color = palette.outline;
-    rect.text_plate_color = palette.plate;
+    const TreemapVisualStyle style = BuildTreemapVisualStyle(item.label, item.path, item.is_dir, item.is_aggregate, depth);
+    rect.fill_color = style.fill_color;
+    rect.label_text_color = style.label_text_color;
+    rect.secondary_text_color = style.secondary_text_color;
+    rect.text_outline_color = style.text_outline_color;
+    rect.text_plate_color = style.text_plate_color;
     rects->push_back(std::move(rect));
 }
 
@@ -439,6 +439,28 @@ std::string TooltipText(const TreemapRect& rect, uint64_t root_size) {
 }
 
 } // namespace
+
+TreemapVisualStyle BuildTreemapVisualStyle(
+    const std::wstring& label,
+    const std::wstring& path,
+    bool is_dir,
+    bool is_aggregate,
+    size_t depth) {
+    LayoutItem item;
+    item.label = label;
+    item.path = path;
+    item.is_dir = is_dir;
+    item.is_aggregate = is_aggregate;
+
+    TreemapVisualStyle style;
+    style.fill_color = ColorForItem(item, depth);
+    const TextPalette palette = TextColorsForFill(style.fill_color);
+    style.label_text_color = palette.primary;
+    style.secondary_text_color = palette.secondary;
+    style.text_outline_color = palette.outline;
+    style.text_plate_color = palette.plate;
+    return style;
+}
 
 std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_id, const TreemapLayoutOptions& options) {
     std::vector<TreemapRect> rects;

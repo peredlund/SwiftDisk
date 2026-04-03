@@ -170,6 +170,15 @@ bool PointInRect(const D2D1_RECT_F& rect, float x, float y) {
     return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
+struct BreadcrumbStrip {
+    uint64_t node_id = 0;
+    D2D1_RECT_F rect = D2D1::RectF(0, 0, 0, 0);
+    D2D1_RECT_F frame_rect = D2D1::RectF(0, 0, 0, 0);
+    D2D1_RECT_F content_rect = D2D1::RectF(0, 0, 0, 0);
+    std::wstring text;
+    visualization::TreemapVisualStyle style;
+};
+
 class MainWindow {
 public:
     explicit MainWindow(GuiOptions options)
@@ -218,6 +227,7 @@ private:
     static constexpr float kTreemapTopSliceHeight = 22.0f;
     static constexpr float kTreemapSideSliceWidth = 3.0f;
     static constexpr float kTreemapBottomSliceHeight = 3.0f;
+    static constexpr size_t kMaxBreadcrumbStrips = 5;
 
     LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param) {
         switch (message) {
@@ -239,9 +249,9 @@ private:
                 OnMouseMove(GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
                 return 0;
             case WM_MOUSELEAVE:
-                if (m_hovered_index != -1 || m_hovering_focus_up) {
+                if (m_hovered_index != -1 || m_hovered_breadcrumb_index != -1) {
                     m_hovered_index = -1;
-                    m_hovering_focus_up = false;
+                    m_hovered_breadcrumb_index = -1;
                     InvalidateRect(m_hwnd, nullptr, FALSE);
                 }
                 return 0;
@@ -657,7 +667,7 @@ private:
         m_scan_in_progress = false;
         m_hovered_index = -1;
         m_rects.clear();
-        m_hovering_focus_up = false;
+        m_hovered_breadcrumb_index = -1;
         SetScanControlsEnabled(true);
 
         if (!payload) {
@@ -904,27 +914,94 @@ private:
         UpdateCanvasRect();
         m_focus_up_rect = D2D1::RectF(0, 0, 0, 0);
         m_treemap_content_rect = m_canvas_rect;
+        m_breadcrumbs.clear();
         if (!m_tree) {
             m_rects.clear();
             return;
         }
 
-        m_focus_up_rect = D2D1::RectF(
+        std::vector<uint64_t> ancestors;
+        uint64_t current = m_view_root_id;
+        size_t guard = 0;
+        while (current != 0 && guard < 128) {
+            ancestors.push_back(current);
+            if (current == m_tree->RootId()) {
+                break;
+            }
+            const Node* node = m_tree->GetNode(current);
+            if (!node || node->parent_id == 0 || node->parent_id == current) {
+                break;
+            }
+            current = node->parent_id;
+            ++guard;
+        }
+        std::reverse(ancestors.begin(), ancestors.end());
+        size_t start_index = 0;
+        bool truncated = false;
+        if (ancestors.size() > kMaxBreadcrumbStrips) {
+            start_index = ancestors.size() - kMaxBreadcrumbStrips;
+            truncated = true;
+        }
+
+        D2D1_RECT_F nested_rect = D2D1::RectF(
             m_canvas_rect.left + 1.0f,
             m_canvas_rect.top + 1.0f,
             m_canvas_rect.right - 1.0f,
-            std::min(m_canvas_rect.bottom - 1.0f, m_canvas_rect.top + 1.0f + kTreemapTopSliceHeight));
-        m_treemap_content_rect = D2D1::RectF(
-            m_canvas_rect.left + 1.0f + kTreemapSideSliceWidth,
-            m_focus_up_rect.bottom,
-            m_canvas_rect.right - 1.0f - kTreemapSideSliceWidth,
-            m_canvas_rect.bottom - 1.0f - kTreemapBottomSliceHeight);
+            m_canvas_rect.bottom - 1.0f);
+
+        const size_t visible_count = ancestors.size() - start_index;
+        for (size_t i = 0; i < visible_count; ++i) {
+            const uint64_t node_id = ancestors[start_index + i];
+            const Node* node = m_tree->GetNode(node_id);
+            if (!node) {
+                continue;
+            }
+
+            BreadcrumbStrip strip;
+            strip.node_id = node_id;
+            strip.frame_rect = nested_rect;
+            strip.rect = D2D1::RectF(
+                nested_rect.left,
+                nested_rect.top,
+                nested_rect.right,
+                std::min(nested_rect.bottom, nested_rect.top + kTreemapTopSliceHeight));
+            strip.content_rect = D2D1::RectF(
+                nested_rect.left + kTreemapSideSliceWidth,
+                strip.rect.bottom,
+                nested_rect.right - kTreemapSideSliceWidth,
+                nested_rect.bottom - kTreemapBottomSliceHeight);
+
+            std::wstring text = node->name.empty() ? m_tree->BuildPath(node_id) : node->name;
+            if (i == 0 && truncated) {
+                text = L"...\\" + text;
+            }
+            strip.text = text + L" - " + HumanizeBytes(node->size);
+
+            const std::wstring path = m_tree->BuildPath(node_id);
+            const size_t depth = start_index + i;
+            strip.style = visualization::BuildTreemapVisualStyle(
+                node->name.empty() ? path : node->name,
+                path,
+                true,
+                false,
+                depth);
+            m_breadcrumbs.push_back(std::move(strip));
+            nested_rect = m_breadcrumbs.back().content_rect;
+        }
+
+        if (!m_breadcrumbs.empty()) {
+            m_focus_up_rect = m_breadcrumbs.back().rect;
+            m_treemap_content_rect = m_breadcrumbs.back().content_rect;
+        } else {
+            m_focus_up_rect = nested_rect;
+            m_treemap_content_rect = nested_rect;
+        }
 
         const float width = std::max(m_treemap_content_rect.right - m_treemap_content_rect.left, 1.0f);
         const float height = std::max(m_treemap_content_rect.bottom - m_treemap_content_rect.top, 1.0f);
         m_layout_options.width = width;
         m_layout_options.height = height;
-        m_layout_options.max_depth = static_cast<size_t>(m_max_depth);
+        m_layout_options.max_depth = static_cast<size_t>(std::max(0, m_max_depth - 1));
         m_layout_options.max_rectangles = 20000;
         m_layout_options.max_children_per_directory = 256;
         m_layout_options.minimum_child_ratio = 0.0;
@@ -949,6 +1026,15 @@ private:
         return -1;
     }
 
+    int HitTestBreadcrumb(float x, float y) const {
+        for (int index = 0; index < static_cast<int>(m_breadcrumbs.size()); ++index) {
+            if (PointInRect(m_breadcrumbs[static_cast<size_t>(index)].rect, x, y)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
     void OnMouseMove(int x, int y) {
         TRACKMOUSEEVENT track = {};
         track.cbSize = sizeof(track);
@@ -956,24 +1042,26 @@ private:
         track.hwndTrack = m_hwnd;
         TrackMouseEvent(&track);
 
-        const bool hover_up = CanNavigateUp() &&
-            PointInRect(m_focus_up_rect, static_cast<float>(x), static_cast<float>(y));
+        const int hovered_breadcrumb = HitTestBreadcrumb(static_cast<float>(x), static_cast<float>(y));
         const int hovered = HitTestTreemap(static_cast<float>(x), static_cast<float>(y));
-        const bool changed = hovered != m_hovered_index || hover_up != m_hovering_focus_up;
-        m_hovering_focus_up = hover_up;
+        const bool changed = hovered != m_hovered_index || hovered_breadcrumb != m_hovered_breadcrumb_index;
+        m_hovered_breadcrumb_index = hovered_breadcrumb;
         if (changed) {
             m_hovered_index = hovered;
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }
 
-        SetCursor(LoadCursorW(nullptr, hover_up ? IDC_HAND : IDC_ARROW));
+        const bool breadcrumb_is_clickable =
+            hovered_breadcrumb >= 0 &&
+            m_breadcrumbs[static_cast<size_t>(hovered_breadcrumb)].node_id != m_view_root_id;
+        SetCursor(LoadCursorW(nullptr, breadcrumb_is_clickable ? IDC_HAND : IDC_ARROW));
     }
 
     void OnLeftButtonDown(int x, int y) {
         SetFocus(m_hwnd);
-        if (CanNavigateUp() &&
-            PointInRect(m_focus_up_rect, static_cast<float>(x), static_cast<float>(y))) {
-            NavigateUp();
+        const int breadcrumb_index = HitTestBreadcrumb(static_cast<float>(x), static_cast<float>(y));
+        if (breadcrumb_index >= 0) {
+            NavigateToNode(m_breadcrumbs[static_cast<size_t>(breadcrumb_index)].node_id);
             return;
         }
 
@@ -997,6 +1085,18 @@ private:
         InvalidateRect(m_hwnd, nullptr, FALSE);
     }
 
+    void NavigateToNode(uint64_t node_id) {
+        if (!m_tree || node_id == 0 || node_id == m_view_root_id) {
+            return;
+        }
+        if (!m_tree->GetNode(node_id)) {
+            return;
+        }
+        m_view_root_id = node_id;
+        RebuildLayout();
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    }
+
     void NavigateUp() {
         if (!CanNavigateUp()) {
             return;
@@ -1007,9 +1107,7 @@ private:
             return;
         }
 
-        m_view_root_id = current->parent_id;
-        RebuildLayout();
-        InvalidateRect(m_hwnd, nullptr, FALSE);
+        NavigateToNode(current->parent_id);
     }
 
     bool CanNavigateUp() const {
@@ -1154,46 +1252,67 @@ private:
             : (m_options.path.empty() ? L"(no path selected)" : m_options.path);
         const std::wstring focused_size = focused_node ? HumanizeBytes(focused_node->size) : L"-";
 
-        const D2D1_RECT_F left_slice_rect = D2D1::RectF(
-            m_canvas_rect.left + 1.0f,
-            m_focus_up_rect.bottom,
-            m_treemap_content_rect.left,
-            m_canvas_rect.bottom - 1.0f - kTreemapBottomSliceHeight);
-        const D2D1_RECT_F right_slice_rect = D2D1::RectF(
-            m_treemap_content_rect.right,
-            m_focus_up_rect.bottom,
-            m_canvas_rect.right - 1.0f,
-            m_canvas_rect.bottom - 1.0f - kTreemapBottomSliceHeight);
-        const D2D1_RECT_F bottom_slice_rect = D2D1::RectF(
-            m_canvas_rect.left + 1.0f,
-            m_canvas_rect.bottom - 1.0f - kTreemapBottomSliceHeight,
-            m_canvas_rect.right - 1.0f,
-            m_canvas_rect.bottom - 1.0f);
+        const visualization::TreemapVisualStyle frame_style = visualization::BuildTreemapVisualStyle(
+            focused_name,
+            focused_path,
+            true,
+            false,
+            0);
+        if (m_breadcrumbs.empty()) {
+            m_header_action_brush->SetColor(ParseHexColor(frame_style.fill_color));
+            m_render_target->FillRectangle(m_focus_up_rect, m_header_action_brush.Get());
+            m_tile_text_brush->SetColor(ParseHexColor(frame_style.label_text_color));
+            m_tile_text_outline_brush->SetColor(ParseHexColor(frame_style.text_outline_color, 0.78f));
+            std::wstring frame_text = focused_name + L" - " + focused_size;
+            DrawTileTextLine(
+                frame_text,
+                m_small_format.Get(),
+                D2D1::RectF(m_focus_up_rect.left + 8.0f, m_focus_up_rect.top + 3.0f, m_focus_up_rect.right - 8.0f, m_focus_up_rect.bottom - 3.0f),
+                m_tile_text_brush.Get(),
+                m_tile_text_outline_brush.Get());
+        } else {
+            for (size_t index = 0; index < m_breadcrumbs.size(); ++index) {
+                const BreadcrumbStrip& strip = m_breadcrumbs[index];
+                const bool is_hovered = static_cast<int>(index) == m_hovered_breadcrumb_index;
 
-        m_header_action_brush->SetColor(ColorFromRgb(18, 31, 49, 0.86f));
-        m_header_action_hover_brush->SetColor(ColorFromRgb(130, 184, 255, 0.22f));
-        m_render_target->FillRectangle(left_slice_rect, m_header_action_brush.Get());
-        m_render_target->FillRectangle(right_slice_rect, m_header_action_brush.Get());
-        m_render_target->FillRectangle(bottom_slice_rect, m_header_action_brush.Get());
+                const D2D1_RECT_F left_slice_rect = D2D1::RectF(
+                    strip.frame_rect.left,
+                    strip.rect.bottom,
+                    strip.content_rect.left,
+                    strip.frame_rect.bottom - kTreemapBottomSliceHeight);
+                const D2D1_RECT_F right_slice_rect = D2D1::RectF(
+                    strip.content_rect.right,
+                    strip.rect.bottom,
+                    strip.frame_rect.right,
+                    strip.frame_rect.bottom - kTreemapBottomSliceHeight);
+                const D2D1_RECT_F bottom_slice_rect = D2D1::RectF(
+                    strip.frame_rect.left,
+                    strip.frame_rect.bottom - kTreemapBottomSliceHeight,
+                    strip.frame_rect.right,
+                    strip.frame_rect.bottom);
 
-        const bool can_navigate_up = CanNavigateUp();
-        ID2D1Brush* top_slice_brush = m_hovering_focus_up && can_navigate_up
-            ? m_header_action_hover_brush.Get()
-            : m_header_action_brush.Get();
-        m_render_target->FillRectangle(m_focus_up_rect, top_slice_brush);
-        m_render_target->DrawRectangle(
-            m_focus_up_rect,
-            can_navigate_up && m_hovering_focus_up ? m_hover_brush.Get() : m_border_brush.Get(),
-            can_navigate_up ? 1.4f : 0.9f);
-        m_tile_text_outline_brush->SetColor(ColorFromRgb(8, 17, 29, 0.72f));
+                m_header_action_brush->SetColor(ParseHexColor(strip.style.fill_color, 0.88f));
+                m_render_target->FillRectangle(left_slice_rect, m_header_action_brush.Get());
+                m_render_target->FillRectangle(right_slice_rect, m_header_action_brush.Get());
+                m_render_target->FillRectangle(bottom_slice_rect, m_header_action_brush.Get());
 
-        std::wstring frame_text = focused_name + L" - " + focused_size;
-        DrawTileTextLine(
-            frame_text,
-            m_small_format.Get(),
-            D2D1::RectF(m_focus_up_rect.left + 8.0f, m_focus_up_rect.top + 3.0f, m_focus_up_rect.right - 8.0f, m_focus_up_rect.bottom - 3.0f),
-            m_text_brush.Get(),
-            m_tile_text_outline_brush.Get());
+                m_header_action_brush->SetColor(ParseHexColor(strip.style.fill_color));
+                m_render_target->FillRectangle(strip.rect, m_header_action_brush.Get());
+                m_render_target->DrawRectangle(
+                    strip.rect,
+                    is_hovered ? m_hover_brush.Get() : m_border_brush.Get(),
+                    is_hovered ? 1.6f : 0.9f);
+
+                m_tile_text_brush->SetColor(ParseHexColor(strip.style.label_text_color));
+                m_tile_text_outline_brush->SetColor(ParseHexColor(strip.style.text_outline_color, 0.78f));
+                DrawTileTextLine(
+                    strip.text,
+                    m_small_format.Get(),
+                    D2D1::RectF(strip.rect.left + 8.0f, strip.rect.top + 3.0f, strip.rect.right - 8.0f, strip.rect.bottom - 3.0f),
+                    m_tile_text_brush.Get(),
+                    m_tile_text_outline_brush.Get());
+            }
+        }
 
         for (size_t index = 0; index < m_rects.size(); ++index) {
             const visualization::TreemapRect& rect = m_rects[index];
@@ -1510,8 +1629,8 @@ private:
     bool m_has_error = false;
     bool m_used_mft_scan = false;
     int m_hovered_index = -1;
-    bool m_hovering_focus_up = false;
-    int m_max_depth = 2;
+    int m_hovered_breadcrumb_index = -1;
+    int m_max_depth = 3;
     double m_elapsed_seconds = 0.0;
     uint64_t m_view_root_id = 0;
     std::wstring m_scan_path;
@@ -1521,6 +1640,7 @@ private:
     std::unique_ptr<FileTree> m_tree;
     visualization::TreemapLayoutOptions m_layout_options;
     std::vector<visualization::TreemapRect> m_rects;
+    std::vector<BreadcrumbStrip> m_breadcrumbs;
     D2D1_RECT_F m_canvas_rect = D2D1::RectF(0, 0, 0, 0);
     D2D1_RECT_F m_treemap_content_rect = D2D1::RectF(0, 0, 0, 0);
     D2D1_RECT_F m_focus_up_rect = D2D1::RectF(0, 0, 0, 0);
