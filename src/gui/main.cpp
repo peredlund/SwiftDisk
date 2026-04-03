@@ -33,6 +33,8 @@ constexpr UINT WM_APP_SCAN_FAILED = WM_APP + 2;
 constexpr int IDC_PATH_EDIT = 1001;
 constexpr int IDC_SCAN_BUTTON = 1002;
 constexpr int IDC_BROWSE_BUTTON = 1003;
+constexpr int IDC_DEPTH_LABEL = 1004;
+constexpr int IDC_DEPTH_EDIT = 1005;
 
 struct GuiOptions {
     std::wstring path;
@@ -336,6 +338,35 @@ private:
             nullptr,
             nullptr);
 
+        m_depth_label = CreateWindowExW(
+            0,
+            L"STATIC",
+            L"Depth",
+            WS_CHILD | WS_VISIBLE,
+            0,
+            0,
+            0,
+            0,
+            m_hwnd,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_DEPTH_LABEL)),
+            nullptr,
+            nullptr);
+
+        const std::wstring depth_text = std::to_wstring(m_max_depth);
+        m_depth_edit = CreateWindowExW(
+            WS_EX_CLIENTEDGE,
+            L"EDIT",
+            depth_text.c_str(),
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_CENTER,
+            0,
+            0,
+            0,
+            0,
+            m_hwnd,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_DEPTH_EDIT)),
+            nullptr,
+            nullptr);
+
         if (m_path_edit) {
             SendMessageW(m_path_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
         }
@@ -344,6 +375,12 @@ private:
         }
         if (m_browse_button) {
             SendMessageW(m_browse_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+        }
+        if (m_depth_label) {
+            SendMessageW(m_depth_label, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+        }
+        if (m_depth_edit) {
+            SendMessageW(m_depth_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
         }
 
         UpdateHeaderControlsLayout();
@@ -360,21 +397,33 @@ private:
 
         const int edit_left = 360;
         const int top = 22;
+        const int second_row_top = 54;
         const int browse_width = 92;
         const int scan_width = 72;
+        const int depth_label_width = 42;
+        const int depth_edit_width = 40;
         const int gap = 8;
         const int right_padding = static_cast<int>(kOuterPadding);
-        const int buttons_left = std::max(edit_left + 180, width - right_padding - browse_width - gap - scan_width);
-        const int edit_width = std::max(160, buttons_left - gap - edit_left);
+        const int browse_left = width - right_padding - browse_width;
+        const int scan_left = browse_left - gap - scan_width;
+        const int edit_width = std::max(160, scan_left - gap - edit_left);
+        const int depth_edit_left = browse_left + browse_width - depth_edit_width;
+        const int depth_label_left = depth_edit_left - gap - depth_label_width;
 
         if (m_path_edit) {
             MoveWindow(m_path_edit, edit_left, top, edit_width, 26, TRUE);
         }
         if (m_scan_button) {
-            MoveWindow(m_scan_button, buttons_left, top, scan_width, 26, TRUE);
+            MoveWindow(m_scan_button, scan_left, top, scan_width, 26, TRUE);
         }
         if (m_browse_button) {
-            MoveWindow(m_browse_button, buttons_left + scan_width + gap, top, browse_width, 26, TRUE);
+            MoveWindow(m_browse_button, browse_left, top, browse_width, 26, TRUE);
+        }
+        if (m_depth_label) {
+            MoveWindow(m_depth_label, depth_label_left, second_row_top + 4, depth_label_width, 18, TRUE);
+        }
+        if (m_depth_edit) {
+            MoveWindow(m_depth_edit, depth_edit_left, second_row_top, depth_edit_width, 26, TRUE);
         }
     }
 
@@ -401,6 +450,32 @@ private:
         if (m_browse_button) {
             EnableWindow(m_browse_button, enabled);
         }
+    }
+
+    bool TryGetDepthLimitFromEdit(int* depth_limit) const {
+        if (!depth_limit) {
+            return false;
+        }
+
+        if (!m_depth_edit) {
+            *depth_limit = m_max_depth;
+            return true;
+        }
+
+        wchar_t buffer[32] = {};
+        GetWindowTextW(m_depth_edit, buffer, static_cast<int>(std::size(buffer)));
+        if (buffer[0] == L'\0') {
+            return false;
+        }
+
+        wchar_t* end = nullptr;
+        const long parsed = wcstol(buffer, &end, 10);
+        if (end == buffer || (end && *end != L'\0')) {
+            return false;
+        }
+
+        *depth_limit = static_cast<int>(std::clamp<long>(parsed, 1, 32));
+        return true;
     }
 
     bool BrowseForFolder(std::wstring* selected_path) {
@@ -489,6 +564,18 @@ private:
     }
 
     void OnCommand(int control_id, int notification_code, HWND control) {
+        if (control_id == IDC_DEPTH_EDIT && control == m_depth_edit && notification_code == EN_CHANGE) {
+            int depth_limit = 0;
+            if (TryGetDepthLimitFromEdit(&depth_limit) && depth_limit != m_max_depth) {
+                m_max_depth = depth_limit;
+                if (m_tree && !m_scan_in_progress) {
+                    RebuildLayout();
+                    InvalidateRect(m_hwnd, nullptr, FALSE);
+                }
+            }
+            return;
+        }
+
         if (notification_code != BN_CLICKED) {
             return;
         }
@@ -837,10 +924,10 @@ private:
         const float height = std::max(m_treemap_content_rect.bottom - m_treemap_content_rect.top, 1.0f);
         m_layout_options.width = width;
         m_layout_options.height = height;
-        m_layout_options.max_depth = 7;
-        m_layout_options.max_rectangles = 5000;
-        m_layout_options.max_children_per_directory = 56;
-        m_layout_options.minimum_child_ratio = 0.0015;
+        m_layout_options.max_depth = static_cast<size_t>(m_max_depth);
+        m_layout_options.max_rectangles = 20000;
+        m_layout_options.max_children_per_directory = 256;
+        m_layout_options.minimum_child_ratio = 0.0;
         m_rects = visualization::BuildTreemapLayout(*m_tree, m_view_root_id, m_layout_options);
     }
 
@@ -1390,6 +1477,8 @@ private:
     HWND m_path_edit = nullptr;
     HWND m_scan_button = nullptr;
     HWND m_browse_button = nullptr;
+    HWND m_depth_label = nullptr;
+    HWND m_depth_edit = nullptr;
     std::shared_ptr<SharedScanState> m_shared_scan_state;
     bool m_requested_path_is_ntfs = false;
 
@@ -1422,6 +1511,7 @@ private:
     bool m_used_mft_scan = false;
     int m_hovered_index = -1;
     bool m_hovering_focus_up = false;
+    int m_max_depth = 2;
     double m_elapsed_seconds = 0.0;
     uint64_t m_view_root_id = 0;
     std::wstring m_scan_path;

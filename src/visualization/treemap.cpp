@@ -365,7 +365,7 @@ void LayoutItemsRecursive(
     if (begin + 1 == end) {
         const LayoutItem& item = items[begin];
         EmitNodeRect(item, depth, bounds, rects);
-        if (!item.is_dir || item.is_aggregate || depth + 1 >= options.max_depth || rects->size() >= options.max_rectangles) {
+        if (!item.is_dir || item.is_aggregate || depth + 1 > options.max_depth || rects->size() >= options.max_rectangles) {
             return;
         }
 
