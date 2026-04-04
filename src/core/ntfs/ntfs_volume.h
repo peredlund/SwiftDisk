@@ -5,11 +5,13 @@
 #include <string>
 #include <vector>
 
-namespace space_scanner::ntfs {
+namespace space_scanner::ntfs
+{
 
 struct DataRun;
 
-struct VolumeInfo {
+struct VolumeInfo
+{
     uint32_t bytes_per_sector = 0;
     uint32_t bytes_per_cluster = 0;
     uint32_t bytes_per_file_record = 0;
@@ -20,8 +22,9 @@ struct VolumeInfo {
 /**
  Provides low-level NTFS volume access for MFT scanning.
  **/
-class NtfsVolume {
-public:
+class NtfsVolume
+{
+  public:
     NtfsVolume();
     ~NtfsVolume();
 
@@ -41,7 +44,7 @@ public:
     using RecordCallback = std::function<void(uint8_t* record, size_t record_size, uint64_t frn)>;
     bool EnumerateMftRecords(const RecordCallback& callback, uint64_t* out_records);
 
-private:
+  private:
     bool ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record);
     bool GetMftDataRuns(std::vector<DataRun>* runs, uint64_t* data_size);
 

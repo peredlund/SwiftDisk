@@ -2,19 +2,21 @@
 
 #include <chrono>
 
-namespace space_scanner {
+namespace space_scanner
+{
 
 /**
  Lightweight monotonic stopwatch for elapsed wall time.
  **/
-class Stopwatch {
-public:
+class Stopwatch
+{
+  public:
     Stopwatch();
 
     void Reset();
     double ElapsedSeconds() const;
 
-private:
+  private:
     std::chrono::steady_clock::time_point m_start;
 };
 

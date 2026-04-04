@@ -4,14 +4,17 @@
 #include <string>
 #include <vector>
 
-namespace space_scanner::ntfs {
+namespace space_scanner::ntfs
+{
 
-struct DataRun {
+struct DataRun
+{
     int64_t lcn = 0;
     uint64_t length = 0;
 };
 
-struct ParsedRecord {
+struct ParsedRecord
+{
     uint64_t frn = 0;
     uint64_t parent_frn = 0;
     uint64_t base_frn = 0;

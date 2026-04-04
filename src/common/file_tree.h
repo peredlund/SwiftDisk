@@ -5,9 +5,11 @@
 #include <unordered_map>
 #include <vector>
 
-namespace space_scanner {
+namespace space_scanner
+{
 
-struct Node {
+struct Node
+{
     uint64_t id = 0;
     uint64_t parent_id = 0;
     std::wstring name;
@@ -20,9 +22,11 @@ struct Node {
  Maintains parent-child relationships, computes aggregate sizes,
  and provides path/stat/top-N queries.
  **/
-class FileTree {
-public:
-    struct TreeStats {
+class FileTree
+{
+  public:
+    struct TreeStats
+    {
         uint64_t file_count = 0;
         uint64_t dir_count = 0;
         uint64_t total_file_size = 0;
@@ -49,7 +53,7 @@ public:
     std::vector<const Node*> TopN(size_t n) const;
     std::wstring BuildPath(uint64_t id) const;
 
-private:
+  private:
     size_t GetDepth(uint64_t id, std::unordered_map<uint64_t, size_t>& cache) const;
 
     uint64_t m_root_id = 0;

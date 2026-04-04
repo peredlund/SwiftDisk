@@ -21,6 +21,11 @@
 - For method/function paramter names, use snake_case:
     void SetBufferSize(int buffer_size);
 
+## Braces placement style
+
+- Use Allman-style brace formatting: place every opening curly brace `{` on its own line, aligned with the corresponding declaration or control statement (e.g., methods, conditionals, loops, classes).
+- Never place an opening brace `{` on the same line as the preceding statement.
+
 ## Const Correctness
 
 - Mark methods const when they do not modify state.

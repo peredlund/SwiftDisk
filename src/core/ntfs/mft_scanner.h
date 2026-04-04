@@ -4,9 +4,11 @@
 
 #include "common/file_tree.h"
 
-namespace space_scanner::ntfs {
+namespace space_scanner::ntfs
+{
 
-struct MftScanStats {
+struct MftScanStats
+{
     uint64_t records_read = 0;
     uint64_t records_parsed = 0;
     uint64_t records_in_use = 0;

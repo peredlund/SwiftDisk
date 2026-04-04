@@ -1,18 +1,21 @@
 #include "common/stopwatch.h"
 
-namespace space_scanner {
+namespace space_scanner
+{
 
 /**
  Constructs the stopwatch and starts timing immediately.
  **/
-Stopwatch::Stopwatch() {
+Stopwatch::Stopwatch()
+{
     Reset();
 }
 
 /**
  Resets the start timestamp to the current monotonic clock tick.
  **/
-void Stopwatch::Reset() {
+void Stopwatch::Reset()
+{
     m_start = std::chrono::steady_clock::now();
 }
 
@@ -21,7 +24,8 @@ void Stopwatch::Reset() {
  
  Returns: Elapsed time in seconds.
  **/
-double Stopwatch::ElapsedSeconds() const {
+double Stopwatch::ElapsedSeconds() const
+{
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(now - m_start);
     return elapsed.count();

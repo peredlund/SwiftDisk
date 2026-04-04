@@ -9,9 +9,11 @@
 #include <cstring>
 #include <iterator>
 
-namespace space_scanner::ntfs {
+namespace space_scanner::ntfs
+{
 
-namespace {
+namespace
+{
 
 /**
  Builds a raw volume device path from a drive letter.
@@ -21,7 +23,8 @@ namespace {
  
  Returns: Device path in \\.\X: form.
  **/
-std::wstring BuildVolumePath(wchar_t drive_letter) {
+std::wstring BuildVolumePath(wchar_t drive_letter)
+{
     std::wstring path = L"\\\\.\\";
     path.push_back(drive_letter);
     path.push_back(L':');
@@ -36,7 +39,8 @@ std::wstring BuildVolumePath(wchar_t drive_letter) {
  
  Returns: Root path in X:\ form.
  **/
-std::wstring BuildRootPath(wchar_t drive_letter) {
+std::wstring BuildRootPath(wchar_t drive_letter)
+{
     std::wstring path;
     path.push_back(drive_letter);
     path.append(L":\\");
@@ -47,11 +51,13 @@ std::wstring BuildRootPath(wchar_t drive_letter) {
 
 NtfsVolume::NtfsVolume() = default;
 
-NtfsVolume::~NtfsVolume() {
+NtfsVolume::~NtfsVolume()
+{
     Close();
 }
 
-NtfsVolume::NtfsVolume(NtfsVolume&& other) noexcept {
+NtfsVolume::NtfsVolume(NtfsVolume&& other) noexcept
+{
     m_handle = other.m_handle;
     m_info = other.m_info;
     m_is_ntfs = other.m_is_ntfs;
@@ -60,8 +66,10 @@ NtfsVolume::NtfsVolume(NtfsVolume&& other) noexcept {
     other.m_is_ntfs = false;
 }
 
-NtfsVolume& NtfsVolume::operator=(NtfsVolume&& other) noexcept {
-    if (this == &other) {
+NtfsVolume& NtfsVolume::operator=(NtfsVolume&& other) noexcept
+{
+    if (this == &other)
+    {
         return *this;
     }
     Close();
@@ -82,7 +90,8 @@ NtfsVolume& NtfsVolume::operator=(NtfsVolume&& other) noexcept {
  
  Returns: true when open and metadata queries succeed.
  **/
-bool NtfsVolume::Open(wchar_t drive_letter) {
+bool NtfsVolume::Open(wchar_t drive_letter)
+{
     Close();
 
     m_volume_path = BuildVolumePath(drive_letter);
@@ -97,7 +106,8 @@ bool NtfsVolume::Open(wchar_t drive_letter) {
         FILE_FLAG_SEQUENTIAL_SCAN,
         nullptr);
 
-    if (m_handle == INVALID_HANDLE_VALUE) {
+    if (m_handle == INVALID_HANDLE_VALUE)
+    {
         m_handle = nullptr;
         return false;
     }
@@ -113,7 +123,8 @@ bool NtfsVolume::Open(wchar_t drive_letter) {
             &volume_data,
             sizeof(volume_data),
             &bytes_returned,
-            nullptr)) {
+            nullptr))
+    {
         Close();
         return false;
     }
@@ -132,18 +143,23 @@ bool NtfsVolume::Open(wchar_t drive_letter) {
             nullptr,
             nullptr,
             fs_name,
-            static_cast<DWORD>(std::size(fs_name)))) {
+            static_cast<DWORD>(std::size(fs_name))))
+    {
         m_info.fs_name = fs_name;
         m_is_ntfs = (_wcsicmp(fs_name, L"NTFS") == 0);
-    } else {
+    }
+    else
+    {
         m_is_ntfs = false;
     }
 
     return true;
 }
 
-void NtfsVolume::Close() {
-    if (m_handle) {
+void NtfsVolume::Close()
+{
+    if (m_handle)
+    {
         CloseHandle(static_cast<HANDLE>(m_handle));
         m_handle = nullptr;
     }
@@ -153,19 +169,23 @@ void NtfsVolume::Close() {
     m_volume_path.clear();
 }
 
-bool NtfsVolume::IsOpen() const {
+bool NtfsVolume::IsOpen() const
+{
     return m_handle != nullptr;
 }
 
-bool NtfsVolume::IsNtfs() const {
+bool NtfsVolume::IsNtfs() const
+{
     return m_is_ntfs;
 }
 
-bool NtfsVolume::IsReadOnlyAccess() const {
+bool NtfsVolume::IsReadOnlyAccess() const
+{
     return m_open_access == GENERIC_READ;
 }
 
-const VolumeInfo& NtfsVolume::Info() const {
+const VolumeInfo& NtfsVolume::Info() const
+{
     return m_info;
 }
 
@@ -178,8 +198,10 @@ const VolumeInfo& NtfsVolume::Info() const {
  
  Returns: true when a non-empty record is returned.
  **/
-bool NtfsVolume::ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record) {
-    if (!m_handle || !out_record) {
+bool NtfsVolume::ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record)
+{
+    if (!m_handle || !out_record)
+    {
         return false;
     }
 
@@ -197,12 +219,14 @@ bool NtfsVolume::ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record) 
             buffer.data(),
             static_cast<DWORD>(buffer.size()),
             &bytes_returned,
-            nullptr)) {
+            nullptr))
+    {
         return false;
     }
 
     auto* output = reinterpret_cast<NTFS_FILE_RECORD_OUTPUT_BUFFER*>(buffer.data());
-    if (output->FileRecordLength == 0) {
+    if (output->FileRecordLength == 0)
+    {
         return false;
     }
 
@@ -219,13 +243,16 @@ bool NtfsVolume::ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record) 
  
  Returns: true on successful run extraction.
  **/
-bool NtfsVolume::GetMftDataRuns(std::vector<DataRun>* runs, uint64_t* data_size) {
-    if (!runs) {
+bool NtfsVolume::GetMftDataRuns(std::vector<DataRun>* runs, uint64_t* data_size)
+{
+    if (!runs)
+    {
         return false;
     }
 
     std::vector<uint8_t> record;
-    if (!ReadFileRecord(0, &record)) {
+    if (!ReadFileRecord(0, &record))
+    {
         return false;
     }
 
@@ -243,26 +270,31 @@ bool NtfsVolume::GetMftDataRuns(std::vector<DataRun>* runs, uint64_t* data_size)
  
  Returns: true on successful full enumeration.
  **/
-bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* out_records) {
-    if (!m_handle || !callback) {
+bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* out_records)
+{
+    if (!m_handle || !callback)
+    {
         return false;
     }
 
     std::vector<DataRun> runs;
     uint64_t mft_data_size = 0;
-    if (!GetMftDataRuns(&runs, &mft_data_size)) {
+    if (!GetMftDataRuns(&runs, &mft_data_size))
+    {
         return false;
     }
 
     const uint32_t record_size = m_info.bytes_per_file_record;
-    if (record_size == 0) {
+    if (record_size == 0)
+    {
         return false;
     }
 
     const size_t base_chunk = 8 * 1024 * 1024;
     // Keep reads aligned to full file-record boundaries.
     size_t chunk_size = (base_chunk / record_size) * record_size;
-    if (chunk_size == 0) {
+    if (chunk_size == 0)
+    {
         chunk_size = record_size;
     }
 
@@ -272,17 +304,22 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
     uint64_t record_index = 0;
 
     uint64_t mft_limit = m_info.mft_valid_data_length;
-    if (mft_limit == 0 && mft_data_size > 0) {
+    if (mft_limit == 0 && mft_data_size > 0)
+    {
         mft_limit = mft_data_size;
     }
     uint64_t remaining_mft_bytes = mft_limit;
-    for (const auto& run : runs) {
-        if (run.length == 0 || run.lcn <= 0) {
+    for (const auto& run : runs)
+    {
+        if (run.length == 0 || run.lcn <= 0)
+        {
             // Sparse/invalid run: skip physical read but keep logical record index aligned.
             uint64_t run_bytes = run.length * static_cast<uint64_t>(m_info.bytes_per_cluster);
             record_index += run_bytes / record_size;
-            if (remaining_mft_bytes > 0) {
-                if (run_bytes >= remaining_mft_bytes) {
+            if (remaining_mft_bytes > 0)
+            {
+                if (run_bytes >= remaining_mft_bytes)
+                {
                     remaining_mft_bytes = 0;
                     break;
                 }
@@ -292,56 +329,67 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
         }
 
         uint64_t run_bytes = run.length * static_cast<uint64_t>(m_info.bytes_per_cluster);
-        if (remaining_mft_bytes > 0) {
+        if (remaining_mft_bytes > 0)
+        {
             run_bytes = std::min(run_bytes, remaining_mft_bytes);
         }
         uint64_t run_offset = static_cast<uint64_t>(run.lcn) * m_info.bytes_per_cluster;
         uint64_t remaining = run_bytes;
 
-        while (remaining > 0) {
+        while (remaining > 0)
+        {
             // Read bounded by chunk size and by remaining bytes in this run extent.
             size_t to_read = static_cast<size_t>(std::min<uint64_t>(chunk_size, remaining));
             LARGE_INTEGER offset;
             offset.QuadPart = static_cast<LONGLONG>(run_offset + (run_bytes - remaining));
-            if (!SetFilePointerEx(static_cast<HANDLE>(m_handle), offset, nullptr, FILE_BEGIN)) {
+            if (!SetFilePointerEx(static_cast<HANDLE>(m_handle), offset, nullptr, FILE_BEGIN))
+            {
                 return false;
             }
 
             DWORD bytes_read = 0;
-            if (!ReadFile(static_cast<HANDLE>(m_handle), buffer.data() + carry, static_cast<DWORD>(to_read), &bytes_read, nullptr)) {
+            if (!ReadFile(static_cast<HANDLE>(m_handle), buffer.data() + carry, static_cast<DWORD>(to_read), &bytes_read, nullptr))
+            {
                 return false;
             }
 
             size_t total = carry + bytes_read;
             size_t records = total / record_size;
-            for (size_t i = 0; i < records; ++i) {
+            for (size_t i = 0; i < records; ++i)
+            {
                 uint8_t* record_ptr = buffer.data() + i * record_size;
                 callback(record_ptr, record_size, record_index++);
             }
             // Keep only trailing partial record bytes for the next iteration.
             carry = total % record_size;
-            if (carry > 0) {
+            if (carry > 0)
+            {
                 // Preserve incomplete record bytes for the next read.
                 std::memmove(buffer.data(), buffer.data() + records * record_size, carry);
             }
 
             remaining -= bytes_read;
-            if (remaining_mft_bytes > 0) {
+            if (remaining_mft_bytes > 0)
+            {
                 remaining_mft_bytes -= bytes_read;
-                if (remaining_mft_bytes == 0) {
+                if (remaining_mft_bytes == 0)
+                {
                     remaining = 0;
                 }
             }
-            if (bytes_read == 0) {
+            if (bytes_read == 0)
+            {
                 break;
             }
         }
-        if (remaining_mft_bytes == 0) {
+        if (remaining_mft_bytes == 0)
+        {
             break;
         }
     }
 
-    if (out_records) {
+    if (out_records)
+    {
         *out_records = record_index;
     }
     return true;

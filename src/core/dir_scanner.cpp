@@ -5,7 +5,8 @@
 #include <cwchar>
 #include <vector>
 
-namespace space_scanner {
+namespace space_scanner
+{
 
 /**
  Normalizes the root path used for display and traversal.
@@ -15,8 +16,10 @@ namespace space_scanner {
  
  Returns: Path without a trailing separator (except drive root forms).
  **/
-static std::wstring NormalizeRootName(std::wstring path) {
-    if (path.size() > 3 && (path.back() == L'\\' || path.back() == L'/')) {
+static std::wstring NormalizeRootName(std::wstring path)
+{
+    if (path.size() > 3 && (path.back() == L'\\' || path.back() == L'/'))
+    {
         path.pop_back();
     }
     return path;
@@ -33,8 +36,10 @@ static std::wstring NormalizeRootName(std::wstring path) {
  
  Returns: true on success, otherwise false.
  **/
-bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_root_id) {
-    if (!tree || root_path.empty()) {
+bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_root_id)
+{
+    if (!tree || root_path.empty())
+    {
         return false;
     }
 
@@ -50,7 +55,8 @@ bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_
     tree->AddNode(root_node);
     tree->SetRootId(root_id);
 
-    struct StackEntry {
+    struct StackEntry
+    {
         std::wstring path;
         uint64_t parent_id;
     };
@@ -58,12 +64,14 @@ bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_
     std::vector<StackEntry> stack;
     stack.push_back({normalized_root, root_id});
 
-    while (!stack.empty()) {
+    while (!stack.empty())
+    {
         StackEntry entry = std::move(stack.back());
         stack.pop_back();
 
         std::wstring search_path = entry.path;
-        if (!search_path.empty() && search_path.back() != L'\\') {
+        if (!search_path.empty() && search_path.back() != L'\\')
+        {
             search_path.append(L"\\");
         }
         search_path.append(L"*");
@@ -77,19 +85,22 @@ bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_
             nullptr,
             FIND_FIRST_EX_LARGE_FETCH);
 
-        if (find_handle == INVALID_HANDLE_VALUE) {
+        if (find_handle == INVALID_HANDLE_VALUE)
+        {
             continue;
         }
 
-        do {
+        do
+        {
             const wchar_t* name = find_data.cFileName;
-            if (wcscmp(name, L".") == 0 || wcscmp(name, L"..") == 0) {
+            if (wcscmp(name, L".") == 0 || wcscmp(name, L"..") == 0)
+            {
                 continue;
             }
 
             bool is_dir = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
             uint64_t size = (static_cast<uint64_t>(find_data.nFileSizeHigh) << 32) |
-                static_cast<uint64_t>(find_data.nFileSizeLow);
+                            static_cast<uint64_t>(find_data.nFileSizeLow);
 
             Node node;
             node.id = next_id++;
@@ -99,9 +110,11 @@ bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_
             node.size = is_dir ? 0 : size;
             tree->AddNode(node);
 
-            if (is_dir) {
+            if (is_dir)
+            {
                 std::wstring child_path = entry.path;
-                if (!child_path.empty() && child_path.back() != L'\\') {
+                if (!child_path.empty() && child_path.back() != L'\\')
+                {
                     child_path.append(L"\\");
                 }
                 child_path.append(name);
@@ -112,7 +125,8 @@ bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_
         FindClose(find_handle);
     }
 
-    if (out_root_id) {
+    if (out_root_id)
+    {
         *out_root_id = root_id;
     }
     return true;

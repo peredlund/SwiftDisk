@@ -8,9 +8,11 @@
 #include "common/file_tree.h"
 #include "core/ntfs/mft_scanner.h"
 
-namespace space_scanner::ntfs {
+namespace space_scanner::ntfs
+{
 
-struct ValidationMismatch {
+struct ValidationMismatch
+{
     uint64_t frn = 0;
     std::wstring path;
     std::wstring field;
@@ -18,7 +20,8 @@ struct ValidationMismatch {
     std::wstring actual;
 };
 
-struct ValidationEdgeCaseSummary {
+struct ValidationEdgeCaseSummary
+{
     uint64_t entries_inspected = 0;
     uint64_t hard_link_entries = 0;
     uint64_t sparse_entries = 0;
@@ -32,7 +35,8 @@ struct ValidationEdgeCaseSummary {
     std::vector<std::wstring> ads_examples;
 };
 
-struct ValidationReport {
+struct ValidationReport
+{
     uint64_t sample_size_requested = 0;
     uint64_t sample_file_candidates = 0;
     uint64_t sampled_files_checked = 0;

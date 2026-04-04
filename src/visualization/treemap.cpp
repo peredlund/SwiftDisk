@@ -14,18 +14,22 @@
 #include <unordered_set>
 #include <utility>
 
-namespace space_scanner::visualization {
+namespace space_scanner::visualization
+{
 
-namespace {
+namespace
+{
 
-struct Bounds {
+struct Bounds
+{
     double x = 0.0;
     double y = 0.0;
     double width = 0.0;
     double height = 0.0;
 };
 
-struct LayoutItem {
+struct LayoutItem
+{
     uint64_t node_id = 0;
     uint64_t size = 0;
     size_t aggregated_child_count = 0;
@@ -35,11 +39,13 @@ struct LayoutItem {
     std::wstring path;
 };
 
-std::wstring HumanizeBytes(uint64_t bytes) {
+std::wstring HumanizeBytes(uint64_t bytes)
+{
     static constexpr std::wstring_view kUnits[] = {L"B", L"KiB", L"MiB", L"GiB", L"TiB", L"PiB"};
     double value = static_cast<double>(bytes);
     size_t unit_index = 0;
-    while (value >= 1024.0 && unit_index + 1 < std::size(kUnits)) {
+    while (value >= 1024.0 && unit_index + 1 < std::size(kUnits))
+    {
         value /= 1024.0;
         ++unit_index;
     }
@@ -49,13 +55,16 @@ std::wstring HumanizeBytes(uint64_t bytes) {
     return buffer;
 }
 
-std::string Utf8FromWide(const std::wstring& value) {
-    if (value.empty()) {
+std::string Utf8FromWide(const std::wstring& value)
+{
+    if (value.empty())
+    {
         return {};
     }
 
     int size = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
-    if (size <= 0) {
+    if (size <= 0)
+    {
         return {};
     }
 
@@ -64,57 +73,80 @@ std::string Utf8FromWide(const std::wstring& value) {
     return utf8;
 }
 
-std::string EscapeHtml(const std::string& value) {
+std::string EscapeHtml(const std::string& value)
+{
     std::ostringstream escaped;
-    for (unsigned char ch : value) {
-        switch (ch) {
-            case '&': escaped << "&amp;"; break;
-            case '<': escaped << "&lt;"; break;
-            case '>': escaped << "&gt;"; break;
-            case '"': escaped << "&quot;"; break;
-            case '\'': escaped << "&#39;"; break;
-            default: escaped << static_cast<char>(ch); break;
+    for (unsigned char ch : value)
+    {
+        switch (ch)
+        {
+        case '&':
+            escaped << "&amp;";
+            break;
+        case '<':
+            escaped << "&lt;";
+            break;
+        case '>':
+            escaped << "&gt;";
+            break;
+        case '"':
+            escaped << "&quot;";
+            break;
+        case '\'':
+            escaped << "&#39;";
+            break;
+        default:
+            escaped << static_cast<char>(ch);
+            break;
         }
     }
     return escaped.str();
 }
 
-std::string EscapeAttribute(const std::wstring& value) {
+std::string EscapeAttribute(const std::wstring& value)
+{
     return EscapeHtml(Utf8FromWide(value));
 }
 
-std::string FormatDouble(double value) {
+std::string FormatDouble(double value)
+{
     std::ostringstream stream;
     stream.setf(std::ios::fixed);
     stream << std::setprecision(2) << value;
     return stream.str();
 }
 
-std::string FormatPercent(double ratio) {
+std::string FormatPercent(double ratio)
+{
     std::ostringstream stream;
     stream.setf(std::ios::fixed);
     stream << std::setprecision(2) << ratio * 100.0;
     return stream.str();
 }
 
-uint64_t SumSizes(const std::vector<LayoutItem>& items, size_t begin, size_t end) {
+uint64_t SumSizes(const std::vector<LayoutItem>& items, size_t begin, size_t end)
+{
     uint64_t total = 0;
-    for (size_t i = begin; i < end; ++i) {
+    for (size_t i = begin; i < end; ++i)
+    {
         total += items[i].size;
     }
     return total;
 }
 
-uint64_t HashPath(const std::wstring& value) {
+uint64_t HashPath(const std::wstring& value)
+{
     uint64_t hash = 1469598103934665603ull;
-    for (wchar_t ch : value) {
+    for (wchar_t ch : value)
+    {
         hash ^= static_cast<uint64_t>(static_cast<uint16_t>(ch));
         hash *= 1099511628211ull;
     }
     return hash;
 }
 
-std::string HexColor(uint32_t rgb) {
+std::string HexColor(uint32_t rgb)
+{
     std::ostringstream stream;
     stream << '#'
            << std::hex << std::setfill('0') << std::setw(6)
@@ -122,19 +154,25 @@ std::string HexColor(uint32_t rgb) {
     return stream.str();
 }
 
-uint32_t ParseHexColor(std::string_view value) {
-    if (value.size() != 7 || value[0] != '#') {
+uint32_t ParseHexColor(std::string_view value)
+{
+    if (value.size() != 7 || value[0] != '#')
+    {
         return 0x7A96BEu;
     }
 
-    auto hex = [](char ch) -> uint32_t {
-        if (ch >= '0' && ch <= '9') {
+    auto hex = [](char ch) -> uint32_t
+    {
+        if (ch >= '0' && ch <= '9')
+        {
             return static_cast<uint32_t>(ch - '0');
         }
-        if (ch >= 'a' && ch <= 'f') {
+        if (ch >= 'a' && ch <= 'f')
+        {
             return static_cast<uint32_t>(10 + ch - 'a');
         }
-        if (ch >= 'A' && ch <= 'F') {
+        if (ch >= 'A' && ch <= 'F')
+        {
             return static_cast<uint32_t>(10 + ch - 'A');
         }
         return 0;
@@ -145,22 +183,26 @@ uint32_t ParseHexColor(std::string_view value) {
            (hex(value[5]) << 4) | hex(value[6]);
 }
 
-double SrgbToLinear(double channel) {
+double SrgbToLinear(double channel)
+{
     const double normalized = channel / 255.0;
-    if (normalized <= 0.04045) {
+    if (normalized <= 0.04045)
+    {
         return normalized / 12.92;
     }
     return std::pow((normalized + 0.055) / 1.055, 2.4);
 }
 
-double RelativeLuminance(uint32_t rgb) {
+double RelativeLuminance(uint32_t rgb)
+{
     const double red = SrgbToLinear(static_cast<double>((rgb >> 16) & 0xFFu));
     const double green = SrgbToLinear(static_cast<double>((rgb >> 8) & 0xFFu));
     const double blue = SrgbToLinear(static_cast<double>(rgb & 0xFFu));
     return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
 }
 
-double ContrastRatio(uint32_t left_rgb, uint32_t right_rgb) {
+double ContrastRatio(uint32_t left_rgb, uint32_t right_rgb)
+{
     const double left = RelativeLuminance(left_rgb);
     const double right = RelativeLuminance(right_rgb);
     const double lighter = std::max(left, right);
@@ -168,28 +210,33 @@ double ContrastRatio(uint32_t left_rgb, uint32_t right_rgb) {
     return (lighter + 0.05) / (darker + 0.05);
 }
 
-struct TextPalette {
+struct TextPalette
+{
     std::string primary;
     std::string secondary;
     std::string outline;
     std::string plate;
 };
 
-TextPalette TextColorsForFill(std::string_view fill_color) {
+TextPalette TextColorsForFill(std::string_view fill_color)
+{
     const uint32_t rgb = ParseHexColor(fill_color);
     constexpr uint32_t kLightPrimary = 0xF8FBFFu;
     constexpr uint32_t kDarkPrimary = 0x102033u;
 
     const double light_contrast = ContrastRatio(rgb, kLightPrimary);
     const double dark_contrast = ContrastRatio(rgb, kDarkPrimary);
-    if (light_contrast >= dark_contrast) {
+    if (light_contrast >= dark_contrast)
+    {
         return {"#f8fbff", "#f8fbff", "#08111d", "#08111d"};
     }
     return {"#102033", "#102033", "#f8fbff", "#f8fbff"};
 }
 
-std::string ColorForItem(const LayoutItem& item, size_t depth) {
-    if (item.is_aggregate) {
+std::string ColorForItem(const LayoutItem& item, size_t depth)
+{
+    if (item.is_aggregate)
+    {
         return "#475569";
     }
 
@@ -201,11 +248,14 @@ std::string ColorForItem(const LayoutItem& item, size_t depth) {
     uint32_t blue = 64u + (base & 0x7Fu);
 
     const uint32_t depth_boost = static_cast<uint32_t>(std::min<size_t>(depth * 8, 48));
-    if (item.is_dir) {
+    if (item.is_dir)
+    {
         red = std::min<uint32_t>(red + 18u + depth_boost / 2u, 220u);
         green = std::min<uint32_t>(green + 14u + depth_boost / 2u, 220u);
         blue = std::min<uint32_t>(blue + 10u + depth_boost / 3u, 220u);
-    } else {
+    }
+    else
+    {
         red = std::min<uint32_t>(red + 8u, 210u);
         green = std::min<uint32_t>(green + 8u, 210u);
         blue = std::min<uint32_t>(blue + 8u, 210u);
@@ -217,23 +267,28 @@ std::string ColorForItem(const LayoutItem& item, size_t depth) {
 std::vector<LayoutItem> CollectChildren(
     const FileTree& tree,
     const Node& parent,
-    const TreemapLayoutOptions& options) {
+    const TreemapLayoutOptions& options)
+{
     std::vector<LayoutItem> children;
     const std::vector<uint64_t>* child_ids = tree.GetChildIds(parent.id);
-    if (!child_ids) {
+    if (!child_ids)
+    {
         return children;
     }
 
     std::unordered_set<uint64_t> seen;
     seen.reserve(child_ids->size());
 
-    for (uint64_t child_id : *child_ids) {
-        if (!seen.insert(child_id).second) {
+    for (uint64_t child_id : *child_ids)
+    {
+        if (!seen.insert(child_id).second)
+        {
             continue;
         }
 
         const Node* child = tree.GetNode(child_id);
-        if (!child || child->size == 0) {
+        if (!child || child->size == 0)
+        {
             continue;
         }
 
@@ -246,14 +301,17 @@ std::vector<LayoutItem> CollectChildren(
         children.push_back(std::move(item));
     }
 
-    std::sort(children.begin(), children.end(), [](const LayoutItem& left, const LayoutItem& right) {
-        if (left.size != right.size) {
-            return left.size > right.size;
-        }
-        return left.label < right.label;
-    });
+    std::sort(children.begin(), children.end(), [](const LayoutItem& left, const LayoutItem& right)
+              {
+                  if (left.size != right.size)
+                  {
+                      return left.size > right.size;
+                  }
+                  return left.label < right.label;
+              });
 
-    if (children.empty()) {
+    if (children.empty())
+    {
         return children;
     }
 
@@ -263,11 +321,13 @@ std::vector<LayoutItem> CollectChildren(
 
     uint64_t aggregated_size = 0;
     size_t aggregated_count = 0;
-    for (size_t index = 0; index < children.size(); ++index) {
+    for (size_t index = 0; index < children.size(); ++index)
+    {
         const LayoutItem& child = children[index];
         const bool exceeds_limit = filtered.size() >= options.max_children_per_directory;
         const bool below_ratio = (static_cast<double>(child.size) / parent_size) < options.minimum_child_ratio;
-        if (exceeds_limit || below_ratio) {
+        if (exceeds_limit || below_ratio)
+        {
             aggregated_size += child.size;
             aggregated_count++;
             continue;
@@ -276,7 +336,8 @@ std::vector<LayoutItem> CollectChildren(
         filtered.push_back(child);
     }
 
-    if (aggregated_size > 0) {
+    if (aggregated_size > 0)
+    {
         LayoutItem aggregate;
         aggregate.size = aggregated_size;
         aggregate.aggregated_child_count = aggregated_count;
@@ -286,30 +347,36 @@ std::vector<LayoutItem> CollectChildren(
         filtered.push_back(std::move(aggregate));
     }
 
-    std::sort(filtered.begin(), filtered.end(), [](const LayoutItem& left, const LayoutItem& right) {
-        if (left.size != right.size) {
-            return left.size > right.size;
-        }
-        return left.label < right.label;
-    });
+    std::sort(filtered.begin(), filtered.end(), [](const LayoutItem& left, const LayoutItem& right)
+              {
+                  if (left.size != right.size)
+                  {
+                      return left.size > right.size;
+                  }
+                  return left.label < right.label;
+              });
     return filtered;
 }
 
-size_t ChooseSplitIndex(const std::vector<LayoutItem>& items, size_t begin, size_t end) {
+size_t ChooseSplitIndex(const std::vector<LayoutItem>& items, size_t begin, size_t end)
+{
     const uint64_t total = SumSizes(items, begin, end);
     uint64_t running = 0;
     size_t split = begin + 1;
-    for (size_t index = begin; index + 1 < end; ++index) {
+    for (size_t index = begin; index + 1 < end; ++index)
+    {
         running += items[index].size;
         split = index + 1;
-        if (running * 2 >= total) {
+        if (running * 2 >= total)
+        {
             break;
         }
     }
     return split;
 }
 
-Bounds InsetBounds(const Bounds& bounds, const TreemapLayoutOptions& options) {
+Bounds InsetBounds(const Bounds& bounds, const TreemapLayoutOptions& options)
+{
     Bounds inner;
     inner.x = bounds.x + options.tile_padding;
     inner.y = bounds.y + options.directory_header_height;
@@ -322,7 +389,8 @@ void EmitNodeRect(
     const LayoutItem& item,
     size_t depth,
     const Bounds& bounds,
-    std::vector<TreemapRect>* rects) {
+    std::vector<TreemapRect>* rects)
+{
     TreemapRect rect;
     rect.node_id = item.node_id;
     rect.size = item.size;
@@ -353,38 +421,47 @@ void LayoutItemsRecursive(
     size_t depth,
     const Bounds& bounds,
     const TreemapLayoutOptions& options,
-    std::vector<TreemapRect>* rects) {
-    if (begin >= end || rects->size() >= options.max_rectangles) {
+    std::vector<TreemapRect>* rects)
+{
+    if (begin >= end || rects->size() >= options.max_rectangles)
+    {
         return;
     }
 
-    if (bounds.width <= 0.0 || bounds.height <= 0.0) {
+    if (bounds.width <= 0.0 || bounds.height <= 0.0)
+    {
         return;
     }
 
-    if (begin + 1 == end) {
+    if (begin + 1 == end)
+    {
         const LayoutItem& item = items[begin];
         EmitNodeRect(item, depth, bounds, rects);
-        if (!item.is_dir || item.is_aggregate || depth + 1 > options.max_depth || rects->size() >= options.max_rectangles) {
+        if (!item.is_dir || item.is_aggregate || depth + 1 > options.max_depth || rects->size() >= options.max_rectangles)
+        {
             return;
         }
 
-        if (bounds.width < options.minimum_child_side || bounds.height < options.minimum_child_side + options.directory_header_height) {
+        if (bounds.width < options.minimum_child_side || bounds.height < options.minimum_child_side + options.directory_header_height)
+        {
             return;
         }
 
         const Node* node = tree.GetNode(item.node_id);
-        if (!node) {
+        if (!node)
+        {
             return;
         }
 
         std::vector<LayoutItem> children = CollectChildren(tree, *node, options);
-        if (children.empty()) {
+        if (children.empty())
+        {
             return;
         }
 
         Bounds inner = InsetBounds(bounds, options);
-        if (inner.width <= 0.0 || inner.height <= 0.0) {
+        if (inner.width <= 0.0 || inner.height <= 0.0)
+        {
             return;
         }
 
@@ -393,7 +470,8 @@ void LayoutItemsRecursive(
     }
 
     const uint64_t total = SumSizes(items, begin, end);
-    if (total == 0) {
+    if (total == 0)
+    {
         return;
     }
 
@@ -403,12 +481,15 @@ void LayoutItemsRecursive(
 
     Bounds first = bounds;
     Bounds second = bounds;
-    if (bounds.width >= bounds.height) {
+    if (bounds.width >= bounds.height)
+    {
         const double first_width = bounds.width * ratio;
         first.width = first_width;
         second.x = bounds.x + first_width;
         second.width = std::max(0.0, bounds.width - first_width);
-    } else {
+    }
+    else
+    {
         const double first_height = bounds.height * ratio;
         first.height = first_height;
         second.y = bounds.y + first_height;
@@ -419,20 +500,23 @@ void LayoutItemsRecursive(
     LayoutItemsRecursive(tree, items, split, end, depth, second, options, rects);
 }
 
-void AppendStatsCard(std::ostringstream& html, const std::string& label, const std::string& value) {
+void AppendStatsCard(std::ostringstream& html, const std::string& label, const std::string& value)
+{
     html << "        <div class=\"stat-card\">\n";
     html << "          <div class=\"stat-label\">" << label << "</div>\n";
     html << "          <div class=\"stat-value\">" << value << "</div>\n";
     html << "        </div>\n";
 }
 
-std::string TooltipText(const TreemapRect& rect, uint64_t root_size) {
+std::string TooltipText(const TreemapRect& rect, uint64_t root_size)
+{
     std::ostringstream tooltip;
     tooltip << EscapeHtml(Utf8FromWide(rect.path.empty() ? rect.label : rect.path))
             << "&#10;Size: " << EscapeHtml(Utf8FromWide(HumanizeBytes(rect.size)))
             << " (" << FormatPercent(root_size == 0 ? 0.0 : static_cast<double>(rect.size) / static_cast<double>(root_size)) << "%)"
             << "&#10;Type: " << (rect.is_dir ? "Directory" : (rect.is_aggregate ? "Aggregate" : "File"));
-    if (rect.is_aggregate && rect.aggregated_child_count > 0) {
+    if (rect.is_aggregate && rect.aggregated_child_count > 0)
+    {
         tooltip << "&#10;Aggregated items: " << rect.aggregated_child_count;
     }
     return tooltip.str();
@@ -445,7 +529,8 @@ TreemapVisualStyle BuildTreemapVisualStyle(
     const std::wstring& path,
     bool is_dir,
     bool is_aggregate,
-    size_t depth) {
+    size_t depth)
+{
     LayoutItem item;
     item.label = label;
     item.path = path;
@@ -462,10 +547,12 @@ TreemapVisualStyle BuildTreemapVisualStyle(
     return style;
 }
 
-std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_id, const TreemapLayoutOptions& options) {
+std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_id, const TreemapLayoutOptions& options)
+{
     std::vector<TreemapRect> rects;
     const Node* root = tree.GetNode(root_id);
-    if (!root) {
+    if (!root)
+    {
         return rects;
     }
 
@@ -473,7 +560,8 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
     root_bounds.width = options.width;
     root_bounds.height = options.height;
 
-    if (!root->is_dir || root->size == 0) {
+    if (!root->is_dir || root->size == 0)
+    {
         LayoutItem item;
         item.node_id = root->id;
         item.size = root->size;
@@ -485,7 +573,8 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
     }
 
     std::vector<LayoutItem> root_children = CollectChildren(tree, *root, options);
-    if (root_children.empty()) {
+    if (root_children.empty())
+    {
         LayoutItem item;
         item.node_id = root->id;
         item.size = root->size;
@@ -500,7 +589,8 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
     return rects;
 }
 
-std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, const TreemapLayoutOptions& options) {
+std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, const TreemapLayoutOptions& options)
+{
     return BuildTreemapLayout(tree, tree.RootId(), options);
 }
 
@@ -509,10 +599,13 @@ bool WriteTreemapHtml(
     const FileTree& tree,
     const TreemapDocumentInfo& info,
     const TreemapLayoutOptions& options,
-    std::wstring* error) {
+    std::wstring* error)
+{
     const Node* root = tree.GetNode(tree.RootId());
-    if (!root) {
-        if (error) {
+    if (!root)
+    {
+        if (error)
+        {
             *error = L"Treemap output requires a valid root node.";
         }
         return false;
@@ -669,7 +762,8 @@ bool WriteTreemapHtml(
     html << "        <svg viewBox=\"0 0 " << FormatDouble(options.width) << ' ' << FormatDouble(options.height)
          << "\" role=\"img\" aria-label=\"Treemap of scanned disk usage\">\n";
 
-    for (size_t index = 0; index < rects.size(); ++index) {
+    for (size_t index = 0; index < rects.size(); ++index)
+    {
         const TreemapRect& rect = rects[index];
         const std::string label = EscapeHtml(Utf8FromWide(rect.label));
         const std::string size_label = EscapeHtml(Utf8FromWide(HumanizeBytes(rect.size)));
@@ -686,24 +780,26 @@ bool WriteTreemapHtml(
              << "\" width=\"" << FormatDouble(rect.width) << "\" height=\"" << FormatDouble(rect.height)
              << "\" rx=\"2\" ry=\"2\" fill=\"" << rect.fill_color << "\" />\n";
 
-        if (rect.width >= 56.0 && rect.height >= 18.0) {
+        if (rect.width >= 56.0 && rect.height >= 18.0)
+        {
             const double text_x = rect.x + 6.0;
             const bool show_label = rect.width >= options.minimum_label_width && rect.height >= options.minimum_label_height;
             const double plate_height = show_label ? 30.0 : 16.0;
             const double label_y = rect.y + 14.0;
             const double size_y = show_label ? rect.y + 28.0 : rect.y + 14.0;
             html << "            <g clip-path=\"url(#clip-" << index << ")\">\n";
-                html << "              <rect x=\"" << FormatDouble(rect.x + 2.0) << "\" y=\"" << FormatDouble(rect.y + 2.0)
-                     << "\" width=\"" << FormatDouble(std::max(0.0, rect.width - 4.0)) << "\" height=\"" << FormatDouble(plate_height)
-                     << "\" rx=\"2\" ry=\"2\" fill=\"" << rect.text_plate_color << "\" opacity=\"0.34\" />\n";
-                if (show_label) {
-                    html << "              <text class=\"tile-label\" fill=\"" << rect.label_text_color
-                         << "\" stroke=\"" << rect.text_outline_color << "\" stroke-width=\"2.2\" paint-order=\"stroke\" x=\"" << FormatDouble(text_x)
-                         << "\" y=\"" << FormatDouble(label_y) << "\">" << label << "</text>\n";
-                }
-                html << "              <text class=\"tile-size\" fill=\"" << rect.secondary_text_color
-                     << "\" stroke=\"" << rect.text_outline_color << "\" stroke-width=\"1.8\" paint-order=\"stroke\" x=\"" << FormatDouble(text_x)
-                     << "\" y=\"" << FormatDouble(size_y) << "\">" << size_label << "</text>\n";
+            html << "              <rect x=\"" << FormatDouble(rect.x + 2.0) << "\" y=\"" << FormatDouble(rect.y + 2.0)
+                 << "\" width=\"" << FormatDouble(std::max(0.0, rect.width - 4.0)) << "\" height=\"" << FormatDouble(plate_height)
+                 << "\" rx=\"2\" ry=\"2\" fill=\"" << rect.text_plate_color << "\" opacity=\"0.34\" />\n";
+            if (show_label)
+            {
+                html << "              <text class=\"tile-label\" fill=\"" << rect.label_text_color
+                     << "\" stroke=\"" << rect.text_outline_color << "\" stroke-width=\"2.2\" paint-order=\"stroke\" x=\"" << FormatDouble(text_x)
+                     << "\" y=\"" << FormatDouble(label_y) << "\">" << label << "</text>\n";
+            }
+            html << "              <text class=\"tile-size\" fill=\"" << rect.secondary_text_color
+                 << "\" stroke=\"" << rect.text_outline_color << "\" stroke-width=\"1.8\" paint-order=\"stroke\" x=\"" << FormatDouble(text_x)
+                 << "\" y=\"" << FormatDouble(size_y) << "\">" << size_label << "</text>\n";
             html << "            </g>\n";
         }
 
@@ -718,8 +814,10 @@ bool WriteTreemapHtml(
     html << "</html>\n";
 
     std::ofstream output(std::filesystem::path(output_path), std::ios::binary);
-    if (!output) {
-        if (error) {
+    if (!output)
+    {
+        if (error)
+        {
             *error = L"Failed to open treemap output file.";
         }
         return false;
@@ -727,8 +825,10 @@ bool WriteTreemapHtml(
 
     const std::string text = html.str();
     output.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!output.good()) {
-        if (error) {
+    if (!output.good())
+    {
+        if (error)
+        {
             *error = L"Failed while writing treemap output.";
         }
         return false;

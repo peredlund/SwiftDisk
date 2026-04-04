@@ -7,9 +7,11 @@
 
 #include "common/file_tree.h"
 
-namespace space_scanner::visualization {
+namespace space_scanner::visualization
+{
 
-struct TreemapLayoutOptions {
+struct TreemapLayoutOptions
+{
     double width = 1600.0;
     double height = 900.0;
     double tile_padding = 2.0;
@@ -23,13 +25,15 @@ struct TreemapLayoutOptions {
     size_t max_rectangles = 4000;
 };
 
-struct TreemapDocumentInfo {
+struct TreemapDocumentInfo
+{
     std::wstring scan_path;
     std::wstring backend_name;
     double elapsed_seconds = 0.0;
 };
 
-struct TreemapRect {
+struct TreemapRect
+{
     uint64_t node_id = 0;
     uint64_t size = 0;
     size_t depth = 0;
@@ -49,7 +53,8 @@ struct TreemapRect {
     std::string text_plate_color;
 };
 
-struct TreemapVisualStyle {
+struct TreemapVisualStyle
+{
     std::string fill_color;
     std::string label_text_color;
     std::string secondary_text_color;

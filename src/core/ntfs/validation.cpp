@@ -10,17 +10,22 @@
 #include <sstream>
 #include <utility>
 
-namespace space_scanner::ntfs {
+namespace space_scanner::ntfs
+{
 
-namespace {
+namespace
+{
 
 constexpr size_t kMaxMismatchExamples = 64;
 constexpr size_t kMaxEdgeExamplesPerKind = 8;
 constexpr uint64_t kNtfsRecordNumberMask = 0x0000FFFFFFFFFFFFULL;
 
-struct HandleCloser {
-    void operator()(HANDLE handle) const {
-        if (handle && handle != INVALID_HANDLE_VALUE) {
+struct HandleCloser
+{
+    void operator()(HANDLE handle) const
+    {
+        if (handle && handle != INVALID_HANDLE_VALUE)
+        {
             CloseHandle(handle);
         }
     }
@@ -28,7 +33,8 @@ struct HandleCloser {
 
 using UniqueHandle = std::unique_ptr<void, HandleCloser>;
 
-struct Win32EntryInfo {
+struct Win32EntryInfo
+{
     bool is_dir = false;
     bool is_sparse = false;
     bool is_compressed = false;
@@ -42,43 +48,53 @@ struct Win32EntryInfo {
     std::wstring name;
 };
 
-uint64_t FileId128Low64(const FILE_ID_128& file_id) {
+uint64_t FileId128Low64(const FILE_ID_128& file_id)
+{
     uint64_t value = 0;
     std::memcpy(&value, &file_id, sizeof(value));
     return value;
 }
 
-uint64_t NormalizeNtfsFileReference(uint64_t file_reference) {
+uint64_t NormalizeNtfsFileReference(uint64_t file_reference)
+{
     // MFT parser stores the 48-bit record number, not the 16-bit sequence.
     return file_reference & kNtfsRecordNumberMask;
 }
 
-bool IsComparableNtfsFileId(const FILE_ID_128& file_id) {
-    for (size_t i = sizeof(uint64_t); i < sizeof(file_id.Identifier); ++i) {
-        if (file_id.Identifier[i] != 0) {
+bool IsComparableNtfsFileId(const FILE_ID_128& file_id)
+{
+    for (size_t i = sizeof(uint64_t); i < sizeof(file_id.Identifier); ++i)
+    {
+        if (file_id.Identifier[i] != 0)
+        {
             return false;
         }
     }
     return true;
 }
 
-std::wstring UInt64ToWide(uint64_t value) {
+std::wstring UInt64ToWide(uint64_t value)
+{
     return std::to_wstring(value);
 }
 
-std::wstring BoolToWide(bool value) {
+std::wstring BoolToWide(bool value)
+{
     return value ? L"true" : L"false";
 }
 
-std::wstring BaseNameFromPath(const std::wstring& path) {
+std::wstring BaseNameFromPath(const std::wstring& path)
+{
     size_t pos = path.find_last_of(L"\\/");
-    if (pos == std::wstring::npos) {
+    if (pos == std::wstring::npos)
+    {
         return path;
     }
     return path.substr(pos + 1);
 }
 
-HANDLE OpenMetadataHandle(const std::wstring& path) {
+HANDLE OpenMetadataHandle(const std::wstring& path)
+{
     return CreateFileW(
         path.c_str(),
         FILE_READ_ATTRIBUTES,
@@ -89,8 +105,10 @@ HANDLE OpenMetadataHandle(const std::wstring& path) {
         nullptr);
 }
 
-bool QueryComparableNtfsIds(HANDLE handle, uint64_t* out_frn, uint64_t* out_parent_frn) {
-    if (!handle || handle == INVALID_HANDLE_VALUE || !out_frn || !out_parent_frn) {
+bool QueryComparableNtfsIds(HANDLE handle, uint64_t* out_frn, uint64_t* out_parent_frn)
+{
+    if (!handle || handle == INVALID_HANDLE_VALUE || !out_frn || !out_parent_frn)
+    {
         return false;
     }
 
@@ -108,26 +126,31 @@ bool QueryComparableNtfsIds(HANDLE handle, uint64_t* out_frn, uint64_t* out_pare
             buffer.data(),
             static_cast<DWORD>(buffer.size()),
             &bytes_returned,
-            nullptr)) {
+            nullptr))
+    {
         return false;
     }
 
-    if (bytes_returned < sizeof(USN_RECORD_COMMON_HEADER)) {
+    if (bytes_returned < sizeof(USN_RECORD_COMMON_HEADER))
+    {
         return false;
     }
 
     auto* header = reinterpret_cast<const USN_RECORD_COMMON_HEADER*>(buffer.data());
-    if (header->MajorVersion == 2 && bytes_returned >= sizeof(USN_RECORD_V2)) {
+    if (header->MajorVersion == 2 && bytes_returned >= sizeof(USN_RECORD_V2))
+    {
         auto* record = reinterpret_cast<const USN_RECORD_V2*>(buffer.data());
         *out_frn = NormalizeNtfsFileReference(record->FileReferenceNumber);
         *out_parent_frn = NormalizeNtfsFileReference(record->ParentFileReferenceNumber);
         return true;
     }
 
-    if (header->MajorVersion == 3 && bytes_returned >= sizeof(USN_RECORD_V3)) {
+    if (header->MajorVersion == 3 && bytes_returned >= sizeof(USN_RECORD_V3))
+    {
         auto* record = reinterpret_cast<const USN_RECORD_V3*>(buffer.data());
         if (!IsComparableNtfsFileId(record->FileReferenceNumber) ||
-            !IsComparableNtfsFileId(record->ParentFileReferenceNumber)) {
+            !IsComparableNtfsFileId(record->ParentFileReferenceNumber))
+        {
             return false;
         }
         *out_frn = NormalizeNtfsFileReference(FileId128Low64(record->FileReferenceNumber));
@@ -138,20 +161,25 @@ bool QueryComparableNtfsIds(HANDLE handle, uint64_t* out_frn, uint64_t* out_pare
     return false;
 }
 
-bool DetectNamedStreams(const std::wstring& path, bool is_dir) {
-    if (is_dir) {
+bool DetectNamedStreams(const std::wstring& path, bool is_dir)
+{
+    if (is_dir)
+    {
         return false;
     }
 
     WIN32_FIND_STREAM_DATA stream_data = {};
     HANDLE stream_handle = FindFirstStreamW(path.c_str(), FindStreamInfoStandard, &stream_data, 0);
-    if (stream_handle == INVALID_HANDLE_VALUE) {
+    if (stream_handle == INVALID_HANDLE_VALUE)
+    {
         return false;
     }
 
     bool has_ads = false;
-    do {
-        if (wcscmp(stream_data.cStreamName, L"::$DATA") != 0) {
+    do
+    {
+        if (wcscmp(stream_data.cStreamName, L"::$DATA") != 0)
+        {
             has_ads = true;
             break;
         }
@@ -161,18 +189,22 @@ bool DetectNamedStreams(const std::wstring& path, bool is_dir) {
     return has_ads;
 }
 
-bool QueryPathInfo(const std::wstring& path, Win32EntryInfo* out_info) {
-    if (!out_info) {
+bool QueryPathInfo(const std::wstring& path, Win32EntryInfo* out_info)
+{
+    if (!out_info)
+    {
         return false;
     }
 
     UniqueHandle handle(OpenMetadataHandle(path));
-    if (!handle || handle.get() == INVALID_HANDLE_VALUE) {
+    if (!handle || handle.get() == INVALID_HANDLE_VALUE)
+    {
         return false;
     }
 
     BY_HANDLE_FILE_INFORMATION info = {};
-    if (!GetFileInformationByHandle(static_cast<HANDLE>(handle.get()), &info)) {
+    if (!GetFileInformationByHandle(static_cast<HANDLE>(handle.get()), &info))
+    {
         return false;
     }
 
@@ -198,11 +230,14 @@ void AddMismatch(
     const std::wstring& path,
     const std::wstring& field,
     const std::wstring& expected,
-    const std::wstring& actual) {
-    if (!report) {
+    const std::wstring& actual)
+{
+    if (!report)
+    {
         return;
     }
-    if (report->mismatches.size() >= kMaxMismatchExamples) {
+    if (report->mismatches.size() >= kMaxMismatchExamples)
+    {
         return;
     }
 
@@ -215,52 +250,64 @@ void AddMismatch(
     report->mismatches.push_back(std::move(mismatch));
 }
 
-void AddEdgeExample(std::vector<std::wstring>* examples, const std::wstring& path, const std::wstring& detail) {
-    if (!examples || examples->size() >= kMaxEdgeExamplesPerKind) {
+void AddEdgeExample(std::vector<std::wstring>* examples, const std::wstring& path, const std::wstring& detail)
+{
+    if (!examples || examples->size() >= kMaxEdgeExamplesPerKind)
+    {
         return;
     }
-    if (detail.empty()) {
+    if (detail.empty())
+    {
         examples->push_back(path);
-    } else {
+    }
+    else
+    {
         examples->push_back(path + L" [" + detail + L"]");
     }
 }
 
-std::vector<const Node*> CollectSortedNodes(const FileTree& tree, bool files_only) {
+std::vector<const Node*> CollectSortedNodes(const FileTree& tree, bool files_only)
+{
     std::vector<const Node*> nodes = tree.GetAllNodes();
     nodes.erase(
         std::remove_if(
             nodes.begin(),
             nodes.end(),
-            [&](const Node* node) {
-                if (!node || node->id == tree.RootId()) {
+            [&](const Node* node)
+            {
+                if (!node || node->id == tree.RootId())
+                {
                     return true;
                 }
                 return files_only && node->is_dir;
             }),
         nodes.end());
 
-    std::sort(nodes.begin(), nodes.end(), [](const Node* left, const Node* right) {
-        return left->id < right->id;
-    });
+    std::sort(nodes.begin(), nodes.end(), [](const Node* left, const Node* right)
+              { return left->id < right->id; });
 
     return nodes;
 }
 
-std::vector<const Node*> SampleEvenly(const std::vector<const Node*>& nodes, size_t sample_size) {
-    if (nodes.empty() || sample_size == 0) {
+std::vector<const Node*> SampleEvenly(const std::vector<const Node*>& nodes, size_t sample_size)
+{
+    if (nodes.empty() || sample_size == 0)
+    {
         return {};
     }
-    if (nodes.size() <= sample_size) {
+    if (nodes.size() <= sample_size)
+    {
         return nodes;
     }
-    if (sample_size == 1) {
+    if (sample_size == 1)
+    {
         return {nodes[nodes.size() / 2]};
     }
 
     std::vector<const Node*> sample;
     sample.reserve(sample_size);
-    for (size_t i = 0; i < sample_size; ++i) {
+    for (size_t i = 0; i < sample_size; ++i)
+    {
         size_t index = (i * (nodes.size() - 1)) / (sample_size - 1);
         sample.push_back(nodes[index]);
     }
@@ -275,9 +322,12 @@ bool ValidateVolumeWithWin32(
     size_t sample_size,
     size_t edge_scan_limit,
     ValidationReport* out_report,
-    std::wstring* error) {
-    if (!out_report) {
-        if (error) {
+    std::wstring* error)
+{
+    if (!out_report)
+    {
+        if (error)
+        {
             *error = L"ValidationReport is null.";
         }
         return false;
@@ -292,41 +342,50 @@ bool ValidateVolumeWithWin32(
     report.sample_file_candidates = files.size();
 
     std::vector<const Node*> sample = SampleEvenly(files, sample_size);
-    for (const Node* node : sample) {
-        if (!node) {
+    for (const Node* node : sample)
+    {
+        if (!node)
+        {
             continue;
         }
 
         std::wstring path = tree.BuildPath(node->id);
         Win32EntryInfo win32_info;
-        if (!QueryPathInfo(path, &win32_info)) {
+        if (!QueryPathInfo(path, &win32_info))
+        {
             report.missing_paths++;
             AddMismatch(&report, *node, path, L"path", L"accessible", L"missing_or_unopenable");
             continue;
         }
 
         report.sampled_files_checked++;
-        if (win32_info.has_comparable_ids) {
+        if (win32_info.has_comparable_ids)
+        {
             report.sampled_files_with_comparable_ids++;
         }
 
-        if (win32_info.size != node->size) {
+        if (win32_info.size != node->size)
+        {
             report.size_mismatches++;
             AddMismatch(&report, *node, path, L"size", UInt64ToWide(node->size), UInt64ToWide(win32_info.size));
         }
-        if (win32_info.has_comparable_ids && win32_info.parent_frn != node->parent_id) {
+        if (win32_info.has_comparable_ids && win32_info.parent_frn != node->parent_id)
+        {
             report.parent_mismatches++;
             AddMismatch(&report, *node, path, L"parent_frn", UInt64ToWide(node->parent_id), UInt64ToWide(win32_info.parent_frn));
         }
-        if (win32_info.name != node->name) {
+        if (win32_info.name != node->name)
+        {
             report.name_mismatches++;
             AddMismatch(&report, *node, path, L"name", node->name, win32_info.name);
         }
-        if (win32_info.is_dir != node->is_dir) {
+        if (win32_info.is_dir != node->is_dir)
+        {
             report.type_mismatches++;
             AddMismatch(&report, *node, path, L"is_dir", BoolToWide(node->is_dir), BoolToWide(win32_info.is_dir));
         }
-        if (win32_info.has_comparable_ids && win32_info.frn != node->id) {
+        if (win32_info.has_comparable_ids && win32_info.frn != node->id)
+        {
             report.frn_mismatches++;
             AddMismatch(&report, *node, path, L"frn", UInt64ToWide(node->id), UInt64ToWide(win32_info.frn));
         }
@@ -334,37 +393,45 @@ bool ValidateVolumeWithWin32(
 
     std::vector<const Node*> entries = CollectSortedNodes(tree, false);
     size_t inspect_limit = std::min(edge_scan_limit, entries.size());
-    for (size_t i = 0; i < inspect_limit; ++i) {
+    for (size_t i = 0; i < inspect_limit; ++i)
+    {
         const Node* node = entries[i];
-        if (!node) {
+        if (!node)
+        {
             continue;
         }
 
         std::wstring path = tree.BuildPath(node->id);
         Win32EntryInfo win32_info;
-        if (!QueryPathInfo(path, &win32_info)) {
+        if (!QueryPathInfo(path, &win32_info))
+        {
             continue;
         }
 
         report.edge_cases.entries_inspected++;
 
-        if (win32_info.hard_link_count > 1) {
+        if (win32_info.hard_link_count > 1)
+        {
             report.edge_cases.hard_link_entries++;
             AddEdgeExample(&report.edge_cases.hard_link_examples, path, L"links=" + UInt64ToWide(win32_info.hard_link_count));
         }
-        if (win32_info.is_sparse) {
+        if (win32_info.is_sparse)
+        {
             report.edge_cases.sparse_entries++;
             AddEdgeExample(&report.edge_cases.sparse_examples, path, L"sparse");
         }
-        if (win32_info.is_compressed) {
+        if (win32_info.is_compressed)
+        {
             report.edge_cases.compressed_entries++;
             AddEdgeExample(&report.edge_cases.compressed_examples, path, L"compressed");
         }
-        if (win32_info.is_reparse) {
+        if (win32_info.is_reparse)
+        {
             report.edge_cases.reparse_entries++;
             AddEdgeExample(&report.edge_cases.reparse_examples, path, L"reparse");
         }
-        if (win32_info.has_ads) {
+        if (win32_info.has_ads)
+        {
             report.edge_cases.ads_entries++;
             AddEdgeExample(&report.edge_cases.ads_examples, path, L"ads");
         }
