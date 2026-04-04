@@ -283,8 +283,8 @@ std::vector<const Node*> CollectSortedNodes(const FileTree& tree, bool files_onl
             }),
         nodes.end());
 
-    std::sort(nodes.begin(), nodes.end(), [](const Node* left, const Node* right)
-              { return left->id < right->id; });
+    std::sort(nodes.begin(), nodes.end(),
+        [](const Node* left, const Node* right) { return left->id < right->id; });
 
     return nodes;
 }

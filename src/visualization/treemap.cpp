@@ -347,14 +347,15 @@ std::vector<LayoutItem> CollectChildren(
         filtered.push_back(std::move(aggregate));
     }
 
-    std::sort(filtered.begin(), filtered.end(), [](const LayoutItem& left, const LayoutItem& right)
-              {
-                  if (left.size != right.size)
-                  {
-                      return left.size > right.size;
-                  }
-                  return left.label < right.label;
-              });
+    std::sort(filtered.begin(), filtered.end(), 
+        [](const LayoutItem& left, const LayoutItem& right)
+        {
+            if (left.size != right.size)
+            {
+                return left.size > right.size;
+            }
+            return left.label < right.label;
+        });
     return filtered;
 }
 

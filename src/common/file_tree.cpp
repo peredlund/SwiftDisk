@@ -121,8 +121,8 @@ void FileTree::Finalize()
         ids.push_back(entry.first);
     }
 
-    std::sort(ids.begin(), ids.end(), [&](uint64_t a, uint64_t b)
-              { return GetDepth(a, depth_cache) > GetDepth(b, depth_cache); });
+    std::sort(ids.begin(), ids.end(), 
+        [&](uint64_t a, uint64_t b) { return GetDepth(a, depth_cache) > GetDepth(b, depth_cache); });
 
     for (uint64_t id : ids)
     {
@@ -267,8 +267,8 @@ std::vector<const Node*> FileTree::TopN(size_t n) const
         nodes.push_back(&entry.second);
     }
 
-    std::sort(nodes.begin(), nodes.end(), [](const Node* a, const Node* b)
-              { return a->size > b->size; });
+    std::sort(nodes.begin(), nodes.end(), 
+        [](const Node* a, const Node* b) { return a->size > b->size; });
 
     if (nodes.size() > n)
     {
