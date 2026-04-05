@@ -58,6 +58,34 @@ struct SharedScanState
     std::unique_ptr<ScanPayload> pending_payload;
 };
 
+bool VolumeExists(wchar_t drive_letter)
+{
+    wchar_t root_path[] = {drive_letter, L':', L'\\', L'\0'};
+    return GetDriveTypeW(root_path) != DRIVE_NO_ROOT_DIR;
+}
+
+std::wstring NormalizeScanPath(const std::wstring& path)
+{
+    if (path.size() == 2 &&
+        ((path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z')) &&
+        path[1] == L':')
+    {
+        return path + L'\\';
+    }
+
+    return path;
+}
+
+std::wstring GetDefaultPathFieldValue()
+{
+    if (VolumeExists(L'C'))
+    {
+        return L"C:";
+    }
+
+    return {};
+}
+
 bool TryGetVolumeRoot(const std::wstring& path, std::wstring* volume_root)
 {
     if (!volume_root || path.empty())
@@ -129,6 +157,7 @@ GuiOptions ParseOptions()
     }
 
     LocalFree(argv);
+    options.path = NormalizeScanPath(options.path);
     return options;
 }
 
@@ -363,11 +392,12 @@ class MainWindow
     void CreateHeaderControls()
     {
         HFONT gui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        const std::wstring initial_path = m_options.path.empty() ? GetDefaultPathFieldValue() : m_options.path;
 
         m_path_edit = CreateWindowExW(
             WS_EX_CLIENTEDGE,
             L"EDIT",
-            m_options.path.c_str(),
+            initial_path.c_str(),
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
             0,
             0,
@@ -666,7 +696,7 @@ class MainWindow
             return;
         }
 
-        m_options.path = path;
+        m_options.path = NormalizeScanPath(path);
         m_requested_path_is_ntfs = IsNtfsPath(m_options.path);
         StartScan();
     }
