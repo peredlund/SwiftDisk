@@ -65,8 +65,7 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
 TreemapVisualStyle BuildTreemapVisualStyle(
     const std::wstring& label,
     const std::wstring& path,
-    bool is_dir,
-    size_t depth);
+    bool is_dir);
 
 bool WriteTreemapHtml(
     const std::wstring& output_path,

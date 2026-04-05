@@ -1183,16 +1183,14 @@ namespace space_scanner::gui
                 if (i == 0 && truncated)
                 {
                     text = L"...\\" + text;
-                }
-                strip.text = text + L" - " + HumanizeBytes(node->size);
+            }
+            strip.text = text + L" - " + HumanizeBytes(node->size);
 
-                const std::wstring path = m_tree->BuildPath(node_id);
-                const size_t depth = start_index + i;
-                strip.style = visualization::BuildTreemapVisualStyle(
-                    node->name.empty() ? path : node->name,
-                    path,
-                    true,
-                    depth);
+            const std::wstring path = m_tree->BuildPath(node_id);
+            strip.style = visualization::BuildTreemapVisualStyle(
+                node->name.empty() ? path : node->name,
+                path,
+                true);
                 m_breadcrumbs.push_back(std::move(strip));
                 nested_rect = m_breadcrumbs.back().content_rect;
             }
@@ -1502,11 +1500,10 @@ namespace space_scanner::gui
                 : (m_options.path.empty() ? L"(no path selected)" : m_options.path);
             const std::wstring focused_size = focused_node ? HumanizeBytes(focused_node->size) : L"-";
 
-            const visualization::TreemapVisualStyle frame_style = visualization::BuildTreemapVisualStyle(
-                focused_name,
-                focused_path,
-                true,
-                0);
+        const visualization::TreemapVisualStyle frame_style = visualization::BuildTreemapVisualStyle(
+            focused_name,
+            focused_path,
+            true);
             if (m_breadcrumbs.empty())
             {
                 const D2D1_RECT_F shadow_rect = D2D1::RectF(
@@ -1574,17 +1571,27 @@ namespace space_scanner::gui
                         m_render_target->DrawRectangle(glow_rect, m_active_level_glow_brush.Get(), 5.5f);
                     }
 
-                    m_header_action_brush->SetColor(ParseHexColor(strip.style.fill_color, 0.88f));
-                    m_render_target->FillRectangle(left_slice_rect, m_header_action_brush.Get());
-                    m_render_target->FillRectangle(right_slice_rect, m_header_action_brush.Get());
-                    m_render_target->FillRectangle(bottom_slice_rect, m_header_action_brush.Get());
+                m_header_action_brush->SetColor(ParseHexColor(strip.style.fill_color, 0.88f));
+                m_render_target->FillRectangle(left_slice_rect, m_header_action_brush.Get());
+                m_render_target->FillRectangle(right_slice_rect, m_header_action_brush.Get());
+                m_render_target->FillRectangle(bottom_slice_rect, m_header_action_brush.Get());
 
-                    m_header_action_brush->SetColor(ParseHexColor(strip.style.fill_color));
-                    m_render_target->FillRectangle(strip.rect, m_header_action_brush.Get());
-                    m_render_target->DrawRectangle(
-                        strip.rect,
-                        is_hovered ? m_hover_brush.Get() : m_border_brush.Get(),
-                        is_hovered ? 1.6f : 0.9f);
+                m_header_action_brush->SetColor(ParseHexColor(strip.style.fill_color));
+                m_render_target->FillRectangle(strip.rect, m_header_action_brush.Get());
+                m_tile_text_plate_brush->SetColor(ParseHexColor(strip.style.text_plate_color, 0.42f));
+                const D2D1_ROUNDED_RECT strip_plate_rect = D2D1::RoundedRect(
+                    D2D1::RectF(
+                        strip.rect.left + 1.0f,
+                        strip.rect.top + 1.0f,
+                        std::max(strip.rect.left + 2.0f, strip.rect.right - 1.0f),
+                        std::max(strip.rect.top + 2.0f, strip.rect.bottom - 1.0f)),
+                    2.0f,
+                    2.0f);
+                m_render_target->FillRoundedRectangle(strip_plate_rect, m_tile_text_plate_brush.Get());
+                m_render_target->DrawRectangle(
+                    strip.rect,
+                    is_hovered ? m_hover_brush.Get() : m_border_brush.Get(),
+                    is_hovered ? 1.6f : 0.9f);
                     if (is_active_level)
                     {
                         m_render_target->DrawRectangle(strip.frame_rect, m_hover_brush.Get(), 2.8f);
@@ -1600,6 +1607,9 @@ namespace space_scanner::gui
                         m_tile_text_outline_brush.Get());
                 }
             }
+
+            m_tile_brush->SetColor(ParseHexColor(frame_style.fill_color));
+            m_render_target->FillRectangle(m_treemap_content_rect, m_tile_brush.Get());
 
             for (size_t index = 0; index < m_rects.size(); ++index)
             {

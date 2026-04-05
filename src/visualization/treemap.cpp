@@ -278,7 +278,7 @@ TextPalette TextColorsForFill(std::string_view fill_color)
     return {"#102033", "#102033", "#f8fbff", "#f8fbff"};
 }
 
-std::string ColorForItem(const LayoutItem& item, size_t depth)
+std::string ColorForItem(const LayoutItem& item)
 {
     const uint64_t hash = HashPath(item.path.empty() ? item.label : item.path);
     const uint32_t base = static_cast<uint32_t>(hash & 0x00FFFFFFu);
@@ -287,12 +287,11 @@ std::string ColorForItem(const LayoutItem& item, size_t depth)
     uint32_t green = 64u + ((base >> 8) & 0x7Fu);
     uint32_t blue = 64u + (base & 0x7Fu);
 
-    const uint32_t depth_boost = static_cast<uint32_t>(std::min<size_t>(depth * 8, 48));
     if (item.is_dir)
     {
-        red = std::min<uint32_t>(red + 18u + depth_boost / 2u, 220u);
-        green = std::min<uint32_t>(green + 14u + depth_boost / 2u, 220u);
-        blue = std::min<uint32_t>(blue + 10u + depth_boost / 3u, 220u);
+        red = std::min<uint32_t>(red + 18u, 220u);
+        green = std::min<uint32_t>(green + 14u, 220u);
+        blue = std::min<uint32_t>(blue + 10u, 220u);
     }
     else
     {
@@ -417,7 +416,7 @@ void EmitNodeRect(
     rect.is_dir = item.is_dir;
     rect.label = item.label;
     rect.path = item.path;
-    const TreemapVisualStyle style = BuildTreemapVisualStyle(item.label, item.path, item.is_dir, depth);
+    const TreemapVisualStyle style = BuildTreemapVisualStyle(item.label, item.path, item.is_dir);
     rect.fill_color = style.fill_color;
     rect.label_text_color = style.label_text_color;
     rect.secondary_text_color = style.secondary_text_color;
@@ -787,8 +786,7 @@ std::string TooltipText(const TreemapRect& rect, uint64_t root_size)
 TreemapVisualStyle BuildTreemapVisualStyle(
     const std::wstring& label,
     const std::wstring& path,
-    bool is_dir,
-    size_t depth)
+    bool is_dir)
 {
     LayoutItem item;
     item.label = label;
@@ -796,7 +794,7 @@ TreemapVisualStyle BuildTreemapVisualStyle(
     item.is_dir = is_dir;
 
     TreemapVisualStyle style;
-    style.fill_color = ColorForItem(item, depth);
+    style.fill_color = ColorForItem(item);
     const TextPalette palette = TextColorsForFill(style.fill_color);
     style.label_text_color = palette.primary;
     style.secondary_text_color = palette.secondary;
