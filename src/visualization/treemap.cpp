@@ -57,6 +57,7 @@ struct SelectionState
 {
     uint64_t parent_size = 0;
     size_t child_depth = 0;
+    size_t expansion_bonus = 0;
     size_t next_child_index = 0;
     size_t visible_child_count = 0;
 };
@@ -303,6 +304,11 @@ std::string ColorForItem(const LayoutItem& item)
     return HexColor((red << 16) | (green << 8) | blue);
 }
 
+bool IsExpandedNode(const std::unordered_set<uint64_t>& expanded_nodes, uint64_t node_id)
+{
+    return expanded_nodes.find(node_id) != expanded_nodes.end();
+}
+
 /**
  Collects a directory's real children, drops duplicate ids, ignores zero-sized
  nodes, and sorts the result by descending size.
@@ -536,6 +542,12 @@ void PushNextCandidate(
     }
 
     SelectionState& state = state_it->second;
+    const size_t visible_limit = options.max_depth + state.expansion_bonus;
+    if (state.child_depth > visible_limit)
+    {
+        return;
+    }
+
     if (options.max_children_per_directory > 0 &&
         state.visible_child_count >= options.max_children_per_directory)
     {
@@ -578,8 +590,10 @@ void EmitVisibleSubtree(
     uint64_t root_id,
     uint64_t node_id,
     size_t depth,
+    size_t expansion_bonus,
     const Bounds& bounds,
     const TreemapLayoutOptions& options,
+    const std::unordered_set<uint64_t>& expanded_nodes,
     const std::unordered_map<uint64_t, size_t>& visible_child_counts,
     const std::unordered_map<uint64_t, ChildCollection>& children_cache,
     std::vector<TreemapRect>* rects)
@@ -603,13 +617,14 @@ void EmitVisibleSubtree(
         return;
     }
 
-    if (depth >= options.max_depth)
+    if (bounds.width < options.minimum_child_side ||
+        bounds.height < options.minimum_child_side + options.directory_header_height)
     {
         return;
     }
 
-    if (bounds.width < options.minimum_child_side ||
-        bounds.height < options.minimum_child_side + options.directory_header_height)
+    const size_t child_depth = depth + 1;
+    if (child_depth > options.max_depth + expansion_bonus)
     {
         return;
     }
@@ -657,7 +672,6 @@ void EmitVisibleSubtree(
         return;
     }
 
-    const size_t child_depth = (node_id == root_id) ? 0 : depth + 1;
     std::vector<PositionedItem> positioned;
     positioned.reserve(layout_items.size());
     CollectItemBounds(layout_items, 0, layout_items.size(), child_depth, inner, &positioned);
@@ -674,8 +688,10 @@ void EmitVisibleSubtree(
             root_id,
             positioned_item.item->node_id,
             positioned_item.depth,
+            expansion_bonus + (IsExpandedNode(expanded_nodes, positioned_item.item->node_id) ? 1u : 0u),
             positioned_item.bounds,
             options,
+            expanded_nodes,
             visible_child_counts,
             children_cache,
             rects);
@@ -691,6 +707,12 @@ void EmitVisibleSubtree(
  and breadcrumb chrome. This helper therefore lays out only the root's visible
  children, while still reserving space for omitted descendants through the same
  hidden-placeholder mechanism used deeper in the tree.
+
+ Expanded-path bonuses are intentionally not applied to the current view root
+ itself. Clicking into a directory should reveal only the next absolute level.
+ For the root's visible children, however, the child's own remembered expansion
+ must apply immediately so that navigating back to an intermediate ancestor
+ still shows the deepest level previously revealed along that path.
  **/
 void EmitVisibleChildren(
     const FileTree& tree,
@@ -698,6 +720,7 @@ void EmitVisibleChildren(
     size_t depth,
     const Bounds& bounds,
     const TreemapLayoutOptions& options,
+    const std::unordered_set<uint64_t>& expanded_nodes,
     const std::unordered_map<uint64_t, size_t>& visible_child_counts,
     const std::unordered_map<uint64_t, ChildCollection>& children_cache,
     std::vector<TreemapRect>* rects)
@@ -755,8 +778,10 @@ void EmitVisibleChildren(
             root_id,
             positioned_item.item->node_id,
             positioned_item.depth,
+            IsExpandedNode(expanded_nodes, positioned_item.item->node_id) ? 1u : 0u,
             positioned_item.bounds,
             options,
+            expanded_nodes,
             visible_child_counts,
             children_cache,
             rects);
@@ -816,7 +841,10 @@ TreemapVisualStyle BuildTreemapVisualStyle(
    4. Repeatedly take the largest candidate from that heap until the rectangle
       budget is exhausted. Selecting a child spends one rectangle from the budget.
       If that child is a directory and depth permits, it starts contributing its
-      own children as future candidates.
+      own children as future candidates. Nodes listed in
+      `options.expanded_node_ids` add one extra reveal level once they appear as
+      descendants inside an ancestor view, so only the explicitly expanded paths
+      can drill deeper than the base depth.
    5. After the visible child counts are chosen, emit the actual rectangles in a
       second pass. The current view root emits only its visible children directly
       into the treemap bounds, while deeper directories emit themselves first and
@@ -848,6 +876,9 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
 
     std::unordered_map<uint64_t, ChildCollection> children_cache;
     children_cache.reserve(std::min<size_t>(options.max_rectangles, 512));
+    const std::unordered_set<uint64_t> expanded_nodes(
+        options.expanded_node_ids.begin(),
+        options.expanded_node_ids.end());
 
     std::unordered_map<uint64_t, SelectionState> selection_states;
     selection_states.reserve(std::min<size_t>(options.max_rectangles, 512));
@@ -862,6 +893,7 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
         SelectionState root_state;
         root_state.parent_size = root->size;
         root_state.child_depth = 0;
+        root_state.expansion_bonus = 0;
         selection_states.emplace(root_id, root_state);
         PushNextCandidate(tree, root_id, options, &selection_states, &children_cache, &candidates);
 
@@ -901,7 +933,15 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
             // competing globally for more visible rectangles.
             PushNextCandidate(tree, candidate.parent_id, options, &selection_states, &children_cache, &candidates);
 
-            if (!child.is_dir || state.child_depth >= options.max_depth)
+            if (!child.is_dir)
+            {
+                continue;
+            }
+
+            const size_t child_expansion_bonus =
+                state.expansion_bonus + (IsExpandedNode(expanded_nodes, child.node_id) ? 1u : 0u);
+            const size_t next_child_depth = state.child_depth + 1;
+            if (next_child_depth > options.max_depth + child_expansion_bonus)
             {
                 continue;
             }
@@ -910,7 +950,8 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
             // own largest child as the next possible expansion.
             SelectionState child_state;
             child_state.parent_size = child.size;
-            child_state.child_depth = state.child_depth + 1;
+            child_state.child_depth = next_child_depth;
+            child_state.expansion_bonus = child_expansion_bonus;
             selection_states.emplace(child.node_id, child_state);
             PushNextCandidate(tree, child.node_id, options, &selection_states, &children_cache, &candidates);
         }
@@ -934,6 +975,7 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
         0,
         root_bounds,
         options,
+        expanded_nodes,
         visible_child_counts,
         children_cache,
         &rects);

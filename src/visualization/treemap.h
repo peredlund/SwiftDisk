@@ -23,6 +23,7 @@ struct TreemapLayoutOptions
     size_t max_depth = 6;
     size_t max_children_per_directory = 0;
     size_t max_rectangles = 4000;
+    std::vector<uint64_t> expanded_node_ids;
 };
 
 struct TreemapDocumentInfo

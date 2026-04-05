@@ -15,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -709,6 +710,7 @@ namespace space_scanner::gui
                 if (TryGetDepthLimitFromEdit(&depth_limit) && depth_limit != m_max_depth)
                 {
                     m_max_depth = depth_limit;
+                    m_expanded_reveal_nodes.clear();
                     if (m_tree && !m_scan_in_progress)
                     {
                         RebuildLayout();
@@ -842,6 +844,7 @@ namespace space_scanner::gui
             m_tree_stats = m_tree->ComputeStats();
             m_used_mft_scan = payload->used_mft_scan;
             m_view_root_id = m_tree->RootId();
+            m_expanded_reveal_nodes.clear();
             m_has_error = false;
             m_error_text.clear();
             m_status_text = L"Ready";
@@ -1208,12 +1211,19 @@ namespace space_scanner::gui
 
             const float width = std::max(m_treemap_content_rect.right - m_treemap_content_rect.left, 1.0f);
             const float height = std::max(m_treemap_content_rect.bottom - m_treemap_content_rect.top, 1.0f);
+            const size_t current_root_depth = GetAbsoluteNodeDepth(m_view_root_id);
+            const size_t base_visible_depth = static_cast<size_t>(std::max(m_max_depth, 0));
+            const size_t local_depth_limit =
+                current_root_depth < base_visible_depth
+                    ? (base_visible_depth - current_root_depth - 1)
+                    : 0;
             m_layout_options.width = width;
             m_layout_options.height = height;
-            m_layout_options.max_depth = static_cast<size_t>(std::max(0, m_max_depth - 1));
+            m_layout_options.max_depth = local_depth_limit;
             m_layout_options.max_rectangles = 20000;
             m_layout_options.max_children_per_directory = 0;
             m_layout_options.minimum_child_ratio = 0.0;
+            m_layout_options.expanded_node_ids.assign(m_expanded_reveal_nodes.begin(), m_expanded_reveal_nodes.end());
             //m_layout_options.max_rectangles = 5000;
             //m_layout_options.max_children_per_directory = 56;
             //m_layout_options.minimum_child_ratio = 0.0015;
@@ -1306,6 +1316,12 @@ namespace space_scanner::gui
                 return;
             }
 
+            const size_t clicked_depth = GetAbsoluteNodeDepth(rect.node_id);
+            const size_t expanded_ancestor_count = CountExpandedRevealAncestorsExclusive(rect.node_id);
+            if (clicked_depth >= static_cast<size_t>(m_max_depth) + expanded_ancestor_count)
+            {
+                m_expanded_reveal_nodes.insert(rect.node_id);
+            }
             m_view_root_id = rect.node_id;
             RebuildLayout();
             InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -1345,6 +1361,63 @@ namespace space_scanner::gui
         bool CanNavigateUp() const
         {
             return m_tree && m_view_root_id != 0 && m_view_root_id != m_tree->RootId();
+        }
+
+        size_t GetAbsoluteNodeDepth(uint64_t node_id) const
+        {
+            if (!m_tree || node_id == 0)
+            {
+                return 0;
+            }
+
+            const uint64_t root_id = m_tree->RootId();
+            size_t depth = 0;
+            uint64_t current_id = node_id;
+            size_t guard = 0;
+            while (current_id != 0 && current_id != root_id && guard < 1024)
+            {
+                const Node* current = m_tree->GetNode(current_id);
+                if (!current || current->parent_id == 0 || current->parent_id == current_id)
+                {
+                    break;
+                }
+
+                ++depth;
+                current_id = current->parent_id;
+                ++guard;
+            }
+
+            return depth;
+        }
+
+        size_t CountExpandedRevealAncestorsExclusive(uint64_t node_id) const
+        {
+            if (!m_tree || node_id == 0)
+            {
+                return 0;
+            }
+
+            size_t count = 0;
+            const uint64_t root_id = m_tree->RootId();
+            const Node* current = m_tree->GetNode(node_id);
+            size_t guard = 0;
+            while (current && current->parent_id != 0 && current->parent_id != current->id && guard < 1024)
+            {
+                const uint64_t parent_id = current->parent_id;
+                if (m_expanded_reveal_nodes.find(parent_id) != m_expanded_reveal_nodes.end())
+                {
+                    ++count;
+                }
+                if (parent_id == root_id)
+                {
+                    break;
+                }
+
+                current = m_tree->GetNode(parent_id);
+                ++guard;
+            }
+
+            return count;
         }
 
         void OnKeyDown(UINT key_code)
@@ -1982,6 +2055,7 @@ namespace space_scanner::gui
         std::unique_ptr<FileTree> m_tree;
         visualization::TreemapLayoutOptions m_layout_options;
         std::vector<visualization::TreemapRect> m_rects;
+        std::unordered_set<uint64_t> m_expanded_reveal_nodes;
         std::vector<BreadcrumbStrip> m_breadcrumbs;
         D2D1_RECT_F m_canvas_rect = D2D1::RectF(0, 0, 0, 0);
         D2D1_RECT_F m_treemap_content_rect = D2D1::RectF(0, 0, 0, 0);
