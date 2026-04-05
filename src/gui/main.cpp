@@ -1570,22 +1570,43 @@ class MainWindow
             const bool is_hovered = static_cast<int>(index) == m_hovered_index;
             ID2D1Brush* border_brush = is_hovered ? m_hover_brush.Get() : m_border_brush.Get();
             const float stroke_width = is_hovered ? 2.0f : 0.75f;
-            m_render_target->DrawRectangle(draw_rect, border_brush, stroke_width);
-
             const float tile_width = draw_rect.right - draw_rect.left;
             const float tile_height = draw_rect.bottom - draw_rect.top;
+            const bool is_view_root = rect.node_id == m_view_root_id;
+            const bool is_directory_header = rect.is_dir && !is_view_root;
+
+            if (is_directory_header && tile_width >= 4.0f && tile_height >= 4.0f)
+            {
+                const float header_height = std::min(
+                    std::max(3.0f, static_cast<float>(m_layout_options.directory_header_height) - 2.0f),
+                    std::max(0.0f, tile_height - 2.0f));
+                if (header_height > 0.0f)
+                {
+                    m_tile_text_plate_brush->SetColor(ParseHexColor(rect.text_plate_color, 0.42f));
+                    const D2D1_ROUNDED_RECT header_rect = D2D1::RoundedRect(
+                        D2D1::RectF(
+                            draw_rect.left + 1.0f,
+                            draw_rect.top + 1.0f,
+                            std::max(draw_rect.left + 2.0f, draw_rect.right - 1.0f),
+                            std::min(draw_rect.bottom - 1.0f, draw_rect.top + 1.0f + header_height)),
+                        2.0f,
+                        2.0f);
+                    m_render_target->FillRoundedRectangle(header_rect, m_tile_text_plate_brush.Get());
+                }
+            }
+
+            m_render_target->DrawRectangle(draw_rect, border_brush, stroke_width);
+
             if (tile_width >= 56.0f && tile_height >= 18.0f)
             {
-                const bool is_view_root = rect.node_id == m_view_root_id;
                 m_tile_text_brush->SetColor(ParseHexColor(rect.label_text_color));
                 m_tile_secondary_text_brush->SetColor(ParseHexColor(rect.secondary_text_color));
                 m_tile_text_outline_brush->SetColor(ParseHexColor(rect.text_outline_color, 0.78f));
                 m_tile_text_plate_brush->SetColor(ParseHexColor(rect.text_plate_color, 0.34f));
 
-                const bool is_directory_header = rect.is_dir && !is_view_root;
                 const bool is_leaf_file = !rect.is_dir;
                 const bool show_label = tile_width >= 92.0f && tile_height >= 34.0f && !is_directory_header;
-                if (!is_leaf_file && !is_view_root)
+                if (!is_leaf_file && !is_view_root && !is_directory_header)
                 {
                     const float plate_height = show_label ? 30.0f : 16.0f;
                     const D2D1_ROUNDED_RECT plate_rect = D2D1::RoundedRect(
