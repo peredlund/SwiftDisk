@@ -726,51 +726,52 @@ class MainWindow
         const HWND hwnd = m_hwnd;
         const std::wstring path = m_options.path;
         const std::shared_ptr<SharedScanState> shared_state = m_shared_scan_state;
-        std::thread([hwnd, path, shared_state]()
+        std::thread(
+            [hwnd, path, shared_state]()
+            {
+                auto payload = std::make_unique<ScanPayload>();
+                payload->path = path;
+                payload->tree = std::make_unique<FileTree>();
+
+                Stopwatch timer;
+                std::wstring error;
+                ntfs::MftScanStats stats;
+                bool ok = false;
+                bool used_mft_scan = false;
+
+                if (IsNtfsPath(path))
+                {
+                    ok = ntfs::ScanPathMft(path, payload->tree.get(), &error, &stats);
+                    used_mft_scan = ok;
+                }
+                else
+                {
+                    ok = ScanDirectory(path, payload->tree.get(), nullptr);
+                    if (ok)
                     {
-                        auto payload = std::make_unique<ScanPayload>();
-                        payload->path = path;
-                        payload->tree = std::make_unique<FileTree>();
+                        payload->tree->Finalize();
+                    }
+                }
 
-                        Stopwatch timer;
-                        std::wstring error;
-                        ntfs::MftScanStats stats;
-                        bool ok = false;
-                        bool used_mft_scan = false;
+                payload->elapsed_seconds = timer.ElapsedSeconds();
+                payload->used_mft_scan = used_mft_scan;
+                if (!ok)
+                {
+                    payload->error = error.empty() ? L"Unknown scan error." : error;
+                    payload->tree.reset();
+                }
 
-                        if (IsNtfsPath(path))
-                        {
-                            ok = ntfs::ScanPathMft(path, payload->tree.get(), &error, &stats);
-                            used_mft_scan = ok;
-                        }
-                        else
-                        {
-                            ok = ScanDirectory(path, payload->tree.get(), nullptr);
-                            if (ok)
-                            {
-                                payload->tree->Finalize();
-                            }
-                        }
+                {
+                    std::lock_guard<std::mutex> lock(shared_state->mutex);
+                    shared_state->pending_payload = std::move(payload);
+                }
 
-                        payload->elapsed_seconds = timer.ElapsedSeconds();
-                        payload->used_mft_scan = used_mft_scan;
-                        if (!ok)
-                        {
-                            payload->error = error.empty() ? L"Unknown scan error." : error;
-                            payload->tree.reset();
-                        }
-
-                        {
-                            std::lock_guard<std::mutex> lock(shared_state->mutex);
-                            shared_state->pending_payload = std::move(payload);
-                        }
-
-                        if (IsWindow(hwnd))
-                        {
-                            PostMessageW(hwnd, ok ? WM_APP_SCAN_COMPLETE : WM_APP_SCAN_FAILED, 0, 0);
-                        }
-                    })
-            .detach();
+                if (IsWindow(hwnd))
+                {
+                    PostMessageW(hwnd, ok ? WM_APP_SCAN_COMPLETE : WM_APP_SCAN_FAILED, 0, 0);
+                }
+            }
+        ).detach();
     }
 
     void ApplyCompletedScan(bool failed)
@@ -1149,7 +1150,6 @@ class MainWindow
                 node->name.empty() ? path : node->name,
                 path,
                 true,
-                false,
                 depth);
             m_breadcrumbs.push_back(std::move(strip));
             nested_rect = m_breadcrumbs.back().content_rect;
@@ -1172,7 +1172,7 @@ class MainWindow
         m_layout_options.height = height;
         m_layout_options.max_depth = static_cast<size_t>(std::max(0, m_max_depth - 1));
         m_layout_options.max_rectangles = 20000;
-        m_layout_options.max_children_per_directory = 256;
+        m_layout_options.max_children_per_directory = 0;
         m_layout_options.minimum_child_ratio = 0.0;
         //m_layout_options.max_rectangles = 5000;
         //m_layout_options.max_children_per_directory = 56;
@@ -1255,7 +1255,7 @@ class MainWindow
         }
 
         const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(hit_index)];
-        if (!rect.is_dir || rect.is_aggregate || rect.node_id == 0 || rect.node_id == m_view_root_id)
+        if (!rect.is_dir || rect.node_id == 0 || rect.node_id == m_view_root_id)
         {
             return;
         }
@@ -1464,7 +1464,6 @@ class MainWindow
             focused_name,
             focused_path,
             true,
-            false,
             0);
         if (m_breadcrumbs.empty())
         {
@@ -1547,15 +1546,16 @@ class MainWindow
             const float tile_height = draw_rect.bottom - draw_rect.top;
             if (tile_width >= 56.0f && tile_height >= 18.0f)
             {
+                const bool is_view_root = rect.node_id == m_view_root_id;
                 m_tile_text_brush->SetColor(ParseHexColor(rect.label_text_color));
                 m_tile_secondary_text_brush->SetColor(ParseHexColor(rect.secondary_text_color));
                 m_tile_text_outline_brush->SetColor(ParseHexColor(rect.text_outline_color, 0.78f));
                 m_tile_text_plate_brush->SetColor(ParseHexColor(rect.text_plate_color, 0.34f));
 
-                const bool is_directory_header = rect.is_dir && !rect.is_aggregate;
-                const bool is_leaf_file = !rect.is_dir && !rect.is_aggregate;
+                const bool is_directory_header = rect.is_dir && !is_view_root;
+                const bool is_leaf_file = !rect.is_dir;
                 const bool show_label = tile_width >= 92.0f && tile_height >= 34.0f && !is_directory_header;
-                if (!is_leaf_file)
+                if (!is_leaf_file && !is_view_root)
                 {
                     const float plate_height = show_label ? 30.0f : 16.0f;
                     const D2D1_ROUNDED_RECT plate_rect = D2D1::RoundedRect(
@@ -1599,7 +1599,7 @@ class MainWindow
                         m_tile_text_outline_brush.Get(),
                         DWRITE_TEXT_ALIGNMENT_TRAILING);
                 }
-                else if (tile_width >= 64.0f && tile_height >= 40.0f)
+                else if (!is_view_root && tile_width >= 64.0f && tile_height >= 40.0f)
                 {
                     const std::wstring size_text = HumanizeBytes(rect.size);
                     const float margin = 6.0f;
@@ -1788,10 +1788,6 @@ class MainWindow
         std::wstringstream footer;
         footer << (rect.path.empty() ? rect.label : rect.path)
                << L"   |   " << HumanizeBytes(rect.size);
-        if (rect.is_aggregate && rect.aggregated_child_count > 0)
-        {
-            footer << L"   |   Aggregated items: " << rect.aggregated_child_count;
-        }
 
         const D2D1_RECT_F footer_rect = D2D1::RectF(
             m_canvas_rect.left + 16.0f,

@@ -9,8 +9,10 @@
 #include <fstream>
 #include <iomanip>
 #include <numeric>
+#include <queue>
 #include <sstream>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -32,11 +34,54 @@ struct LayoutItem
 {
     uint64_t node_id = 0;
     uint64_t size = 0;
-    size_t aggregated_child_count = 0;
     bool is_dir = false;
-    bool is_aggregate = false;
+    bool is_hidden = false;
     std::wstring label;
     std::wstring path;
+};
+
+struct ChildCollection
+{
+    std::vector<LayoutItem> items;
+    uint64_t total_size = 0;
+};
+
+struct PositionedItem
+{
+    const LayoutItem* item = nullptr;
+    Bounds bounds;
+    size_t depth = 0;
+};
+
+struct SelectionState
+{
+    uint64_t parent_size = 0;
+    size_t child_depth = 0;
+    size_t next_child_index = 0;
+    size_t visible_child_count = 0;
+};
+
+struct ChildCandidate
+{
+    uint64_t parent_id = 0;
+    uint64_t size = 0;
+    size_t child_index = 0;
+};
+
+struct ChildCandidateLess
+{
+    bool operator()(const ChildCandidate& left, const ChildCandidate& right) const
+    {
+        if (left.size != right.size)
+        {
+            return left.size < right.size;
+        }
+        if (left.parent_id != right.parent_id)
+        {
+            return left.parent_id > right.parent_id;
+        }
+        return left.child_index > right.child_index;
+    }
 };
 
 std::wstring HumanizeBytes(uint64_t bytes)
@@ -235,11 +280,6 @@ TextPalette TextColorsForFill(std::string_view fill_color)
 
 std::string ColorForItem(const LayoutItem& item, size_t depth)
 {
-    if (item.is_aggregate)
-    {
-        return "#475569";
-    }
-
     const uint64_t hash = HashPath(item.path.empty() ? item.label : item.path);
     const uint32_t base = static_cast<uint32_t>(hash & 0x00FFFFFFu);
 
@@ -264,16 +304,23 @@ std::string ColorForItem(const LayoutItem& item, size_t depth)
     return HexColor((red << 16) | (green << 8) | blue);
 }
 
-std::vector<LayoutItem> CollectChildren(
+/**
+ Collects a directory's real children, drops duplicate ids, ignores zero-sized
+ nodes, and sorts the result by descending size.
+
+ The returned order is important for the budgeted treemap strategy: each
+ directory exposes its children to the global selection heap one at a time,
+ largest first.
+ **/
+ChildCollection CollectChildren(
     const FileTree& tree,
-    const Node& parent,
-    const TreemapLayoutOptions& options)
+    const Node& parent)
 {
-    std::vector<LayoutItem> children;
+    ChildCollection collection;
     const std::vector<uint64_t>* child_ids = tree.GetChildIds(parent.id);
     if (!child_ids)
     {
-        return children;
+        return collection;
     }
 
     std::unordered_set<uint64_t> seen;
@@ -298,10 +345,11 @@ std::vector<LayoutItem> CollectChildren(
         item.is_dir = child->is_dir;
         item.label = child->name.empty() ? L"(unnamed)" : child->name;
         item.path = tree.BuildPath(child->id);
-        children.push_back(std::move(item));
+        collection.total_size += item.size;
+        collection.items.push_back(std::move(item));
     }
 
-    std::sort(children.begin(), children.end(), [](const LayoutItem& left, const LayoutItem& right)
+    std::sort(collection.items.begin(), collection.items.end(), [](const LayoutItem& left, const LayoutItem& right)
               {
                   if (left.size != right.size)
                   {
@@ -309,56 +357,17 @@ std::vector<LayoutItem> CollectChildren(
                   }
                   return left.label < right.label;
               });
-
-    if (children.empty())
-    {
-        return children;
-    }
-
-    const double parent_size = static_cast<double>(std::max<uint64_t>(parent.size, 1));
-    std::vector<LayoutItem> filtered;
-    filtered.reserve(std::min(children.size(), options.max_children_per_directory + 1));
-
-    uint64_t aggregated_size = 0;
-    size_t aggregated_count = 0;
-    for (size_t index = 0; index < children.size(); ++index)
-    {
-        const LayoutItem& child = children[index];
-        const bool exceeds_limit = filtered.size() >= options.max_children_per_directory;
-        const bool below_ratio = (static_cast<double>(child.size) / parent_size) < options.minimum_child_ratio;
-        if (exceeds_limit || below_ratio)
-        {
-            aggregated_size += child.size;
-            aggregated_count++;
-            continue;
-        }
-
-        filtered.push_back(child);
-    }
-
-    if (aggregated_size > 0)
-    {
-        LayoutItem aggregate;
-        aggregate.size = aggregated_size;
-        aggregate.aggregated_child_count = aggregated_count;
-        aggregate.is_aggregate = true;
-        aggregate.label = L"Other";
-        aggregate.path = tree.BuildPath(parent.id) + L"\\[other]";
-        filtered.push_back(std::move(aggregate));
-    }
-
-    std::sort(filtered.begin(), filtered.end(), 
-        [](const LayoutItem& left, const LayoutItem& right)
-        {
-            if (left.size != right.size)
-            {
-                return left.size > right.size;
-            }
-            return left.label < right.label;
-        });
-    return filtered;
+    return collection;
 }
 
+/**
+ Chooses a split point that balances cumulative size as evenly as possible
+ between the left and right partitions.
+
+ This is the core partition step for the binary treemap layout. The function
+ assumes items are already sorted by size, then walks forward until the running
+ total reaches roughly half of the partition's total size.
+ **/
 size_t ChooseSplitIndex(const std::vector<LayoutItem>& items, size_t begin, size_t end)
 {
     const uint64_t total = SumSizes(items, begin, end);
@@ -392,20 +401,23 @@ void EmitNodeRect(
     const Bounds& bounds,
     std::vector<TreemapRect>* rects)
 {
+    if (item.is_hidden)
+    {
+        return;
+    }
+
     TreemapRect rect;
     rect.node_id = item.node_id;
     rect.size = item.size;
     rect.depth = depth;
-    rect.aggregated_child_count = item.aggregated_child_count;
     rect.x = bounds.x;
     rect.y = bounds.y;
     rect.width = bounds.width;
     rect.height = bounds.height;
     rect.is_dir = item.is_dir;
-    rect.is_aggregate = item.is_aggregate;
     rect.label = item.label;
     rect.path = item.path;
-    const TreemapVisualStyle style = BuildTreemapVisualStyle(item.label, item.path, item.is_dir, item.is_aggregate, depth);
+    const TreemapVisualStyle style = BuildTreemapVisualStyle(item.label, item.path, item.is_dir, depth);
     rect.fill_color = style.fill_color;
     rect.label_text_color = style.label_text_color;
     rect.secondary_text_color = style.secondary_text_color;
@@ -414,17 +426,22 @@ void EmitNodeRect(
     rects->push_back(std::move(rect));
 }
 
-void LayoutItemsRecursive(
-    const FileTree& tree,
+/**
+ Recursively assigns bounds to a list of items using a binary split treemap.
+
+ This helper is geometry-only: it does not decide which nodes are visible under
+ the rectangle budget. It simply turns a chosen item list into rectangles by
+ repeatedly splitting the current bounds along the longer axis.
+ **/
+void CollectItemBounds(
     const std::vector<LayoutItem>& items,
     size_t begin,
     size_t end,
     size_t depth,
     const Bounds& bounds,
-    const TreemapLayoutOptions& options,
-    std::vector<TreemapRect>* rects)
+    std::vector<PositionedItem>* positioned)
 {
-    if (begin >= end || rects->size() >= options.max_rectangles)
+    if (begin >= end)
     {
         return;
     }
@@ -436,37 +453,11 @@ void LayoutItemsRecursive(
 
     if (begin + 1 == end)
     {
-        const LayoutItem& item = items[begin];
-        EmitNodeRect(item, depth, bounds, rects);
-        if (!item.is_dir || item.is_aggregate || depth + 1 > options.max_depth || rects->size() >= options.max_rectangles)
-        {
-            return;
-        }
-
-        if (bounds.width < options.minimum_child_side || bounds.height < options.minimum_child_side + options.directory_header_height)
-        {
-            return;
-        }
-
-        const Node* node = tree.GetNode(item.node_id);
-        if (!node)
-        {
-            return;
-        }
-
-        std::vector<LayoutItem> children = CollectChildren(tree, *node, options);
-        if (children.empty())
-        {
-            return;
-        }
-
-        Bounds inner = InsetBounds(bounds, options);
-        if (inner.width <= 0.0 || inner.height <= 0.0)
-        {
-            return;
-        }
-
-        LayoutItemsRecursive(tree, children, 0, children.size(), depth + 1, inner, options, rects);
+        PositionedItem entry;
+        entry.item = &items[begin];
+        entry.bounds = bounds;
+        entry.depth = depth;
+        positioned->push_back(entry);
         return;
     }
 
@@ -497,8 +488,280 @@ void LayoutItemsRecursive(
         second.height = std::max(0.0, bounds.height - first_height);
     }
 
-    LayoutItemsRecursive(tree, items, begin, split, depth, first, options, rects);
-    LayoutItemsRecursive(tree, items, split, end, depth, second, options, rects);
+    CollectItemBounds(items, begin, split, depth, first, positioned);
+    CollectItemBounds(items, split, end, depth, second, positioned);
+}
+
+const ChildCollection& GetOrCreateChildren(
+    const FileTree& tree,
+    uint64_t parent_id,
+    std::unordered_map<uint64_t, ChildCollection>* cache)
+{
+    auto it = cache->find(parent_id);
+    if (it != cache->end())
+    {
+        return it->second;
+    }
+
+    ChildCollection children;
+    const Node* parent = tree.GetNode(parent_id);
+    if (parent)
+    {
+        children = CollectChildren(tree, *parent);
+    }
+
+    auto inserted = cache->emplace(parent_id, std::move(children)).first;
+    return inserted->second;
+}
+
+/**
+ Pushes the next eligible child for a directory into the global candidate heap.
+
+ Each directory contributes at most one pending candidate at a time: its
+ largest remaining child that passes the minimum ratio filter and any optional
+ per-directory child cap. When that candidate is selected, the caller advances
+ the directory state and asks this helper for the next one.
+ **/
+void PushNextCandidate(
+    const FileTree& tree,
+    uint64_t parent_id,
+    const TreemapLayoutOptions& options,
+    std::unordered_map<uint64_t, SelectionState>* states,
+    std::unordered_map<uint64_t, ChildCollection>* children_cache,
+    std::priority_queue<ChildCandidate, std::vector<ChildCandidate>, ChildCandidateLess>* candidates)
+{
+    auto state_it = states->find(parent_id);
+    if (state_it == states->end())
+    {
+        return;
+    }
+
+    SelectionState& state = state_it->second;
+    if (options.max_children_per_directory > 0 &&
+        state.visible_child_count >= options.max_children_per_directory)
+    {
+        return;
+    }
+
+    const ChildCollection& children = GetOrCreateChildren(tree, parent_id, children_cache);
+    const double parent_size = static_cast<double>(std::max<uint64_t>(state.parent_size, 1));
+
+    while (state.next_child_index < children.items.size())
+    {
+        const LayoutItem& child = children.items[state.next_child_index];
+        const double child_ratio = static_cast<double>(child.size) / parent_size;
+        if (child_ratio < options.minimum_child_ratio)
+        {
+            ++state.next_child_index;
+            continue;
+        }
+
+        ChildCandidate candidate;
+        candidate.parent_id = parent_id;
+        candidate.size = child.size;
+        candidate.child_index = state.next_child_index;
+        candidates->push(candidate);
+        return;
+    }
+}
+
+/**
+ Emits rectangles for the visible portion of a subtree after the budget
+ selection pass has decided how many children each directory may show.
+
+ The method emits the current node first, then lays out only the selected
+ leading children for that directory. Any unselected remainder is represented
+ by a hidden placeholder that occupies space during layout but is never drawn,
+ causing omitted descendants to stay absorbed into the nearest real directory.
+ **/
+void EmitVisibleSubtree(
+    const FileTree& tree,
+    uint64_t root_id,
+    uint64_t node_id,
+    size_t depth,
+    const Bounds& bounds,
+    const TreemapLayoutOptions& options,
+    const std::unordered_map<uint64_t, size_t>& visible_child_counts,
+    const std::unordered_map<uint64_t, ChildCollection>& children_cache,
+    std::vector<TreemapRect>* rects)
+{
+    const Node* node = tree.GetNode(node_id);
+    if (!node)
+    {
+        return;
+    }
+
+    LayoutItem item;
+    item.node_id = node->id;
+    item.size = node->size;
+    item.is_dir = node->is_dir;
+    item.label = node->name.empty() ? (node->id == root_id ? L"(root)" : L"(unnamed)") : node->name;
+    item.path = tree.BuildPath(node->id);
+    EmitNodeRect(item, depth, bounds, rects);
+
+    if (!node->is_dir)
+    {
+        return;
+    }
+
+    if (depth >= options.max_depth)
+    {
+        return;
+    }
+
+    if (bounds.width < options.minimum_child_side ||
+        bounds.height < options.minimum_child_side + options.directory_header_height)
+    {
+        return;
+    }
+
+    auto visible_it = visible_child_counts.find(node_id);
+    if (visible_it == visible_child_counts.end() || visible_it->second == 0)
+    {
+        return;
+    }
+
+    auto children_it = children_cache.find(node_id);
+    if (children_it == children_cache.end())
+    {
+        return;
+    }
+
+    const ChildCollection& children = children_it->second;
+    const size_t visible_count = std::min(visible_it->second, children.items.size());
+    if (visible_count == 0)
+    {
+        return;
+    }
+
+    std::vector<LayoutItem> layout_items;
+    layout_items.reserve(visible_count + 1);
+
+    uint64_t visible_size = 0;
+    for (size_t index = 0; index < visible_count; ++index)
+    {
+        visible_size += children.items[index].size;
+        layout_items.push_back(children.items[index]);
+    }
+
+    if (children.total_size > visible_size)
+    {
+        LayoutItem hidden;
+        hidden.size = children.total_size - visible_size;
+        hidden.is_hidden = true;
+        layout_items.push_back(std::move(hidden));
+    }
+
+    Bounds inner = InsetBounds(bounds, options);
+    if (inner.width <= 0.0 || inner.height <= 0.0)
+    {
+        return;
+    }
+
+    const size_t child_depth = (node_id == root_id) ? 0 : depth + 1;
+    std::vector<PositionedItem> positioned;
+    positioned.reserve(layout_items.size());
+    CollectItemBounds(layout_items, 0, layout_items.size(), child_depth, inner, &positioned);
+
+    for (const PositionedItem& positioned_item : positioned)
+    {
+        if (!positioned_item.item || positioned_item.item->is_hidden)
+        {
+            continue;
+        }
+
+        EmitVisibleSubtree(
+            tree,
+            root_id,
+            positioned_item.item->node_id,
+            positioned_item.depth,
+            positioned_item.bounds,
+            options,
+            visible_child_counts,
+            children_cache,
+            rects);
+    }
+}
+
+/**
+ Emits the selected top-level children of the current view root directly into
+ the available treemap bounds.
+
+ Unlike deeper directories, the current root is not drawn as an enclosing tile
+ in the GUI because that level is already represented by the surrounding header
+ and breadcrumb chrome. This helper therefore lays out only the root's visible
+ children, while still reserving space for omitted descendants through the same
+ hidden-placeholder mechanism used deeper in the tree.
+ **/
+void EmitVisibleChildren(
+    const FileTree& tree,
+    uint64_t root_id,
+    size_t depth,
+    const Bounds& bounds,
+    const TreemapLayoutOptions& options,
+    const std::unordered_map<uint64_t, size_t>& visible_child_counts,
+    const std::unordered_map<uint64_t, ChildCollection>& children_cache,
+    std::vector<TreemapRect>* rects)
+{
+    auto visible_it = visible_child_counts.find(root_id);
+    if (visible_it == visible_child_counts.end() || visible_it->second == 0)
+    {
+        return;
+    }
+
+    auto children_it = children_cache.find(root_id);
+    if (children_it == children_cache.end())
+    {
+        return;
+    }
+
+    const ChildCollection& children = children_it->second;
+    const size_t visible_count = std::min(visible_it->second, children.items.size());
+    if (visible_count == 0)
+    {
+        return;
+    }
+
+    std::vector<LayoutItem> layout_items;
+    layout_items.reserve(visible_count + 1);
+
+    uint64_t visible_size = 0;
+    for (size_t index = 0; index < visible_count; ++index)
+    {
+        visible_size += children.items[index].size;
+        layout_items.push_back(children.items[index]);
+    }
+
+    if (children.total_size > visible_size)
+    {
+        LayoutItem hidden;
+        hidden.size = children.total_size - visible_size;
+        hidden.is_hidden = true;
+        layout_items.push_back(std::move(hidden));
+    }
+
+    std::vector<PositionedItem> positioned;
+    positioned.reserve(layout_items.size());
+    CollectItemBounds(layout_items, 0, layout_items.size(), depth, bounds, &positioned);
+
+    for (const PositionedItem& positioned_item : positioned)
+    {
+        if (!positioned_item.item || positioned_item.item->is_hidden)
+        {
+            continue;
+        }
+
+        EmitVisibleSubtree(
+            tree,
+            root_id,
+            positioned_item.item->node_id,
+            positioned_item.depth,
+            positioned_item.bounds,
+            options,
+            visible_child_counts,
+            children_cache,
+            rects);
+    }
 }
 
 void AppendStatsCard(std::ostringstream& html, const std::string& label, const std::string& value)
@@ -515,11 +778,7 @@ std::string TooltipText(const TreemapRect& rect, uint64_t root_size)
     tooltip << EscapeHtml(Utf8FromWide(rect.path.empty() ? rect.label : rect.path))
             << "&#10;Size: " << EscapeHtml(Utf8FromWide(HumanizeBytes(rect.size)))
             << " (" << FormatPercent(root_size == 0 ? 0.0 : static_cast<double>(rect.size) / static_cast<double>(root_size)) << "%)"
-            << "&#10;Type: " << (rect.is_dir ? "Directory" : (rect.is_aggregate ? "Aggregate" : "File"));
-    if (rect.is_aggregate && rect.aggregated_child_count > 0)
-    {
-        tooltip << "&#10;Aggregated items: " << rect.aggregated_child_count;
-    }
+            << "&#10;Type: " << (rect.is_dir ? "Directory" : "File");
     return tooltip.str();
 }
 
@@ -529,14 +788,12 @@ TreemapVisualStyle BuildTreemapVisualStyle(
     const std::wstring& label,
     const std::wstring& path,
     bool is_dir,
-    bool is_aggregate,
     size_t depth)
 {
     LayoutItem item;
     item.label = label;
     item.path = path;
     item.is_dir = is_dir;
-    item.is_aggregate = is_aggregate;
 
     TreemapVisualStyle style;
     style.fill_color = ColorForItem(item, depth);
@@ -548,9 +805,39 @@ TreemapVisualStyle BuildTreemapVisualStyle(
     return style;
 }
 
+/**
+ Builds a treemap layout for the requested root using a global rectangle budget.
+
+ Strategy:
+   1. Keep the underlying FileTree exact. No nodes are merged into the tree itself.
+   2. Build the initial global candidate heap from the current view root's
+      children rather than drawing the root itself as an enclosing tile.
+   3. For each visible directory, consider only its next-largest undisplayed child
+      as an expansion candidate. All candidates across the current visible tree are
+      stored in a max-heap ordered by size.
+   4. Repeatedly take the largest candidate from that heap until the rectangle
+      budget is exhausted. Selecting a child spends one rectangle from the budget.
+      If that child is a directory and depth permits, it starts contributing its
+      own children as future candidates.
+   5. After the visible child counts are chosen, emit the actual rectangles in a
+      second pass. The current view root emits only its visible children directly
+      into the treemap bounds, while deeper directories emit themselves first and
+      then their selected children. Any children that were not selected remain
+      absorbed into the nearest real ancestor directory's area instead of becoming
+      a synthetic "Other" rectangle.
+
+ This yields a best-first expansion of the tree: large directories/files near the
+ top tend to appear first, and smaller descendants only become visible if there is
+ enough remaining budget to justify expanding deeper.
+ **/
 std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_id, const TreemapLayoutOptions& options)
 {
     std::vector<TreemapRect> rects;
+    if (options.max_rectangles == 0)
+    {
+        return rects;
+    }
+
     const Node* root = tree.GetNode(root_id);
     if (!root)
     {
@@ -560,6 +847,76 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
     Bounds root_bounds;
     root_bounds.width = options.width;
     root_bounds.height = options.height;
+
+    std::unordered_map<uint64_t, ChildCollection> children_cache;
+    children_cache.reserve(std::min<size_t>(options.max_rectangles, 512));
+
+    std::unordered_map<uint64_t, SelectionState> selection_states;
+    selection_states.reserve(std::min<size_t>(options.max_rectangles, 512));
+
+    std::unordered_map<uint64_t, size_t> visible_child_counts;
+    visible_child_counts.reserve(std::min<size_t>(options.max_rectangles, 512));
+
+    std::priority_queue<ChildCandidate, std::vector<ChildCandidate>, ChildCandidateLess> candidates;
+
+    if (root->is_dir && root->size > 0)
+    {
+        SelectionState root_state;
+        root_state.parent_size = root->size;
+        root_state.child_depth = 0;
+        selection_states.emplace(root_id, root_state);
+        PushNextCandidate(tree, root_id, options, &selection_states, &children_cache, &candidates);
+
+        // The current view root is not emitted as a tile in the GUI treemap, so
+        // the full rectangle budget is available for visible descendants.
+        size_t visible_rectangles = 0;
+        while (!candidates.empty() && visible_rectangles < options.max_rectangles)
+        {
+            const ChildCandidate candidate = candidates.top();
+            candidates.pop();
+
+            auto state_it = selection_states.find(candidate.parent_id);
+            if (state_it == selection_states.end())
+            {
+                continue;
+            }
+
+            SelectionState& state = state_it->second;
+            if (candidate.child_index != state.next_child_index)
+            {
+                continue;
+            }
+
+            const ChildCollection& children = GetOrCreateChildren(tree, candidate.parent_id, &children_cache);
+            if (candidate.child_index >= children.items.size())
+            {
+                continue;
+            }
+
+            const LayoutItem& child = children.items[candidate.child_index];
+            ++state.visible_child_count;
+            visible_child_counts[candidate.parent_id] = state.visible_child_count;
+            ++state.next_child_index;
+            ++visible_rectangles;
+
+            // Advance this directory to its next-largest child so it can keep
+            // competing globally for more visible rectangles.
+            PushNextCandidate(tree, candidate.parent_id, options, &selection_states, &children_cache, &candidates);
+
+            if (!child.is_dir || state.child_depth >= options.max_depth)
+            {
+                continue;
+            }
+
+            // Newly selected directories join the competition by exposing their
+            // own largest child as the next possible expansion.
+            SelectionState child_state;
+            child_state.parent_size = child.size;
+            child_state.child_depth = state.child_depth + 1;
+            selection_states.emplace(child.node_id, child_state);
+            PushNextCandidate(tree, child.node_id, options, &selection_states, &children_cache, &candidates);
+        }
+    }
 
     if (!root->is_dir || root->size == 0)
     {
@@ -573,20 +930,15 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
         return rects;
     }
 
-    std::vector<LayoutItem> root_children = CollectChildren(tree, *root, options);
-    if (root_children.empty())
-    {
-        LayoutItem item;
-        item.node_id = root->id;
-        item.size = root->size;
-        item.is_dir = true;
-        item.label = root->name.empty() ? L"(root)" : root->name;
-        item.path = tree.BuildPath(root->id);
-        EmitNodeRect(item, 0, root_bounds, &rects);
-        return rects;
-    }
-
-    LayoutItemsRecursive(tree, root_children, 0, root_children.size(), 0, root_bounds, options, &rects);
+    EmitVisibleChildren(
+        tree,
+        root_id,
+        0,
+        root_bounds,
+        options,
+        visible_child_counts,
+        children_cache,
+        &rects);
     return rects;
 }
 
@@ -757,7 +1109,7 @@ bool WriteTreemapHtml(
     AppendStatsCard(html, "Elapsed", FormatDouble(info.elapsed_seconds) + "s");
     AppendStatsCard(html, "Depth Limit", std::to_string(options.max_depth));
     html << "        </div>\n";
-    html << "        <p class=\"hint\">Hover any rectangle for exact path and size. Small children are rolled into <strong>Other</strong> so large scans stay readable.</p>\n";
+    html << "        <p class=\"hint\">Hover any rectangle for exact path and size. Rendering is capped to keep large scans responsive without drawing synthetic summary boxes.</p>\n";
     html << "      </div>\n";
     html << "      <div class=\"canvas-panel\">\n";
     html << "        <svg viewBox=\"0 0 " << FormatDouble(options.width) << ' ' << FormatDouble(options.height)
