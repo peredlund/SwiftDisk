@@ -37,8 +37,7 @@ namespace space_scanner::gui
     constexpr int IDC_BROWSE_BUTTON = 1003;
     constexpr int IDC_DEPTH_LABEL = 1004;
     constexpr int IDC_DEPTH_EDIT = 1005;
-    constexpr int IDC_TOOLTIP_MODE_LABEL = 1006;
-    constexpr int IDC_TOOLTIP_MODE_COMBO = 1007;
+    constexpr int IDC_TOOLTIP_FOLLOW_CHECK = 1006;
 
     struct GuiOptions
     {
@@ -59,13 +58,6 @@ namespace space_scanner::gui
     {
         std::mutex mutex;
         std::unique_ptr<ScanPayload> pending_payload;
-    };
-
-    enum class TooltipMode
-    {
-        Auto = 0,
-        Fixed = 1,
-        Follow = 2,
     };
 
     bool VolumeExists(wchar_t drive_letter)
@@ -501,31 +493,17 @@ namespace space_scanner::gui
                 nullptr,
                 nullptr);
 
-            m_tooltip_mode_label = CreateWindowExW(
+            m_tooltip_follow_check = CreateWindowExW(
                 0,
-                L"STATIC",
-                L"Tooltip",
-                WS_CHILD | WS_VISIBLE,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TOOLTIP_MODE_LABEL)),
-                nullptr,
-                nullptr);
-
-            m_tooltip_mode_combo = CreateWindowExW(
-                0,
-                L"COMBOBOX",
-                L"",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+                L"BUTTON",
+                L"Always follow",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
                 0,
                 0,
                 0,
                 0,
                 m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TOOLTIP_MODE_COMBO)),
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TOOLTIP_FOLLOW_CHECK)),
                 nullptr,
                 nullptr);
 
@@ -549,20 +527,17 @@ namespace space_scanner::gui
             {
                 SendMessageW(m_depth_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
             }
-            if (m_tooltip_mode_label)
+            if (m_tooltip_follow_check)
             {
-                SendMessageW(m_tooltip_mode_label, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_tooltip_mode_combo)
-            {
-                SendMessageW(m_tooltip_mode_combo, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-                SendMessageW(m_tooltip_mode_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Auto"));
-                SendMessageW(m_tooltip_mode_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Fixed"));
-                SendMessageW(m_tooltip_mode_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Follow"));
                 SendMessageW(
-                    m_tooltip_mode_combo,
-                    CB_SETCURSEL,
-                    static_cast<WPARAM>(m_tooltip_mode),
+                    m_tooltip_follow_check,
+                    WM_SETFONT,
+                    reinterpret_cast<WPARAM>(gui_font),
+                    TRUE);
+                SendMessageW(
+                    m_tooltip_follow_check,
+                    BM_SETCHECK,
+                    m_tooltip_always_follow ? BST_CHECKED : BST_UNCHECKED,
                     0);
             }
 
@@ -587,8 +562,7 @@ namespace space_scanner::gui
             const int scan_width = 72;
             const int depth_label_width = 42;
             const int depth_edit_width = 40;
-            const int tooltip_mode_label_width = 44;
-            const int tooltip_mode_combo_width = 110;
+            const int tooltip_check_width = 112;
             const int gap = 8;
             const int right_padding = static_cast<int>(kOuterPadding);
             const int browse_left = width - right_padding - browse_width;
@@ -596,8 +570,7 @@ namespace space_scanner::gui
             const int edit_width = std::max(160, scan_left - gap - edit_left);
             const int depth_edit_left = browse_left + browse_width - depth_edit_width;
             const int depth_label_left = depth_edit_left - gap - depth_label_width;
-            const int tooltip_mode_combo_left = depth_label_left - gap - tooltip_mode_combo_width;
-            const int tooltip_mode_label_left = tooltip_mode_combo_left - gap - tooltip_mode_label_width;
+            const int tooltip_check_left = depth_label_left - gap - tooltip_check_width;
 
             if (m_path_edit)
             {
@@ -619,13 +592,9 @@ namespace space_scanner::gui
             {
                 MoveWindow(m_depth_edit, depth_edit_left, second_row_top, depth_edit_width, 26, TRUE);
             }
-            if (m_tooltip_mode_label)
+            if (m_tooltip_follow_check)
             {
-                MoveWindow(m_tooltip_mode_label, tooltip_mode_label_left, second_row_top + 4, tooltip_mode_label_width, 18, TRUE);
-            }
-            if (m_tooltip_mode_combo)
-            {
-                MoveWindow(m_tooltip_mode_combo, tooltip_mode_combo_left, second_row_top, tooltip_mode_combo_width, 240, TRUE);
+                MoveWindow(m_tooltip_follow_check, tooltip_check_left, second_row_top + 2, tooltip_check_width, 22, TRUE);
             }
         }
 
@@ -659,9 +628,9 @@ namespace space_scanner::gui
             {
                 EnableWindow(m_browse_button, enabled);
             }
-            if (m_tooltip_mode_combo)
+            if (m_tooltip_follow_check)
             {
-                EnableWindow(m_tooltip_mode_combo, enabled);
+                EnableWindow(m_tooltip_follow_check, enabled);
             }
         }
 
@@ -815,34 +784,26 @@ namespace space_scanner::gui
                 return;
             }
 
-            if (control_id == IDC_TOOLTIP_MODE_COMBO && control == m_tooltip_mode_combo && notification_code == CBN_SELCHANGE)
+            if (control_id == IDC_TOOLTIP_FOLLOW_CHECK && control == m_tooltip_follow_check && notification_code == BN_CLICKED)
             {
-                const LRESULT selection = SendMessageW(m_tooltip_mode_combo, CB_GETCURSEL, 0, 0);
-                if (selection >= 0 && selection <= static_cast<LRESULT>(TooltipMode::Follow))
+                m_tooltip_always_follow =
+                    SendMessageW(m_tooltip_follow_check, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                if (m_hovered_index >= 0)
                 {
-                    m_tooltip_mode = static_cast<TooltipMode>(selection);
-                    if (m_hovered_index >= 0)
+                    const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
+                    if (ShouldFollowTooltip(rect))
                     {
-                        const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
-                        if (ShouldFollowTooltip(rect))
-                        {
-                            m_tooltip_target_position = m_mouse_position;
-                            StartTooltipAnimation();
-                        }
-                        else
-                        {
-                            m_tooltip_position = m_mouse_position;
-                            m_tooltip_target_position = m_mouse_position;
-                            StopTooltipAnimation();
-                        }
+                        m_tooltip_target_position = m_mouse_position;
+                        StartTooltipAnimation();
+                    }
+                    else
+                    {
+                        m_tooltip_position = m_mouse_position;
+                        m_tooltip_target_position = m_mouse_position;
+                        StopTooltipAnimation();
                     }
                 }
                 InvalidateCanvas();
-                return;
-            }
-
-            if (notification_code != BN_CLICKED)
-            {
                 return;
             }
 
@@ -2145,15 +2106,9 @@ namespace space_scanner::gui
 
         bool ShouldFollowTooltip(const visualization::TreemapRect& rect) const
         {
-            switch (m_tooltip_mode)
+            if (m_tooltip_always_follow)
             {
-            case TooltipMode::Fixed:
-                return false;
-            case TooltipMode::Follow:
                 return true;
-            case TooltipMode::Auto:
-            default:
-                break;
             }
 
             const float rect_width = static_cast<float>(rect.width);
@@ -2411,8 +2366,7 @@ namespace space_scanner::gui
         HWND m_browse_button = nullptr;
         HWND m_depth_label = nullptr;
         HWND m_depth_edit = nullptr;
-        HWND m_tooltip_mode_label = nullptr;
-        HWND m_tooltip_mode_combo = nullptr;
+        HWND m_tooltip_follow_check = nullptr;
         std::shared_ptr<SharedScanState> m_shared_scan_state;
         bool m_requested_path_is_ntfs = false;
 
@@ -2464,7 +2418,7 @@ namespace space_scanner::gui
         std::vector<visualization::TreemapRect> m_rects;
         std::unordered_set<uint64_t> m_expanded_reveal_nodes;
         std::vector<BreadcrumbStrip> m_breadcrumbs;
-        TooltipMode m_tooltip_mode = TooltipMode::Auto;
+        bool m_tooltip_always_follow = false;
         bool m_tooltip_animation_active = false;
         D2D1_POINT_2F m_mouse_position = D2D1::Point2F(-1.0f, -1.0f);
         D2D1_POINT_2F m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
