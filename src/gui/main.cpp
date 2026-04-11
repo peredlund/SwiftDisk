@@ -37,7 +37,8 @@ namespace space_scanner::gui
     constexpr int IDC_BROWSE_BUTTON = 1003;
     constexpr int IDC_DEPTH_LABEL = 1004;
     constexpr int IDC_DEPTH_EDIT = 1005;
-    constexpr int IDC_TOOLTIP_FOLLOW_CHECK = 1006;
+    constexpr int IDC_SHOW_TOOLTIP_CHECK = 1006;
+    constexpr int IDC_SHOW_STATUS_BAR_CHECK = 1007;
 
     struct GuiOptions
     {
@@ -304,6 +305,10 @@ namespace space_scanner::gui
         static constexpr float kTreemapTopSliceHeight = 22.0f;
         static constexpr float kTreemapSideSliceWidth = 3.0f;
         static constexpr float kTreemapBottomSliceHeight = 3.0f;
+        static constexpr float kStatusBarHeight = 26.0f;
+        static constexpr float kStatusBarGap = 7.0f;
+        static constexpr float kStatusBarBottomPadding = 4.0f;
+        static constexpr float kStatusBarTextVerticalPadding = 4.0f;
         static constexpr float kTooltipOffsetX = 16.0f;
         static constexpr float kTooltipOffsetY = 22.0f;
         static constexpr float kTooltipPaddingX = 10.0f;
@@ -311,9 +316,6 @@ namespace space_scanner::gui
         static constexpr float kTooltipLineGap = 4.0f;
         static constexpr float kTooltipCornerRadius = 4.0f;
         static constexpr float kTooltipInnerMargin = 6.0f;
-        static constexpr float kTooltipAutoFollowWidth = 300.0f;
-        static constexpr float kTooltipAutoFollowHeight = 190.0f;
-        static constexpr float kTooltipAutoFollowAreaRatio = 0.11f;
         static constexpr UINT_PTR kTooltipAnimationTimerId = 1;
         static constexpr UINT kTooltipAnimationIntervalMs = 16;
         static constexpr float kTooltipAnimationSmoothing = 0.38f;
@@ -493,17 +495,31 @@ namespace space_scanner::gui
                 nullptr,
                 nullptr);
 
-            m_tooltip_follow_check = CreateWindowExW(
+            m_show_tooltip_check = CreateWindowExW(
                 0,
                 L"BUTTON",
-                L"Always follow",
+                L"Show tooltip",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
                 0,
                 0,
                 0,
                 0,
                 m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TOOLTIP_FOLLOW_CHECK)),
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_SHOW_TOOLTIP_CHECK)),
+                nullptr,
+                nullptr);
+
+            m_show_status_bar_check = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Show status bar",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                0,
+                0,
+                0,
+                0,
+                m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_SHOW_STATUS_BAR_CHECK)),
                 nullptr,
                 nullptr);
 
@@ -527,17 +543,30 @@ namespace space_scanner::gui
             {
                 SendMessageW(m_depth_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
             }
-            if (m_tooltip_follow_check)
+            if (m_show_tooltip_check)
             {
                 SendMessageW(
-                    m_tooltip_follow_check,
+                    m_show_tooltip_check,
                     WM_SETFONT,
                     reinterpret_cast<WPARAM>(gui_font),
                     TRUE);
                 SendMessageW(
-                    m_tooltip_follow_check,
+                    m_show_tooltip_check,
                     BM_SETCHECK,
-                    m_tooltip_always_follow ? BST_CHECKED : BST_UNCHECKED,
+                    m_show_tooltip ? BST_CHECKED : BST_UNCHECKED,
+                    0);
+            }
+            if (m_show_status_bar_check)
+            {
+                SendMessageW(
+                    m_show_status_bar_check,
+                    WM_SETFONT,
+                    reinterpret_cast<WPARAM>(gui_font),
+                    TRUE);
+                SendMessageW(
+                    m_show_status_bar_check,
+                    BM_SETCHECK,
+                    m_show_status_bar ? BST_CHECKED : BST_UNCHECKED,
                     0);
             }
 
@@ -562,7 +591,8 @@ namespace space_scanner::gui
             const int scan_width = 72;
             const int depth_label_width = 42;
             const int depth_edit_width = 40;
-            const int tooltip_check_width = 112;
+            const int show_status_bar_width = 124;
+            const int show_tooltip_width = 102;
             const int gap = 8;
             const int right_padding = static_cast<int>(kOuterPadding);
             const int browse_left = width - right_padding - browse_width;
@@ -570,7 +600,8 @@ namespace space_scanner::gui
             const int edit_width = std::max(160, scan_left - gap - edit_left);
             const int depth_edit_left = browse_left + browse_width - depth_edit_width;
             const int depth_label_left = depth_edit_left - gap - depth_label_width;
-            const int tooltip_check_left = depth_label_left - gap - tooltip_check_width;
+            const int show_status_bar_left = depth_label_left - gap - show_status_bar_width;
+            const int show_tooltip_left = show_status_bar_left - gap - show_tooltip_width;
 
             if (m_path_edit)
             {
@@ -592,9 +623,13 @@ namespace space_scanner::gui
             {
                 MoveWindow(m_depth_edit, depth_edit_left, second_row_top, depth_edit_width, 26, TRUE);
             }
-            if (m_tooltip_follow_check)
+            if (m_show_tooltip_check)
             {
-                MoveWindow(m_tooltip_follow_check, tooltip_check_left, second_row_top + 2, tooltip_check_width, 22, TRUE);
+                MoveWindow(m_show_tooltip_check, show_tooltip_left, second_row_top + 2, show_tooltip_width, 22, TRUE);
+            }
+            if (m_show_status_bar_check)
+            {
+                MoveWindow(m_show_status_bar_check, show_status_bar_left, second_row_top + 2, show_status_bar_width, 22, TRUE);
             }
         }
 
@@ -628,9 +663,13 @@ namespace space_scanner::gui
             {
                 EnableWindow(m_browse_button, enabled);
             }
-            if (m_tooltip_follow_check)
+            if (m_show_tooltip_check)
             {
-                EnableWindow(m_tooltip_follow_check, enabled);
+                EnableWindow(m_show_tooltip_check, enabled);
+            }
+            if (m_show_status_bar_check)
+            {
+                EnableWindow(m_show_status_bar_check, enabled);
             }
         }
 
@@ -784,25 +823,29 @@ namespace space_scanner::gui
                 return;
             }
 
-            if (control_id == IDC_TOOLTIP_FOLLOW_CHECK && control == m_tooltip_follow_check && notification_code == BN_CLICKED)
+            if (control_id == IDC_SHOW_TOOLTIP_CHECK && control == m_show_tooltip_check && notification_code == BN_CLICKED)
             {
-                m_tooltip_always_follow =
-                    SendMessageW(m_tooltip_follow_check, BM_GETCHECK, 0, 0) == BST_CHECKED;
-                if (m_hovered_index >= 0)
+                m_show_tooltip =
+                    SendMessageW(m_show_tooltip_check, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                if (!m_show_tooltip)
                 {
-                    const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
-                    if (ShouldFollowTooltip(rect))
-                    {
-                        m_tooltip_target_position = m_mouse_position;
-                        StartTooltipAnimation();
-                    }
-                    else
-                    {
-                        m_tooltip_position = m_mouse_position;
-                        m_tooltip_target_position = m_mouse_position;
-                        StopTooltipAnimation();
-                    }
+                    StopTooltipAnimation();
                 }
+                else if (m_hovered_index >= 0 || m_hovered_breadcrumb_index >= 0)
+                {
+                    m_tooltip_position = m_mouse_position;
+                    m_tooltip_target_position = m_mouse_position;
+                    StartTooltipAnimation();
+                }
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+
+            if (control_id == IDC_SHOW_STATUS_BAR_CHECK && control == m_show_status_bar_check && notification_code == BN_CLICKED)
+            {
+                m_show_status_bar =
+                    SendMessageW(m_show_status_bar_check, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                RebuildLayout();
                 InvalidateCanvas();
                 return;
             }
@@ -1207,8 +1250,16 @@ namespace space_scanner::gui
 
         void InvalidateCanvas()
         {
-            const RECT canvas_rect = RectFToRect(m_canvas_rect);
-            InvalidateRect(m_hwnd, &canvas_rect, FALSE);
+            RECT redraw_rect = RectFToRect(m_canvas_rect);
+            if (m_show_status_bar)
+            {
+                const RECT status_rect = RectFToRect(m_status_bar_rect);
+                redraw_rect.left = std::min(redraw_rect.left, status_rect.left);
+                redraw_rect.top = std::min(redraw_rect.top, status_rect.top);
+                redraw_rect.right = std::max(redraw_rect.right, status_rect.right);
+                redraw_rect.bottom = std::max(redraw_rect.bottom, status_rect.bottom);
+            }
+            InvalidateRect(m_hwnd, &redraw_rect, FALSE);
         }
 
         void UpdateCanvasRect()
@@ -1217,12 +1268,30 @@ namespace space_scanner::gui
             GetClientRect(m_hwnd, &client);
             const float width = static_cast<float>(std::max<LONG>(client.right - client.left, 1));
             const float height = static_cast<float>(std::max<LONG>(client.bottom - client.top, 1));
+            const float status_bar_top = std::max(
+                kOuterPadding + kHeaderHeight + 1.0f,
+                height - kStatusBarBottomPadding - kStatusBarHeight);
+
+            if (m_show_status_bar)
+            {
+                m_status_bar_rect = D2D1::RectF(
+                    kOuterPadding,
+                    status_bar_top,
+                    std::max(width - kOuterPadding, kOuterPadding + 1.0f),
+                    std::max(status_bar_top + kStatusBarHeight, status_bar_top + 1.0f));
+            }
+            else
+            {
+                m_status_bar_rect = D2D1::RectF(0, 0, 0, 0);
+            }
 
             m_canvas_rect = D2D1::RectF(
                 kOuterPadding,
                 kOuterPadding + kHeaderHeight,
                 std::max(width - kOuterPadding, kOuterPadding + 1.0f),
-                std::max(height - kOuterPadding, kOuterPadding + kHeaderHeight + 1.0f));
+                std::max(
+                    (m_show_status_bar ? status_bar_top - kStatusBarGap : height - kOuterPadding),
+                    kOuterPadding + kHeaderHeight + 1.0f));
         }
 
         void RebuildLayout()
@@ -2128,28 +2197,14 @@ namespace space_scanner::gui
                 m_muted_brush.Get());
         }
 
-        bool ShouldFollowTooltip(const visualization::TreemapRect& rect) const
+        bool ShouldFollowTooltip(const visualization::TreemapRect&) const
         {
-            if (m_tooltip_always_follow)
-            {
-                return true;
-            }
-
-            const float rect_width = static_cast<float>(rect.width);
-            const float rect_height = static_cast<float>(rect.height);
-            const float rect_area = rect_width * rect_height;
-            const float treemap_width = std::max(m_treemap_content_rect.right - m_treemap_content_rect.left, 1.0f);
-            const float treemap_height = std::max(m_treemap_content_rect.bottom - m_treemap_content_rect.top, 1.0f);
-            const float treemap_area = treemap_width * treemap_height;
-
-            return rect_width >= kTooltipAutoFollowWidth ||
-                rect_height >= kTooltipAutoFollowHeight ||
-                rect_area >= (treemap_area * kTooltipAutoFollowAreaRatio);
+            return true;
         }
 
         void StartTooltipAnimation()
         {
-            if (m_tooltip_animation_active || !m_hwnd)
+            if (!m_show_tooltip || m_tooltip_animation_active || !m_hwnd)
             {
                 return;
             }
@@ -2171,6 +2226,12 @@ namespace space_scanner::gui
 
         void OnTooltipAnimationTimer()
         {
+            if (!m_show_tooltip)
+            {
+                StopTooltipAnimation();
+                return;
+            }
+
             const bool breadcrumb_hovered =
                 m_hovered_breadcrumb_index >= 0 &&
                 m_hovered_breadcrumb_index < static_cast<int>(m_breadcrumbs.size());
@@ -2216,6 +2277,51 @@ namespace space_scanner::gui
                 m_treemap_content_rect.top + static_cast<float>(rect.y),
                 m_treemap_content_rect.left + static_cast<float>(rect.x + rect.width),
                 m_treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
+        }
+
+        bool TryGetHoverDisplayInfo(
+            std::wstring* name_text,
+            std::wstring* size_text,
+            D2D1_RECT_F* hovered_bounds,
+            bool* follow_tooltip) const
+        {
+            if (!name_text || !size_text || !hovered_bounds || !follow_tooltip)
+            {
+                return false;
+            }
+
+            if (m_hovered_breadcrumb_index >= 0 && m_hovered_breadcrumb_index < static_cast<int>(m_breadcrumbs.size()))
+            {
+                const BreadcrumbStrip& strip = m_breadcrumbs[static_cast<size_t>(m_hovered_breadcrumb_index)];
+                *hovered_bounds = strip.rect;
+                *follow_tooltip = true;
+
+                if (m_tree)
+                {
+                    const Node* node = m_tree->GetNode(strip.node_id);
+                    const std::wstring path = m_tree->BuildPath(strip.node_id);
+                    *name_text = path.empty() ? strip.text : path;
+                    *size_text = L"Size: " + (node ? HumanizeBytes(node->size) : L"-");
+                }
+                else
+                {
+                    *name_text = strip.text;
+                    *size_text = L"Size: -";
+                }
+                return true;
+            }
+
+            if (m_hovered_index >= 0 && m_hovered_index < static_cast<int>(m_rects.size()))
+            {
+                const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
+                *hovered_bounds = GetHoveredRectBounds(rect);
+                *follow_tooltip = ShouldFollowTooltip(rect);
+                *name_text = rect.path.empty() ? rect.label : rect.path;
+                *size_text = L"Size: " + HumanizeBytes(rect.size);
+                return true;
+            }
+
+            return false;
         }
 
         D2D1_POINT_2F ResolveTooltipPosition(
@@ -2265,6 +2371,10 @@ namespace space_scanner::gui
 
         void DrawHoverTooltip()
         {
+            if (!m_show_tooltip)
+            {
+                return;
+            }
             if (!m_dwrite_factory || !m_small_format || !m_tooltip_background_brush || !m_tooltip_border_brush ||
                 !m_tooltip_text_brush || !m_tooltip_secondary_text_brush || !m_tooltip_shadow_brush)
             {
@@ -2275,35 +2385,7 @@ namespace space_scanner::gui
             std::wstring size_text;
             D2D1_RECT_F hovered_bounds = m_canvas_rect;
             bool follow_tooltip = false;
-
-            if (m_hovered_breadcrumb_index >= 0 && m_hovered_breadcrumb_index < static_cast<int>(m_breadcrumbs.size()))
-            {
-                const BreadcrumbStrip& strip = m_breadcrumbs[static_cast<size_t>(m_hovered_breadcrumb_index)];
-                hovered_bounds = strip.rect;
-                follow_tooltip = true;
-
-                if (m_tree)
-                {
-                    const Node* node = m_tree->GetNode(strip.node_id);
-                    const std::wstring path = m_tree->BuildPath(strip.node_id);
-                    name_text = path.empty() ? strip.text : path;
-                    size_text = L"Size: " + (node ? HumanizeBytes(node->size) : L"-");
-                }
-                else
-                {
-                    name_text = strip.text;
-                    size_text = L"Size: -";
-                }
-            }
-            else if (m_hovered_index >= 0 && m_hovered_index < static_cast<int>(m_rects.size()))
-            {
-                const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
-                hovered_bounds = GetHoveredRectBounds(rect);
-                follow_tooltip = ShouldFollowTooltip(rect);
-                name_text = rect.path.empty() ? rect.label : rect.path;
-                size_text = L"Size: " + HumanizeBytes(rect.size);
-            }
-            else
+            if (!TryGetHoverDisplayInfo(&name_text, &size_text, &hovered_bounds, &follow_tooltip))
             {
                 return;
             }
@@ -2393,6 +2475,35 @@ namespace space_scanner::gui
             m_render_target->DrawTextLayout(size_origin, size_layout.Get(), m_tooltip_secondary_text_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
 
+        void DrawStatusBar()
+        {
+            if (!m_show_status_bar)
+            {
+                return;
+            }
+
+            const D2D1_ROUNDED_RECT status_panel = D2D1::RoundedRect(m_status_bar_rect, 12.0f, 12.0f);
+            m_render_target->FillRoundedRectangle(status_panel, m_panel_brush.Get());
+            m_render_target->DrawRoundedRectangle(status_panel, m_border_brush.Get(), 1.0f);
+
+            std::wstring name_text;
+            std::wstring size_text;
+            D2D1_RECT_F hovered_bounds = m_status_bar_rect;
+            bool follow_tooltip = true;
+            if (!TryGetHoverDisplayInfo(&name_text, &size_text, &hovered_bounds, &follow_tooltip))
+            {
+                return;
+            }
+
+            const std::wstring status_text = name_text + L" - " + size_text.substr(6);
+            const D2D1_RECT_F text_rect = D2D1::RectF(
+                m_status_bar_rect.left + 12.0f,
+                m_status_bar_rect.top + kStatusBarTextVerticalPadding,
+                m_status_bar_rect.right - 12.0f,
+                m_status_bar_rect.bottom - kStatusBarTextVerticalPadding);
+            DrawTextLine(status_text, m_small_format.Get(), text_rect, m_text_brush.Get());
+        }
+
         void OnPaint()
         {
             PAINTSTRUCT paint = {};
@@ -2408,6 +2519,7 @@ namespace space_scanner::gui
                 UpdateCanvasRect();
                 DrawHeader();
                 DrawTreemap();
+                DrawStatusBar();
                 DrawHoverTooltip();
 
                 hr = m_render_target->EndDraw();
@@ -2427,7 +2539,8 @@ namespace space_scanner::gui
         HWND m_browse_button = nullptr;
         HWND m_depth_label = nullptr;
         HWND m_depth_edit = nullptr;
-        HWND m_tooltip_follow_check = nullptr;
+        HWND m_show_tooltip_check = nullptr;
+        HWND m_show_status_bar_check = nullptr;
         std::shared_ptr<SharedScanState> m_shared_scan_state;
         bool m_requested_path_is_ntfs = false;
 
@@ -2479,12 +2592,14 @@ namespace space_scanner::gui
         std::vector<visualization::TreemapRect> m_rects;
         std::unordered_set<uint64_t> m_expanded_reveal_nodes;
         std::vector<BreadcrumbStrip> m_breadcrumbs;
-        bool m_tooltip_always_follow = false;
+        bool m_show_tooltip = true;
+        bool m_show_status_bar = false;
         bool m_tooltip_animation_active = false;
         D2D1_POINT_2F m_mouse_position = D2D1::Point2F(-1.0f, -1.0f);
         D2D1_POINT_2F m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
         D2D1_POINT_2F m_tooltip_target_position = D2D1::Point2F(-1.0f, -1.0f);
         D2D1_RECT_F m_canvas_rect = D2D1::RectF(0, 0, 0, 0);
+        D2D1_RECT_F m_status_bar_rect = D2D1::RectF(0, 0, 0, 0);
         D2D1_RECT_F m_treemap_content_rect = D2D1::RectF(0, 0, 0, 0);
         D2D1_RECT_F m_focus_up_rect = D2D1::RectF(0, 0, 0, 0);
     };
