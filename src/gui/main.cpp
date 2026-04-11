@@ -1389,11 +1389,17 @@ namespace space_scanner::gui
             const int hovered_breadcrumb = HitTestBreadcrumb(static_cast<float>(x), static_cast<float>(y));
             const int hovered = HitTestTreemap(static_cast<float>(x), static_cast<float>(y));
             const bool hovered_changed = hovered != m_hovered_index || hovered_breadcrumb != m_hovered_breadcrumb_index;
-            m_hovered_breadcrumb_index = hovered_breadcrumb;
             if (hovered_changed)
             {
                 m_hovered_index = hovered;
-                if (hovered >= 0)
+                m_hovered_breadcrumb_index = hovered_breadcrumb;
+                if (hovered_breadcrumb >= 0)
+                {
+                    m_tooltip_position = new_mouse_position;
+                    m_tooltip_target_position = new_mouse_position;
+                    StartTooltipAnimation();
+                }
+                else if (hovered >= 0)
                 {
                     m_tooltip_position = new_mouse_position;
                     m_tooltip_target_position = new_mouse_position;
@@ -1415,10 +1421,28 @@ namespace space_scanner::gui
                 }
                 InvalidateCanvas();
             }
-            else if (hovered >= 0)
+            else
             {
-                const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(hovered)];
-                if (ShouldFollowTooltip(rect))
+                m_hovered_breadcrumb_index = hovered_breadcrumb;
+                if (hovered >= 0)
+                {
+                    const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(hovered)];
+                    if (hovered_breadcrumb >= 0)
+                    {
+                        m_tooltip_target_position = new_mouse_position;
+                        StartTooltipAnimation();
+                    }
+                    else if (ShouldFollowTooltip(rect))
+                    {
+                        m_tooltip_target_position = new_mouse_position;
+                        StartTooltipAnimation();
+                    }
+                    else
+                    {
+                        StopTooltipAnimation();
+                    }
+                }
+                else if (hovered_breadcrumb >= 0)
                 {
                     m_tooltip_target_position = new_mouse_position;
                     StartTooltipAnimation();
@@ -2147,17 +2171,26 @@ namespace space_scanner::gui
 
         void OnTooltipAnimationTimer()
         {
-            if (m_hovered_index < 0 || m_hovered_index >= static_cast<int>(m_rects.size()))
+            const bool breadcrumb_hovered =
+                m_hovered_breadcrumb_index >= 0 &&
+                m_hovered_breadcrumb_index < static_cast<int>(m_breadcrumbs.size());
+            const bool rect_hovered =
+                m_hovered_index >= 0 &&
+                m_hovered_index < static_cast<int>(m_rects.size());
+            if (!breadcrumb_hovered && !rect_hovered)
             {
                 StopTooltipAnimation();
                 return;
             }
 
-            const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
-            if (!ShouldFollowTooltip(rect))
+            if (!breadcrumb_hovered)
             {
-                StopTooltipAnimation();
-                return;
+                const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
+                if (!ShouldFollowTooltip(rect))
+                {
+                    StopTooltipAnimation();
+                    return;
+                }
             }
 
             const float delta_x = m_tooltip_target_position.x - m_tooltip_position.x;
@@ -2232,20 +2265,48 @@ namespace space_scanner::gui
 
         void DrawHoverTooltip()
         {
-            if (m_hovered_index < 0 || m_hovered_index >= static_cast<int>(m_rects.size()))
-            {
-                return;
-            }
             if (!m_dwrite_factory || !m_small_format || !m_tooltip_background_brush || !m_tooltip_border_brush ||
                 !m_tooltip_text_brush || !m_tooltip_secondary_text_brush || !m_tooltip_shadow_brush)
             {
                 return;
             }
 
-            const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
-            const bool follow_tooltip = ShouldFollowTooltip(rect);
-            const std::wstring name_text = rect.path.empty() ? rect.label : rect.path;
-            const std::wstring size_text = L"Size: " + HumanizeBytes(rect.size);
+            std::wstring name_text;
+            std::wstring size_text;
+            D2D1_RECT_F hovered_bounds = m_canvas_rect;
+            bool follow_tooltip = false;
+
+            if (m_hovered_breadcrumb_index >= 0 && m_hovered_breadcrumb_index < static_cast<int>(m_breadcrumbs.size()))
+            {
+                const BreadcrumbStrip& strip = m_breadcrumbs[static_cast<size_t>(m_hovered_breadcrumb_index)];
+                hovered_bounds = strip.rect;
+                follow_tooltip = true;
+
+                if (m_tree)
+                {
+                    const Node* node = m_tree->GetNode(strip.node_id);
+                    const std::wstring path = m_tree->BuildPath(strip.node_id);
+                    name_text = path.empty() ? strip.text : path;
+                    size_text = L"Size: " + (node ? HumanizeBytes(node->size) : L"-");
+                }
+                else
+                {
+                    name_text = strip.text;
+                    size_text = L"Size: -";
+                }
+            }
+            else if (m_hovered_index >= 0 && m_hovered_index < static_cast<int>(m_rects.size()))
+            {
+                const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
+                hovered_bounds = GetHoveredRectBounds(rect);
+                follow_tooltip = ShouldFollowTooltip(rect);
+                name_text = rect.path.empty() ? rect.label : rect.path;
+                size_text = L"Size: " + HumanizeBytes(rect.size);
+            }
+            else
+            {
+                return;
+            }
 
             const float available_tooltip_width = std::max(48.0f, (m_canvas_rect.right - m_canvas_rect.left) - 12.0f);
             const float max_tooltip_width = std::min(420.0f, std::max(28.0f, available_tooltip_width - (kTooltipPaddingX * 2.0f)));
@@ -2295,7 +2356,7 @@ namespace space_scanner::gui
             const float tooltip_height = (kTooltipPaddingY * 2.0f) + name_height + kTooltipLineGap + size_height;
             const D2D1_POINT_2F tooltip_origin = ResolveTooltipPosition(
                 m_tooltip_position,
-                GetHoveredRectBounds(rect),
+                hovered_bounds,
                 tooltip_width,
                 tooltip_height,
                 follow_tooltip);
