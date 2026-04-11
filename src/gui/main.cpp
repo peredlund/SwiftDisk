@@ -37,6 +37,8 @@ namespace space_scanner::gui
     constexpr int IDC_BROWSE_BUTTON = 1003;
     constexpr int IDC_DEPTH_LABEL = 1004;
     constexpr int IDC_DEPTH_EDIT = 1005;
+    constexpr int IDC_TOOLTIP_MODE_LABEL = 1006;
+    constexpr int IDC_TOOLTIP_MODE_COMBO = 1007;
 
     struct GuiOptions
     {
@@ -57,6 +59,13 @@ namespace space_scanner::gui
     {
         std::mutex mutex;
         std::unique_ptr<ScanPayload> pending_payload;
+    };
+
+    enum class TooltipMode
+    {
+        Auto = 0,
+        Fixed = 1,
+        Follow = 2,
     };
 
     bool VolumeExists(wchar_t drive_letter)
@@ -303,6 +312,20 @@ namespace space_scanner::gui
         static constexpr float kTreemapTopSliceHeight = 22.0f;
         static constexpr float kTreemapSideSliceWidth = 3.0f;
         static constexpr float kTreemapBottomSliceHeight = 3.0f;
+        static constexpr float kTooltipOffsetX = 16.0f;
+        static constexpr float kTooltipOffsetY = 22.0f;
+        static constexpr float kTooltipPaddingX = 10.0f;
+        static constexpr float kTooltipPaddingY = 8.0f;
+        static constexpr float kTooltipLineGap = 4.0f;
+        static constexpr float kTooltipCornerRadius = 4.0f;
+        static constexpr float kTooltipInnerMargin = 6.0f;
+        static constexpr float kTooltipAutoFollowWidth = 300.0f;
+        static constexpr float kTooltipAutoFollowHeight = 190.0f;
+        static constexpr float kTooltipAutoFollowAreaRatio = 0.11f;
+        static constexpr UINT_PTR kTooltipAnimationTimerId = 1;
+        static constexpr UINT kTooltipAnimationIntervalMs = 16;
+        static constexpr float kTooltipAnimationSmoothing = 0.38f;
+        static constexpr float kTooltipAnimationSnapDistance = 1.5f;
         static constexpr size_t kMaxBreadcrumbStrips = 5;
 
         LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param)
@@ -334,6 +357,10 @@ namespace space_scanner::gui
                 {
                     m_hovered_index = -1;
                     m_hovered_breadcrumb_index = -1;
+                    m_mouse_position = D2D1::Point2F(-1.0f, -1.0f);
+                    m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
+                    m_tooltip_target_position = D2D1::Point2F(-1.0f, -1.0f);
+                    StopTooltipAnimation();
                     InvalidateCanvas();
                 }
                 return 0;
@@ -358,7 +385,15 @@ namespace space_scanner::gui
             case WM_DISPLAYCHANGE:
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return 0;
+            case WM_TIMER:
+                if (w_param == kTooltipAnimationTimerId)
+                {
+                    OnTooltipAnimationTimer();
+                    return 0;
+                }
+                break;
             case WM_DESTROY:
+                StopTooltipAnimation();
                 DiscardDeviceResources();
                 PostQuitMessage(0);
                 return 0;
@@ -466,6 +501,34 @@ namespace space_scanner::gui
                 nullptr,
                 nullptr);
 
+            m_tooltip_mode_label = CreateWindowExW(
+                0,
+                L"STATIC",
+                L"Tooltip",
+                WS_CHILD | WS_VISIBLE,
+                0,
+                0,
+                0,
+                0,
+                m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TOOLTIP_MODE_LABEL)),
+                nullptr,
+                nullptr);
+
+            m_tooltip_mode_combo = CreateWindowExW(
+                0,
+                L"COMBOBOX",
+                L"",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+                0,
+                0,
+                0,
+                0,
+                m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_TOOLTIP_MODE_COMBO)),
+                nullptr,
+                nullptr);
+
             if (m_path_edit)
             {
                 SendMessageW(m_path_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
@@ -485,6 +548,22 @@ namespace space_scanner::gui
             if (m_depth_edit)
             {
                 SendMessageW(m_depth_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+            }
+            if (m_tooltip_mode_label)
+            {
+                SendMessageW(m_tooltip_mode_label, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+            }
+            if (m_tooltip_mode_combo)
+            {
+                SendMessageW(m_tooltip_mode_combo, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+                SendMessageW(m_tooltip_mode_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Auto"));
+                SendMessageW(m_tooltip_mode_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Fixed"));
+                SendMessageW(m_tooltip_mode_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Follow"));
+                SendMessageW(
+                    m_tooltip_mode_combo,
+                    CB_SETCURSEL,
+                    static_cast<WPARAM>(m_tooltip_mode),
+                    0);
             }
 
             UpdateHeaderControlsLayout();
@@ -508,6 +587,8 @@ namespace space_scanner::gui
             const int scan_width = 72;
             const int depth_label_width = 42;
             const int depth_edit_width = 40;
+            const int tooltip_mode_label_width = 44;
+            const int tooltip_mode_combo_width = 110;
             const int gap = 8;
             const int right_padding = static_cast<int>(kOuterPadding);
             const int browse_left = width - right_padding - browse_width;
@@ -515,6 +596,8 @@ namespace space_scanner::gui
             const int edit_width = std::max(160, scan_left - gap - edit_left);
             const int depth_edit_left = browse_left + browse_width - depth_edit_width;
             const int depth_label_left = depth_edit_left - gap - depth_label_width;
+            const int tooltip_mode_combo_left = depth_label_left - gap - tooltip_mode_combo_width;
+            const int tooltip_mode_label_left = tooltip_mode_combo_left - gap - tooltip_mode_label_width;
 
             if (m_path_edit)
             {
@@ -535,6 +618,14 @@ namespace space_scanner::gui
             if (m_depth_edit)
             {
                 MoveWindow(m_depth_edit, depth_edit_left, second_row_top, depth_edit_width, 26, TRUE);
+            }
+            if (m_tooltip_mode_label)
+            {
+                MoveWindow(m_tooltip_mode_label, tooltip_mode_label_left, second_row_top + 4, tooltip_mode_label_width, 18, TRUE);
+            }
+            if (m_tooltip_mode_combo)
+            {
+                MoveWindow(m_tooltip_mode_combo, tooltip_mode_combo_left, second_row_top, tooltip_mode_combo_width, 240, TRUE);
             }
         }
 
@@ -567,6 +658,10 @@ namespace space_scanner::gui
             if (m_browse_button)
             {
                 EnableWindow(m_browse_button, enabled);
+            }
+            if (m_tooltip_mode_combo)
+            {
+                EnableWindow(m_tooltip_mode_combo, enabled);
             }
         }
 
@@ -717,6 +812,32 @@ namespace space_scanner::gui
                         InvalidateRect(m_hwnd, nullptr, FALSE);
                     }
                 }
+                return;
+            }
+
+            if (control_id == IDC_TOOLTIP_MODE_COMBO && control == m_tooltip_mode_combo && notification_code == CBN_SELCHANGE)
+            {
+                const LRESULT selection = SendMessageW(m_tooltip_mode_combo, CB_GETCURSEL, 0, 0);
+                if (selection >= 0 && selection <= static_cast<LRESULT>(TooltipMode::Follow))
+                {
+                    m_tooltip_mode = static_cast<TooltipMode>(selection);
+                    if (m_hovered_index >= 0)
+                    {
+                        const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
+                        if (ShouldFollowTooltip(rect))
+                        {
+                            m_tooltip_target_position = m_mouse_position;
+                            StartTooltipAnimation();
+                        }
+                        else
+                        {
+                            m_tooltip_position = m_mouse_position;
+                            m_tooltip_target_position = m_mouse_position;
+                            StopTooltipAnimation();
+                        }
+                    }
+                }
+                InvalidateCanvas();
                 return;
             }
 
@@ -982,6 +1103,31 @@ namespace space_scanner::gui
                 {
                     return hr;
                 }
+                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(255, 255, 255, 0.98f), m_tooltip_background_brush.GetAddressOf());
+                if (FAILED(hr))
+                {
+                    return hr;
+                }
+                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(166, 172, 181, 0.95f), m_tooltip_border_brush.GetAddressOf());
+                if (FAILED(hr))
+                {
+                    return hr;
+                }
+                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(42, 42, 42, 0.96f), m_tooltip_text_brush.GetAddressOf());
+                if (FAILED(hr))
+                {
+                    return hr;
+                }
+                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(86, 86, 86, 0.96f), m_tooltip_secondary_text_brush.GetAddressOf());
+                if (FAILED(hr))
+                {
+                    return hr;
+                }
+                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(0, 0, 0, 0.18f), m_tooltip_shadow_brush.GetAddressOf());
+                if (FAILED(hr))
+                {
+                    return hr;
+                }
 
                 hr = m_dwrite_factory->CreateTextFormat(
                     L"Segoe UI Variable Display",
@@ -1071,6 +1217,11 @@ namespace space_scanner::gui
             m_glow_b_brush.Reset();
             m_header_action_brush.Reset();
             m_header_action_hover_brush.Reset();
+            m_tooltip_background_brush.Reset();
+            m_tooltip_border_brush.Reset();
+            m_tooltip_text_brush.Reset();
+            m_tooltip_secondary_text_brush.Reset();
+            m_tooltip_shadow_brush.Reset();
             m_title_format.Reset();
             m_body_format.Reset();
             m_small_format.Reset();
@@ -1272,14 +1423,49 @@ namespace space_scanner::gui
             track.hwndTrack = m_hwnd;
             TrackMouseEvent(&track);
 
+            const D2D1_POINT_2F new_mouse_position = D2D1::Point2F(static_cast<float>(x), static_cast<float>(y));
+            m_mouse_position = new_mouse_position;
             const int hovered_breadcrumb = HitTestBreadcrumb(static_cast<float>(x), static_cast<float>(y));
             const int hovered = HitTestTreemap(static_cast<float>(x), static_cast<float>(y));
-            const bool changed = hovered != m_hovered_index || hovered_breadcrumb != m_hovered_breadcrumb_index;
+            const bool hovered_changed = hovered != m_hovered_index || hovered_breadcrumb != m_hovered_breadcrumb_index;
             m_hovered_breadcrumb_index = hovered_breadcrumb;
-            if (changed)
+            if (hovered_changed)
             {
                 m_hovered_index = hovered;
+                if (hovered >= 0)
+                {
+                    m_tooltip_position = new_mouse_position;
+                    m_tooltip_target_position = new_mouse_position;
+                    const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(hovered)];
+                    if (ShouldFollowTooltip(rect))
+                    {
+                        StartTooltipAnimation();
+                    }
+                    else
+                    {
+                        StopTooltipAnimation();
+                    }
+                }
+                else
+                {
+                    m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
+                    m_tooltip_target_position = D2D1::Point2F(-1.0f, -1.0f);
+                    StopTooltipAnimation();
+                }
                 InvalidateCanvas();
+            }
+            else if (hovered >= 0)
+            {
+                const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(hovered)];
+                if (ShouldFollowTooltip(rect))
+                {
+                    m_tooltip_target_position = new_mouse_position;
+                    StartTooltipAnimation();
+                }
+                else
+                {
+                    StopTooltipAnimation();
+                }
             }
 
             const bool breadcrumb_is_clickable =
@@ -1957,24 +2143,238 @@ namespace space_scanner::gui
                 m_muted_brush.Get());
         }
 
-        void DrawFooter()
+        bool ShouldFollowTooltip(const visualization::TreemapRect& rect) const
+        {
+            switch (m_tooltip_mode)
+            {
+            case TooltipMode::Fixed:
+                return false;
+            case TooltipMode::Follow:
+                return true;
+            case TooltipMode::Auto:
+            default:
+                break;
+            }
+
+            const float rect_width = static_cast<float>(rect.width);
+            const float rect_height = static_cast<float>(rect.height);
+            const float rect_area = rect_width * rect_height;
+            const float treemap_width = std::max(m_treemap_content_rect.right - m_treemap_content_rect.left, 1.0f);
+            const float treemap_height = std::max(m_treemap_content_rect.bottom - m_treemap_content_rect.top, 1.0f);
+            const float treemap_area = treemap_width * treemap_height;
+
+            return rect_width >= kTooltipAutoFollowWidth ||
+                rect_height >= kTooltipAutoFollowHeight ||
+                rect_area >= (treemap_area * kTooltipAutoFollowAreaRatio);
+        }
+
+        void StartTooltipAnimation()
+        {
+            if (m_tooltip_animation_active || !m_hwnd)
+            {
+                return;
+            }
+
+            SetTimer(m_hwnd, kTooltipAnimationTimerId, kTooltipAnimationIntervalMs, nullptr);
+            m_tooltip_animation_active = true;
+        }
+
+        void StopTooltipAnimation()
+        {
+            if (!m_tooltip_animation_active || !m_hwnd)
+            {
+                return;
+            }
+
+            KillTimer(m_hwnd, kTooltipAnimationTimerId);
+            m_tooltip_animation_active = false;
+        }
+
+        void OnTooltipAnimationTimer()
+        {
+            if (m_hovered_index < 0 || m_hovered_index >= static_cast<int>(m_rects.size()))
+            {
+                StopTooltipAnimation();
+                return;
+            }
+
+            const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
+            if (!ShouldFollowTooltip(rect))
+            {
+                StopTooltipAnimation();
+                return;
+            }
+
+            const float delta_x = m_tooltip_target_position.x - m_tooltip_position.x;
+            const float delta_y = m_tooltip_target_position.y - m_tooltip_position.y;
+            const float distance_squared = (delta_x * delta_x) + (delta_y * delta_y);
+            if (distance_squared <= (kTooltipAnimationSnapDistance * kTooltipAnimationSnapDistance))
+            {
+                m_tooltip_position = m_tooltip_target_position;
+                StopTooltipAnimation();
+                InvalidateCanvas();
+                return;
+            }
+
+            m_tooltip_position.x += delta_x * kTooltipAnimationSmoothing;
+            m_tooltip_position.y += delta_y * kTooltipAnimationSmoothing;
+            InvalidateCanvas();
+        }
+
+        D2D1_RECT_F GetHoveredRectBounds(const visualization::TreemapRect& rect) const
+        {
+            return D2D1::RectF(
+                m_treemap_content_rect.left + static_cast<float>(rect.x),
+                m_treemap_content_rect.top + static_cast<float>(rect.y),
+                m_treemap_content_rect.left + static_cast<float>(rect.x + rect.width),
+                m_treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
+        }
+
+        D2D1_POINT_2F ResolveTooltipPosition(
+            const D2D1_POINT_2F& anchor,
+            const D2D1_RECT_F& hovered_rect,
+            float tooltip_width,
+            float tooltip_height,
+            bool follow_tooltip) const
+        {
+            float tooltip_left = anchor.x + kTooltipOffsetX;
+            float tooltip_top = anchor.y + kTooltipOffsetY;
+
+            if (tooltip_left + tooltip_width > m_canvas_rect.right - kTooltipInnerMargin)
+            {
+                tooltip_left = anchor.x - tooltip_width - 10.0f;
+            }
+            if (tooltip_top + tooltip_height > m_canvas_rect.bottom - kTooltipInnerMargin)
+            {
+                tooltip_top = anchor.y - tooltip_height - 10.0f;
+            }
+
+            if (!follow_tooltip)
+            {
+                const float hovered_width = hovered_rect.right - hovered_rect.left;
+                const float hovered_height = hovered_rect.bottom - hovered_rect.top;
+                if (hovered_width >= tooltip_width + (kTooltipInnerMargin * 2.0f) &&
+                    hovered_height >= tooltip_height + (kTooltipInnerMargin * 2.0f))
+                {
+                    const float min_hovered_left = hovered_rect.left + kTooltipInnerMargin;
+                    const float max_hovered_left = hovered_rect.right - tooltip_width - kTooltipInnerMargin;
+                    const float min_hovered_top = hovered_rect.top + kTooltipInnerMargin;
+                    const float max_hovered_top = hovered_rect.bottom - tooltip_height - kTooltipInnerMargin;
+                    tooltip_left = std::clamp(tooltip_left, min_hovered_left, max_hovered_left);
+                    tooltip_top = std::clamp(tooltip_top, min_hovered_top, max_hovered_top);
+                }
+            }
+
+            const float min_tooltip_left = m_canvas_rect.left + kTooltipInnerMargin;
+            const float max_tooltip_left = std::max(min_tooltip_left, m_canvas_rect.right - tooltip_width - kTooltipInnerMargin);
+            const float min_tooltip_top = m_canvas_rect.top + kTooltipInnerMargin;
+            const float max_tooltip_top = std::max(min_tooltip_top, m_canvas_rect.bottom - tooltip_height - kTooltipInnerMargin);
+            tooltip_left = std::clamp(tooltip_left, min_tooltip_left, max_tooltip_left);
+            tooltip_top = std::clamp(tooltip_top, min_tooltip_top, max_tooltip_top);
+
+            return D2D1::Point2F(tooltip_left, tooltip_top);
+        }
+
+        void DrawHoverTooltip()
         {
             if (m_hovered_index < 0 || m_hovered_index >= static_cast<int>(m_rects.size()))
             {
                 return;
             }
+            if (!m_dwrite_factory || !m_small_format || !m_tooltip_background_brush || !m_tooltip_border_brush ||
+                !m_tooltip_text_brush || !m_tooltip_secondary_text_brush || !m_tooltip_shadow_brush)
+            {
+                return;
+            }
 
             const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
-            std::wstringstream footer;
-            footer << (rect.path.empty() ? rect.label : rect.path)
-                << L"   |   " << HumanizeBytes(rect.size);
+            const bool follow_tooltip = ShouldFollowTooltip(rect);
+            const std::wstring name_text = rect.path.empty() ? rect.label : rect.path;
+            const std::wstring size_text = L"Size: " + HumanizeBytes(rect.size);
 
-            const D2D1_RECT_F footer_rect = D2D1::RectF(
-                m_canvas_rect.left + 16.0f,
-                m_canvas_rect.bottom - 30.0f,
-                m_canvas_rect.right - 16.0f,
-                m_canvas_rect.bottom - 10.0f);
-            DrawTextLine(footer.str(), m_small_format.Get(), footer_rect, m_text_brush.Get());
+            const float available_tooltip_width = std::max(48.0f, (m_canvas_rect.right - m_canvas_rect.left) - 12.0f);
+            const float max_tooltip_width = std::min(420.0f, std::max(28.0f, available_tooltip_width - (kTooltipPaddingX * 2.0f)));
+            const float max_tooltip_height = std::max(48.0f, (m_canvas_rect.bottom - m_canvas_rect.top) - 24.0f);
+
+            ComPtr<IDWriteTextLayout> name_layout;
+            HRESULT hr = m_dwrite_factory->CreateTextLayout(
+                name_text.c_str(),
+                static_cast<UINT32>(name_text.size()),
+                m_small_format.Get(),
+                max_tooltip_width,
+                max_tooltip_height,
+                name_layout.GetAddressOf());
+            if (FAILED(hr) || !name_layout)
+            {
+                return;
+            }
+            name_layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+
+            ComPtr<IDWriteTextLayout> size_layout;
+            hr = m_dwrite_factory->CreateTextLayout(
+                size_text.c_str(),
+                static_cast<UINT32>(size_text.size()),
+                m_small_format.Get(),
+                max_tooltip_width,
+                22.0f,
+                size_layout.GetAddressOf());
+            if (FAILED(hr) || !size_layout)
+            {
+                return;
+            }
+            size_layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+
+            DWRITE_TEXT_METRICS name_metrics = {};
+            DWRITE_TEXT_METRICS size_metrics = {};
+            if (FAILED(name_layout->GetMetrics(&name_metrics)) || FAILED(size_layout->GetMetrics(&size_metrics)))
+            {
+                return;
+            }
+
+            const float text_width = std::max(
+                std::max(name_metrics.widthIncludingTrailingWhitespace, size_metrics.widthIncludingTrailingWhitespace),
+                96.0f);
+            const float name_height = std::max(name_metrics.height, 16.0f);
+            const float size_height = std::max(size_metrics.height, 14.0f);
+            const float tooltip_width = std::min(available_tooltip_width, text_width + (kTooltipPaddingX * 2.0f));
+            const float tooltip_height = (kTooltipPaddingY * 2.0f) + name_height + kTooltipLineGap + size_height;
+            const D2D1_POINT_2F tooltip_origin = ResolveTooltipPosition(
+                m_tooltip_position,
+                GetHoveredRectBounds(rect),
+                tooltip_width,
+                tooltip_height,
+                follow_tooltip);
+            const float tooltip_left = tooltip_origin.x;
+            const float tooltip_top = tooltip_origin.y;
+
+            const D2D1_ROUNDED_RECT shadow_rect = D2D1::RoundedRect(
+                D2D1::RectF(
+                    tooltip_left + 2.0f,
+                    tooltip_top + 3.0f,
+                    tooltip_left + tooltip_width + 2.0f,
+                    tooltip_top + tooltip_height + 3.0f),
+                kTooltipCornerRadius,
+                kTooltipCornerRadius);
+            const D2D1_ROUNDED_RECT tooltip_rect = D2D1::RoundedRect(
+                D2D1::RectF(
+                    tooltip_left,
+                    tooltip_top,
+                    tooltip_left + tooltip_width,
+                    tooltip_top + tooltip_height),
+                kTooltipCornerRadius,
+                kTooltipCornerRadius);
+            m_render_target->FillRoundedRectangle(shadow_rect, m_tooltip_shadow_brush.Get());
+            m_render_target->FillRoundedRectangle(tooltip_rect, m_tooltip_background_brush.Get());
+            m_render_target->DrawRoundedRectangle(tooltip_rect, m_tooltip_border_brush.Get(), 1.0f);
+
+            const D2D1_POINT_2F name_origin = D2D1::Point2F(
+                tooltip_left + kTooltipPaddingX,
+                tooltip_top + kTooltipPaddingY);
+            const D2D1_POINT_2F size_origin = D2D1::Point2F(
+                tooltip_left + kTooltipPaddingX,
+                tooltip_top + kTooltipPaddingY + name_height + kTooltipLineGap);
+            m_render_target->DrawTextLayout(name_origin, name_layout.Get(), m_tooltip_text_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            m_render_target->DrawTextLayout(size_origin, size_layout.Get(), m_tooltip_secondary_text_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
         }
 
         void OnPaint()
@@ -1992,7 +2392,7 @@ namespace space_scanner::gui
                 UpdateCanvasRect();
                 DrawHeader();
                 DrawTreemap();
-                DrawFooter();
+                DrawHoverTooltip();
 
                 hr = m_render_target->EndDraw();
                 if (hr == D2DERR_RECREATE_TARGET)
@@ -2011,6 +2411,8 @@ namespace space_scanner::gui
         HWND m_browse_button = nullptr;
         HWND m_depth_label = nullptr;
         HWND m_depth_edit = nullptr;
+        HWND m_tooltip_mode_label = nullptr;
+        HWND m_tooltip_mode_combo = nullptr;
         std::shared_ptr<SharedScanState> m_shared_scan_state;
         bool m_requested_path_is_ntfs = false;
 
@@ -2035,6 +2437,11 @@ namespace space_scanner::gui
         ComPtr<ID2D1SolidColorBrush> m_glow_b_brush;
         ComPtr<ID2D1SolidColorBrush> m_header_action_brush;
         ComPtr<ID2D1SolidColorBrush> m_header_action_hover_brush;
+        ComPtr<ID2D1SolidColorBrush> m_tooltip_background_brush;
+        ComPtr<ID2D1SolidColorBrush> m_tooltip_border_brush;
+        ComPtr<ID2D1SolidColorBrush> m_tooltip_text_brush;
+        ComPtr<ID2D1SolidColorBrush> m_tooltip_secondary_text_brush;
+        ComPtr<ID2D1SolidColorBrush> m_tooltip_shadow_brush;
         ComPtr<IDWriteTextFormat> m_title_format;
         ComPtr<IDWriteTextFormat> m_body_format;
         ComPtr<IDWriteTextFormat> m_small_format;
@@ -2057,6 +2464,11 @@ namespace space_scanner::gui
         std::vector<visualization::TreemapRect> m_rects;
         std::unordered_set<uint64_t> m_expanded_reveal_nodes;
         std::vector<BreadcrumbStrip> m_breadcrumbs;
+        TooltipMode m_tooltip_mode = TooltipMode::Auto;
+        bool m_tooltip_animation_active = false;
+        D2D1_POINT_2F m_mouse_position = D2D1::Point2F(-1.0f, -1.0f);
+        D2D1_POINT_2F m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
+        D2D1_POINT_2F m_tooltip_target_position = D2D1::Point2F(-1.0f, -1.0f);
         D2D1_RECT_F m_canvas_rect = D2D1::RectF(0, 0, 0, 0);
         D2D1_RECT_F m_treemap_content_rect = D2D1::RectF(0, 0, 0, 0);
         D2D1_RECT_F m_focus_up_rect = D2D1::RectF(0, 0, 0, 0);
