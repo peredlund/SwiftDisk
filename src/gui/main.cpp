@@ -1758,6 +1758,87 @@ namespace space_scanner::gui
                 DWRITE_WORD_WRAPPING_NO_WRAP);
         }
 
+        float MeasureTextWidth(
+            const std::wstring& text,
+            IDWriteTextFormat* format) const
+        {
+            if (text.empty() || !format || !m_dwrite_factory)
+            {
+                return 0.0f;
+            }
+
+            ComPtr<IDWriteTextLayout> layout;
+            HRESULT hr = m_dwrite_factory->CreateTextLayout(
+                text.c_str(),
+                static_cast<UINT32>(text.size()),
+                format,
+                4096.0f,
+                64.0f,
+                layout.GetAddressOf());
+            if (FAILED(hr) || !layout)
+            {
+                return 0.0f;
+            }
+
+            layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            DWRITE_TEXT_METRICS metrics = {};
+            if (FAILED(layout->GetMetrics(&metrics)))
+            {
+                return 0.0f;
+            }
+
+            return metrics.widthIncludingTrailingWhitespace;
+        }
+
+        std::wstring BuildDirectoryHeaderText(
+            const std::wstring& label,
+            uint64_t size,
+            float available_width) const
+        {
+            const std::wstring size_suffix = L" - " + HumanizeBytes(size);
+            const std::wstring full_text = label + size_suffix;
+            if (MeasureTextWidth(full_text, m_small_format.Get()) <= available_width)
+            {
+                return full_text;
+            }
+
+            constexpr size_t kMinimumReservedNameCharacters = 5;
+            const float suffix_width = MeasureTextWidth(size_suffix, m_small_format.Get());
+            if (suffix_width >= available_width)
+            {
+                return label;
+            }
+
+            size_t low = 0;
+            size_t high = label.size();
+            size_t best = 0;
+            while (low <= high)
+            {
+                const size_t mid = low + ((high - low) / 2);
+                const std::wstring candidate = label.substr(0, mid) + L"..." + size_suffix;
+                if (MeasureTextWidth(candidate, m_small_format.Get()) <= available_width)
+                {
+                    best = mid;
+                    low = mid + 1;
+                }
+                else
+                {
+                    if (mid == 0)
+                    {
+                        break;
+                    }
+                    high = mid - 1;
+                }
+            }
+
+            if (best < kMinimumReservedNameCharacters)
+            {
+                return label;
+            }
+
+            return label.substr(0, best) + L"..." + size_suffix;
+        }
+
         void DrawTreemap()
         {
             const D2D1_ROUNDED_RECT canvas_panel = D2D1::RoundedRect(m_canvas_rect, 16.0f, 16.0f);
@@ -1991,33 +2072,24 @@ namespace space_scanner::gui
 
                     if (is_directory_header)
                     {
-                        const std::wstring size_text = HumanizeBytes(rect.size);
-                        const float size_column_width = std::clamp(54.0f + static_cast<float>(size_text.size()) * 4.8f, 72.0f, 112.0f);
-                        const D2D1_RECT_F name_rect = D2D1::RectF(
+                        const D2D1_RECT_F header_rect = D2D1::RectF(
                             draw_rect.left + 6.0f,
-                            draw_rect.top + 2.0f,
-                            std::max(draw_rect.left + 12.0f, draw_rect.right - size_column_width - 6.0f),
-                            draw_rect.top + 16.0f);
-                        const D2D1_RECT_F header_size_rect = D2D1::RectF(
-                            std::max(draw_rect.left + 10.0f, draw_rect.right - size_column_width),
                             draw_rect.top + 2.0f,
                             draw_rect.right - 6.0f,
                             draw_rect.top + 16.0f);
+                        const float header_width = std::max(0.0f, header_rect.right - header_rect.left);
+                        const std::wstring header_text = BuildDirectoryHeaderText(
+                            rect.label,
+                            rect.size,
+                            header_width);
 
                         DrawTileTextLine(
-                            rect.label,
+                            header_text,
                             m_small_format.Get(),
-                            name_rect,
+                            header_rect,
                             m_tile_text_brush.Get(),
                             m_tile_text_outline_brush.Get(),
                             DWRITE_TEXT_ALIGNMENT_LEADING);
-                        DrawTileTextLine(
-                            size_text,
-                            m_small_format.Get(),
-                            header_size_rect,
-                            m_tile_secondary_text_brush.Get(),
-                            m_tile_text_outline_brush.Get(),
-                            DWRITE_TEXT_ALIGNMENT_TRAILING);
                     }
                     else if (!is_view_root && tile_width >= 64.0f && tile_height >= 40.0f)
                     {
