@@ -26,13 +26,6 @@ struct TreemapLayoutOptions
     std::vector<uint64_t> expanded_node_ids;
 };
 
-struct TreemapDocumentInfo
-{
-    std::wstring scan_path;
-    std::wstring backend_name;
-    double elapsed_seconds = 0.0;
-};
-
 struct TreemapRect
 {
     uint64_t node_id = 0;
@@ -67,12 +60,5 @@ TreemapVisualStyle BuildTreemapVisualStyle(
     const std::wstring& label,
     const std::wstring& path,
     bool is_dir);
-
-bool WriteTreemapHtml(
-    const std::wstring& output_path,
-    const FileTree& tree,
-    const TreemapDocumentInfo& info,
-    const TreemapLayoutOptions& options,
-    std::wstring* error);
 
 } // namespace space_scanner::visualization

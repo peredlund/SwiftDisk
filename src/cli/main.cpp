@@ -14,8 +14,6 @@
 #include "core/dir_scanner.h"
 #include "core/ntfs/mft_scanner.h"
 #include "core/ntfs/validation.h"
-#include "visualization/treemap.h"
-
 namespace space_scanner
 {
 
@@ -27,7 +25,6 @@ struct Options
     size_t validate_sample = 128;
     size_t validate_edge_limit = 4096;
     std::wstring json_out;
-    std::wstring treemap_out;
 };
 
 bool TryGetVolumeRoot(const std::wstring& path, std::wstring* volume_root)
@@ -87,9 +84,6 @@ void PrintUsage()
                   L"cases (default 4096)\n";
     std::wcout
         << L"  --json-out PATH  Write machine-readable scan report to JSON\n";
-    std::wcout << L"  --treemap-out PATH\n";
-    std::wcout << L"                   Write a standalone HTML treemap "
-                  L"visualization\n";
 }
 
 /**
@@ -137,10 +131,6 @@ bool ParseArgs(int argc, wchar_t* argv[], Options* options)
         else if (wcscmp(argv[i], L"--json-out") == 0 && i + 1 < argc)
         {
             options->json_out = argv[++i];
-        }
-        else if (wcscmp(argv[i], L"--treemap-out") == 0 && i + 1 < argc)
-        {
-            options->treemap_out = argv[++i];
         }
         else if (wcscmp(argv[i], L"--help") == 0 || wcscmp(argv[i], L"-h") == 0)
         {
@@ -660,25 +650,6 @@ int wmain(int argc, wchar_t* argv[])
             return 4;
         }
         std::wcout << L"JSON report written to " << options.json_out << L"\n";
-    }
-
-    if (!options.treemap_out.empty())
-    {
-        visualization::TreemapDocumentInfo treemap_info;
-        treemap_info.scan_path = options.path;
-        treemap_info.backend_name = used_mft_scan ? L"NTFS MFT" : L"Directory";
-        treemap_info.elapsed_seconds = elapsed;
-
-        visualization::TreemapLayoutOptions treemap_options;
-        if (!visualization::WriteTreemapHtml(options.treemap_out, tree,
-                                             treemap_info, treemap_options,
-                                             &error))
-        {
-            std::wcout << L"Failed to write treemap: "
-                       << (error.empty() ? L"Unknown error." : error) << L"\n";
-            return 5;
-        }
-        std::wcout << L"Treemap written to " << options.treemap_out << L"\n";
     }
 
     return 0;
