@@ -39,6 +39,8 @@ namespace space_scanner::gui
     constexpr int IDC_DEPTH_EDIT = 1005;
     constexpr int IDC_SHOW_TOOLTIP_CHECK = 1006;
     constexpr int IDC_SHOW_STATUS_BAR_CHECK = 1007;
+    constexpr int IDC_DEPTH_UP_BUTTON = 1008;
+    constexpr int IDC_DEPTH_DOWN_BUTTON = 1009;
 
     struct GuiOptions
     {
@@ -495,6 +497,34 @@ namespace space_scanner::gui
                 nullptr,
                 nullptr);
 
+            m_depth_up_button = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"\x25B2",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                0,
+                0,
+                0,
+                0,
+                m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_DEPTH_UP_BUTTON)),
+                nullptr,
+                nullptr);
+
+            m_depth_down_button = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"\x25BC",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                0,
+                0,
+                0,
+                0,
+                m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_DEPTH_DOWN_BUTTON)),
+                nullptr,
+                nullptr);
+
             m_show_tooltip_check = CreateWindowExW(
                 0,
                 L"BUTTON",
@@ -542,6 +572,14 @@ namespace space_scanner::gui
             if (m_depth_edit)
             {
                 SendMessageW(m_depth_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+            }
+            if (m_depth_up_button)
+            {
+                SendMessageW(m_depth_up_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+            }
+            if (m_depth_down_button)
+            {
+                SendMessageW(m_depth_down_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
             }
             if (m_show_tooltip_check)
             {
@@ -591,6 +629,8 @@ namespace space_scanner::gui
             const int scan_width = 72;
             const int depth_label_width = 42;
             const int depth_edit_width = 40;
+            const int depth_button_width = 18;
+            const int depth_button_gap = 4;
             const int show_status_bar_width = 124;
             const int show_tooltip_width = 102;
             const int gap = 8;
@@ -598,7 +638,8 @@ namespace space_scanner::gui
             const int browse_left = width - right_padding - browse_width;
             const int scan_left = browse_left - gap - scan_width;
             const int edit_width = std::max(160, scan_left - gap - edit_left);
-            const int depth_edit_left = browse_left + browse_width - depth_edit_width;
+            const int depth_button_left = browse_left + browse_width - depth_button_width;
+            const int depth_edit_left = depth_button_left - depth_button_gap - depth_edit_width;
             const int depth_label_left = depth_edit_left - gap - depth_label_width;
             const int show_status_bar_left = depth_label_left - gap - show_status_bar_width;
             const int show_tooltip_left = show_status_bar_left - gap - show_tooltip_width;
@@ -622,6 +663,14 @@ namespace space_scanner::gui
             if (m_depth_edit)
             {
                 MoveWindow(m_depth_edit, depth_edit_left, second_row_top, depth_edit_width, 26, TRUE);
+            }
+            if (m_depth_up_button)
+            {
+                MoveWindow(m_depth_up_button, depth_button_left, second_row_top, depth_button_width, 12, TRUE);
+            }
+            if (m_depth_down_button)
+            {
+                MoveWindow(m_depth_down_button, depth_button_left, second_row_top + 13, depth_button_width, 13, TRUE);
             }
             if (m_show_tooltip_check)
             {
@@ -671,6 +720,47 @@ namespace space_scanner::gui
             {
                 EnableWindow(m_show_status_bar_check, enabled);
             }
+        }
+
+        void ApplyDepthLimit(int depth_limit)
+        {
+            const int clamped_depth_limit = std::clamp(depth_limit, 1, 32);
+            if (clamped_depth_limit == m_max_depth)
+            {
+                return;
+            }
+
+            m_max_depth = clamped_depth_limit;
+            m_expanded_reveal_nodes.clear();
+            if (m_tree && !m_scan_in_progress)
+            {
+                RebuildLayout();
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+        }
+
+        void SetDepthEditValue(int depth_limit)
+        {
+            if (!m_depth_edit)
+            {
+                ApplyDepthLimit(depth_limit);
+                return;
+            }
+
+            const int clamped_depth_limit = std::clamp(depth_limit, 1, 32);
+            const std::wstring depth_text = std::to_wstring(clamped_depth_limit);
+            SetWindowTextW(m_depth_edit, depth_text.c_str());
+        }
+
+        void AdjustDepthLimit(int delta)
+        {
+            int depth_limit = m_max_depth;
+            if (!TryGetDepthLimitFromEdit(&depth_limit))
+            {
+                depth_limit = m_max_depth;
+            }
+
+            SetDepthEditValue(depth_limit + delta);
         }
 
         bool TryGetDepthLimitFromEdit(int* depth_limit) const
@@ -810,16 +900,22 @@ namespace space_scanner::gui
             if (control_id == IDC_DEPTH_EDIT && control == m_depth_edit && notification_code == EN_CHANGE)
             {
                 int depth_limit = 0;
-                if (TryGetDepthLimitFromEdit(&depth_limit) && depth_limit != m_max_depth)
+                if (TryGetDepthLimitFromEdit(&depth_limit))
                 {
-                    m_max_depth = depth_limit;
-                    m_expanded_reveal_nodes.clear();
-                    if (m_tree && !m_scan_in_progress)
-                    {
-                        RebuildLayout();
-                        InvalidateRect(m_hwnd, nullptr, FALSE);
-                    }
+                    ApplyDepthLimit(depth_limit);
                 }
+                return;
+            }
+
+            if (control_id == IDC_DEPTH_UP_BUTTON && control == m_depth_up_button && notification_code == BN_CLICKED)
+            {
+                AdjustDepthLimit(1);
+                return;
+            }
+
+            if (control_id == IDC_DEPTH_DOWN_BUTTON && control == m_depth_down_button && notification_code == BN_CLICKED)
+            {
+                AdjustDepthLimit(-1);
                 return;
             }
 
@@ -2611,6 +2707,8 @@ namespace space_scanner::gui
         HWND m_browse_button = nullptr;
         HWND m_depth_label = nullptr;
         HWND m_depth_edit = nullptr;
+        HWND m_depth_up_button = nullptr;
+        HWND m_depth_down_button = nullptr;
         HWND m_show_tooltip_check = nullptr;
         HWND m_show_status_bar_check = nullptr;
         std::shared_ptr<SharedScanState> m_shared_scan_state;
