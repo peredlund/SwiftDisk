@@ -41,6 +41,7 @@ namespace space_scanner::gui
     constexpr int IDC_SHOW_STATUS_BAR_CHECK = 1007;
     constexpr int IDC_DEPTH_UP_BUTTON = 1008;
     constexpr int IDC_DEPTH_DOWN_BUTTON = 1009;
+    constexpr int IDC_RESET_BUTTON = 1010;
 
     struct GuiOptions
     {
@@ -351,12 +352,7 @@ namespace space_scanner::gui
             case WM_MOUSELEAVE:
                 if (m_hovered_index != -1 || m_hovered_breadcrumb_index != -1)
                 {
-                    m_hovered_index = -1;
-                    m_hovered_breadcrumb_index = -1;
-                    m_mouse_position = D2D1::Point2F(-1.0f, -1.0f);
-                    m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
-                    m_tooltip_target_position = D2D1::Point2F(-1.0f, -1.0f);
-                    StopTooltipAnimation();
+                    ClearHoverState();
                     InvalidateCanvas();
                 }
                 return 0;
@@ -468,6 +464,20 @@ namespace space_scanner::gui
                 nullptr,
                 nullptr);
 
+            m_reset_button = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Reset",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                0,
+                0,
+                0,
+                0,
+                m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_RESET_BUTTON)),
+                nullptr,
+                nullptr);
+
             m_depth_label = CreateWindowExW(
                 0,
                 L"STATIC",
@@ -565,6 +575,10 @@ namespace space_scanner::gui
             {
                 SendMessageW(m_browse_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
             }
+            if (m_reset_button)
+            {
+                SendMessageW(m_reset_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+            }
             if (m_depth_label)
             {
                 SendMessageW(m_depth_label, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
@@ -627,6 +641,7 @@ namespace space_scanner::gui
             const int second_row_top = 54;
             const int browse_width = 92;
             const int scan_width = 72;
+            const int reset_width = 72;
             const int depth_label_width = 42;
             const int depth_edit_width = 40;
             const int depth_button_width = 18;
@@ -641,7 +656,8 @@ namespace space_scanner::gui
             const int depth_button_left = browse_left + browse_width - depth_button_width;
             const int depth_edit_left = depth_button_left - depth_button_gap - depth_edit_width;
             const int depth_label_left = depth_edit_left - gap - depth_label_width;
-            const int show_status_bar_left = depth_label_left - gap - show_status_bar_width;
+            const int reset_left = depth_label_left - gap - reset_width;
+            const int show_status_bar_left = reset_left - gap - show_status_bar_width;
             const int show_tooltip_left = show_status_bar_left - gap - show_tooltip_width;
 
             if (m_path_edit)
@@ -651,6 +667,10 @@ namespace space_scanner::gui
             if (m_scan_button)
             {
                 MoveWindow(m_scan_button, scan_left, top, scan_width, 26, TRUE);
+            }
+            if (m_reset_button)
+            {
+                MoveWindow(m_reset_button, reset_left, second_row_top, reset_width, 26, TRUE);
             }
             if (m_browse_button)
             {
@@ -708,6 +728,10 @@ namespace space_scanner::gui
             {
                 EnableWindow(m_scan_button, enabled);
             }
+            if (m_reset_button)
+            {
+                EnableWindow(m_reset_button, enabled && m_tree != nullptr);
+            }
             if (m_browse_button)
             {
                 EnableWindow(m_browse_button, enabled);
@@ -722,6 +746,22 @@ namespace space_scanner::gui
             }
         }
 
+        void ClearHoverState()
+        {
+            m_hovered_index = -1;
+            m_hovered_breadcrumb_index = -1;
+            m_mouse_position = D2D1::Point2F(-1.0f, -1.0f);
+            m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
+            m_tooltip_target_position = D2D1::Point2F(-1.0f, -1.0f);
+            StopTooltipAnimation();
+        }
+
+        void RebuildAndRedraw()
+        {
+            RebuildLayout();
+            InvalidateRect(m_hwnd, nullptr, FALSE);
+        }
+
         void ApplyDepthLimit(int depth_limit)
         {
             const int clamped_depth_limit = std::clamp(depth_limit, 1, 32);
@@ -734,9 +774,34 @@ namespace space_scanner::gui
             m_expanded_reveal_nodes.clear();
             if (m_tree && !m_scan_in_progress)
             {
-                RebuildLayout();
-                InvalidateRect(m_hwnd, nullptr, FALSE);
+                RebuildAndRedraw();
             }
+        }
+
+        void ResetTreemapView()
+        {
+            if (!m_tree || m_scan_in_progress)
+            {
+                return;
+            }
+
+            ResetToFreshScanView();
+            RebuildAndRedraw();
+        }
+
+        void ResetToFreshScanView()
+        {
+            if (!m_tree)
+            {
+                return;
+            }
+
+            m_view_root_id = m_tree->RootId();
+            m_expanded_reveal_nodes.clear();
+            m_layout_options = visualization::TreemapLayoutOptions();
+            m_rects.clear();
+            m_breadcrumbs.clear();
+            ClearHoverState();
         }
 
         void SetDepthEditValue(int depth_limit)
@@ -952,6 +1017,12 @@ namespace space_scanner::gui
                 return;
             }
 
+            if (control_id == IDC_RESET_BUTTON && control == m_reset_button)
+            {
+                ResetTreemapView();
+                return;
+            }
+
             if (control_id == IDC_BROWSE_BUTTON && control == m_browse_button)
             {
                 if (m_scan_in_progress)
@@ -1036,15 +1107,14 @@ namespace space_scanner::gui
             }
 
             m_scan_in_progress = false;
-            m_hovered_index = -1;
+            ClearHoverState();
             m_rects.clear();
-            m_hovered_breadcrumb_index = -1;
-            SetScanControlsEnabled(true);
 
             if (!payload)
             {
                 m_has_error = true;
                 m_status_text = L"Scan completed without payload.";
+                SetScanControlsEnabled(true);
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return;
             }
@@ -1057,6 +1127,7 @@ namespace space_scanner::gui
                 m_has_error = true;
                 m_error_text = payload->error.empty() ? L"Scan failed." : payload->error;
                 m_status_text = L"Scan failed";
+                SetScanControlsEnabled(true);
                 InvalidateRect(m_hwnd, nullptr, FALSE);
                 return;
             }
@@ -1064,13 +1135,12 @@ namespace space_scanner::gui
             m_tree = std::move(payload->tree);
             m_tree_stats = m_tree->ComputeStats();
             m_used_mft_scan = payload->used_mft_scan;
-            m_view_root_id = m_tree->RootId();
-            m_expanded_reveal_nodes.clear();
             m_has_error = false;
             m_error_text.clear();
             m_status_text = L"Ready";
-            RebuildLayout();
-            InvalidateRect(m_hwnd, nullptr, FALSE);
+            ResetToFreshScanView();
+            SetScanControlsEnabled(true);
+            RebuildAndRedraw();
         }
 
         HRESULT CreateDeviceResources()
@@ -1659,8 +1729,7 @@ namespace space_scanner::gui
                 m_expanded_reveal_nodes.insert(rect.node_id);
             }
             m_view_root_id = rect.node_id;
-            RebuildLayout();
-            InvalidateRect(m_hwnd, nullptr, FALSE);
+            RebuildAndRedraw();
         }
 
         void NavigateToNode(uint64_t node_id)
@@ -1674,8 +1743,7 @@ namespace space_scanner::gui
                 return;
             }
             m_view_root_id = node_id;
-            RebuildLayout();
-            InvalidateRect(m_hwnd, nullptr, FALSE);
+            RebuildAndRedraw();
         }
 
         void NavigateUp()
@@ -1765,8 +1833,7 @@ namespace space_scanner::gui
             else if (key_code == VK_HOME && m_tree)
             {
                 m_view_root_id = m_tree->RootId();
-                RebuildLayout();
-                InvalidateRect(m_hwnd, nullptr, FALSE);
+                RebuildAndRedraw();
             }
         }
 
@@ -2358,8 +2425,14 @@ namespace space_scanner::gui
                 m_muted_brush.Get());
 
             const std::wstring hint = L"Click a directory to zoom in. Right-click or Backspace to go up. Home returns to the scan root.";
+            const std::wstring reset_hint = L"Reset returns to the scan root at the current depth and clears revealed levels.";
             DrawTextLine(
                 hint,
+                m_small_format.Get(),
+                D2D1::RectF(header_rect.left + 24.0f, header_rect.bottom - 30.0f, header_rect.right - 24.0f, header_rect.bottom - 16.0f),
+                m_muted_brush.Get());
+            DrawTextLine(
+                reset_hint,
                 m_small_format.Get(),
                 D2D1::RectF(header_rect.left + 24.0f, header_rect.bottom - 16.0f, header_rect.right - 24.0f, header_rect.bottom - 2.0f),
                 m_muted_brush.Get());
@@ -2705,6 +2778,7 @@ namespace space_scanner::gui
         HWND m_path_edit = nullptr;
         HWND m_scan_button = nullptr;
         HWND m_browse_button = nullptr;
+        HWND m_reset_button = nullptr;
         HWND m_depth_label = nullptr;
         HWND m_depth_edit = nullptr;
         HWND m_depth_up_button = nullptr;
