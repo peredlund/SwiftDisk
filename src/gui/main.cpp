@@ -329,27 +329,30 @@ namespace space_scanner::gui
         static constexpr float kTooltipAnimationSmoothing = 0.38f;
         static constexpr float kTooltipAnimationSnapDistance = 1.5f;
         static constexpr size_t kMaxBreadcrumbStrips = 5;
-        static constexpr BYTE kHeaderPanelRed = 12;
-        static constexpr BYTE kHeaderPanelGreen = 18;
-        static constexpr BYTE kHeaderPanelBlue = 32;
-        static constexpr BYTE kControlPanelRed = 10;
-        static constexpr BYTE kControlPanelGreen = 15;
-        static constexpr BYTE kControlPanelBlue = 28;
-        static constexpr BYTE kControlSurfaceRed = 18;
-        static constexpr BYTE kControlSurfaceGreen = 26;
-        static constexpr BYTE kControlSurfaceBlue = 44;
-        static constexpr BYTE kControlTextRed = 232;
-        static constexpr BYTE kControlTextGreen = 241;
-        static constexpr BYTE kControlTextBlue = 255;
-        static constexpr BYTE kControlMutedRed = 160;
-        static constexpr BYTE kControlMutedGreen = 177;
-        static constexpr BYTE kControlMutedBlue = 207;
-        static constexpr BYTE kControlBorderRed = 74;
-        static constexpr BYTE kControlBorderGreen = 96;
-        static constexpr BYTE kControlBorderBlue = 132;
+        static constexpr BYTE kWindowBackgroundRed = 23;
+        static constexpr BYTE kWindowBackgroundGreen = 27;
+        static constexpr BYTE kWindowBackgroundBlue = 32;
+        static constexpr BYTE kHeaderPanelRed = 35;
+        static constexpr BYTE kHeaderPanelGreen = 40;
+        static constexpr BYTE kHeaderPanelBlue = 47;
+        static constexpr BYTE kControlPanelRed = 27;
+        static constexpr BYTE kControlPanelGreen = 32;
+        static constexpr BYTE kControlPanelBlue = 38;
+        static constexpr BYTE kControlSurfaceRed = 40;
+        static constexpr BYTE kControlSurfaceGreen = 46;
+        static constexpr BYTE kControlSurfaceBlue = 54;
+        static constexpr BYTE kControlTextRed = 240;
+        static constexpr BYTE kControlTextGreen = 243;
+        static constexpr BYTE kControlTextBlue = 247;
+        static constexpr BYTE kControlMutedRed = 169;
+        static constexpr BYTE kControlMutedGreen = 176;
+        static constexpr BYTE kControlMutedBlue = 185;
+        static constexpr BYTE kControlBorderRed = 84;
+        static constexpr BYTE kControlBorderGreen = 92;
+        static constexpr BYTE kControlBorderBlue = 103;
         static constexpr BYTE kControlActiveRed = 104;
-        static constexpr BYTE kControlActiveGreen = 164;
-        static constexpr BYTE kControlActiveBlue = 232;
+        static constexpr BYTE kControlActiveGreen = 132;
+        static constexpr BYTE kControlActiveBlue = 176;
 
         LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param)
         {
@@ -554,15 +557,15 @@ namespace space_scanner::gui
         {
             if (disabled)
             {
-                return ColorRefFromRgb(27, 34, 52);
+                return ColorRefFromRgb(45, 49, 56);
             }
             if (pressed)
             {
-                return ColorRefFromRgb(32, 46, 70);
+                return ColorRefFromRgb(48, 56, 66);
             }
             if (checked)
             {
-                return ColorRefFromRgb(26, 40, 63);
+                return ColorRefFromRgb(52, 60, 72);
             }
             return ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue);
         }
@@ -1580,21 +1583,21 @@ namespace space_scanner::gui
                     return hr;
                 }
                 hr = m_render_target->CreateSolidColorBrush(
-                    ColorFromRgb(kHeaderPanelRed, kHeaderPanelGreen, kHeaderPanelBlue, 0.96f),
+                    ColorFromRgb(kHeaderPanelRed, kHeaderPanelGreen, kHeaderPanelBlue),
                     m_panel_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
                 }
                 hr = m_render_target->CreateSolidColorBrush(
-                    ColorFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue, 0.98f),
+                    ColorFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue),
                     m_canvas_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
                 }
                 hr = m_render_target->CreateSolidColorBrush(
-                    ColorFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue, 0.55f),
+                    ColorFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue, 0.78f),
                     m_border_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
@@ -1645,24 +1648,9 @@ namespace space_scanner::gui
                 {
                     return hr;
                 }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(88, 172, 232, 0.14f), m_glow_a_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(72, 138, 198, 0.12f), m_glow_b_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
                 hr = m_render_target->CreateSolidColorBrush(
                     ColorFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue, 0.82f),
                     m_header_action_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(130, 184, 255, 0.22f), m_header_action_hover_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
@@ -1777,10 +1765,7 @@ namespace space_scanner::gui
             m_active_level_glow_brush.Reset();
             m_active_level_shadow_brush.Reset();
             m_error_brush.Reset();
-            m_glow_a_brush.Reset();
-            m_glow_b_brush.Reset();
             m_header_action_brush.Reset();
-            m_header_action_hover_brush.Reset();
             m_tooltip_background_brush.Reset();
             m_tooltip_border_brush.Reset();
             m_tooltip_text_brush.Reset();
@@ -2418,7 +2403,7 @@ namespace space_scanner::gui
             if (m_scan_in_progress)
             {
                 DrawTextLine(
-                    L"Scanning in progress",
+                    L"Scanning...",
                     m_title_format.Get(),
                     D2D1::RectF(m_canvas_rect.left + 24.0f, m_canvas_rect.top + 28.0f, m_canvas_rect.right - 24.0f, m_canvas_rect.top + 70.0f),
                     m_text_brush.Get());
@@ -2448,10 +2433,15 @@ namespace space_scanner::gui
             if (!m_tree)
             {
                 DrawTextLine(
-                    L"No scan data yet, specify the path by browsing above.",
+                    L"No scan data yet",
                     m_title_format.Get(),
                     D2D1::RectF(m_canvas_rect.left + 24.0f, m_canvas_rect.top + 28.0f, m_canvas_rect.right - 24.0f, m_canvas_rect.top + 70.0f),
                     m_text_brush.Get());
+                DrawTextLine(
+                    L"Choose a folder above, then click Scan or Browse to start.",
+                    m_body_format.Get(),
+                    D2D1::RectF(m_canvas_rect.left + 24.0f, m_canvas_rect.top + 78.0f, m_canvas_rect.right - 24.0f, m_canvas_rect.top + 104.0f),
+                    m_muted_brush.Get());
                 return;
             }
 
@@ -2790,6 +2780,16 @@ namespace space_scanner::gui
                 m_canvas_rect.right,
                 kOuterPadding + kHeaderHeight - 8.0f);
             DrawPanelRect(header_rect, m_panel_brush.Get(), m_border_brush.Get(), 1.2f);
+
+            const float separator_x = std::floor((m_header_info_rect.right + m_scan_group_rect.left) * 0.5f);
+            if (separator_x > m_header_info_rect.left && separator_x < header_rect.right)
+            {
+                m_render_target->DrawLine(
+                    D2D1::Point2F(separator_x, header_rect.top + 14.0f),
+                    D2D1::Point2F(separator_x, header_rect.bottom - 14.0f),
+                    m_border_brush.Get(),
+                    1.0f);
+            }
 
             DrawTextLine(
                 L"SpaceScanner",
@@ -3169,7 +3169,11 @@ namespace space_scanner::gui
             {
                 m_render_target->BeginDraw();
                 m_render_target->SetTransform(D2D1::Matrix3x2F::Identity());
-                m_render_target->Clear(ColorFromRgb(7, 12, 24));
+                m_render_target->Clear(
+                    ColorFromRgb(
+                        kWindowBackgroundRed,
+                        kWindowBackgroundGreen,
+                        kWindowBackgroundBlue));
 
                 UpdateCanvasRect();
                 DrawHeader();
@@ -3222,10 +3226,7 @@ namespace space_scanner::gui
         ComPtr<ID2D1SolidColorBrush> m_active_level_glow_brush;
         ComPtr<ID2D1SolidColorBrush> m_active_level_shadow_brush;
         ComPtr<ID2D1SolidColorBrush> m_error_brush;
-        ComPtr<ID2D1SolidColorBrush> m_glow_a_brush;
-        ComPtr<ID2D1SolidColorBrush> m_glow_b_brush;
         ComPtr<ID2D1SolidColorBrush> m_header_action_brush;
-        ComPtr<ID2D1SolidColorBrush> m_header_action_hover_brush;
         ComPtr<ID2D1SolidColorBrush> m_tooltip_background_brush;
         ComPtr<ID2D1SolidColorBrush> m_tooltip_border_brush;
         ComPtr<ID2D1SolidColorBrush> m_tooltip_text_brush;
