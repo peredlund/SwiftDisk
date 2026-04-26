@@ -309,7 +309,7 @@ namespace space_scanner::gui
 
     private:
         static constexpr float kOuterPadding = 18.0f;
-        static constexpr float kHeaderHeight = 118.0f;
+        static constexpr float kHeaderHeight = 108.0f;
         static constexpr float kTreemapTopSliceHeight = 22.0f;
         static constexpr float kTreemapSideSliceWidth = 3.0f;
         static constexpr float kTreemapBottomSliceHeight = 3.0f;
@@ -326,6 +326,7 @@ namespace space_scanner::gui
         static constexpr float kTooltipInnerMargin = 6.0f;
         static constexpr UINT_PTR kTooltipAnimationTimerId = 1;
         static constexpr UINT kTooltipAnimationIntervalMs = 16;
+        static constexpr int kDefaultMaxDepth = 3;
         static constexpr float kTooltipAnimationSmoothing = 0.38f;
         static constexpr float kTooltipAnimationSnapDistance = 1.5f;
         static constexpr size_t kMaxBreadcrumbStrips = 5;
@@ -338,9 +339,12 @@ namespace space_scanner::gui
         static constexpr BYTE kControlPanelRed = 27;
         static constexpr BYTE kControlPanelGreen = 32;
         static constexpr BYTE kControlPanelBlue = 38;
-        static constexpr BYTE kControlSurfaceRed = 40;
-        static constexpr BYTE kControlSurfaceGreen = 46;
-        static constexpr BYTE kControlSurfaceBlue = 54;
+        static constexpr BYTE kControlBackplateRed = 43;
+        static constexpr BYTE kControlBackplateGreen = 49;
+        static constexpr BYTE kControlBackplateBlue = 58;
+        static constexpr BYTE kControlSurfaceRed = 52;
+        static constexpr BYTE kControlSurfaceGreen = 60;
+        static constexpr BYTE kControlSurfaceBlue = 70;
         static constexpr BYTE kControlTextRed = 240;
         static constexpr BYTE kControlTextGreen = 243;
         static constexpr BYTE kControlTextBlue = 247;
@@ -471,9 +475,9 @@ namespace space_scanner::gui
             {
                 m_control_panel_brush = CreateSolidBrush(
                     ColorRefFromRgb(
-                        kControlPanelRed,
-                        kControlPanelGreen,
-                        kControlPanelBlue));
+                        kControlBackplateRed,
+                        kControlBackplateGreen,
+                        kControlBackplateBlue));
             }
             if (!m_control_surface_brush)
             {
@@ -521,6 +525,19 @@ namespace space_scanner::gui
                 return reinterpret_cast<LRESULT>(m_control_surface_brush);
             }
 
+            if (message == WM_CTLCOLORSTATIC && control == m_depth_label)
+            {
+                SetTextColor(hdc, ColorRefFromRgb(kControlMutedRed, kControlMutedGreen, kControlMutedBlue));
+                SetBkColor(
+                    hdc,
+                    ColorRefFromRgb(
+                        kHeaderPanelRed,
+                        kHeaderPanelGreen,
+                        kHeaderPanelBlue));
+                SetBkMode(hdc, OPAQUE);
+                return reinterpret_cast<LRESULT>(m_header_background_brush);
+            }
+
             SetBkMode(hdc, TRANSPARENT);
             return reinterpret_cast<LRESULT>(GetStockObject(HOLLOW_BRUSH));
         }
@@ -557,15 +574,15 @@ namespace space_scanner::gui
         {
             if (disabled)
             {
-                return ColorRefFromRgb(45, 49, 56);
+                return ColorRefFromRgb(48, 53, 61);
             }
             if (pressed)
             {
-                return ColorRefFromRgb(48, 56, 66);
+                return ColorRefFromRgb(59, 68, 80);
             }
             if (checked)
             {
-                return ColorRefFromRgb(52, 60, 72);
+                return ColorRefFromRgb(62, 72, 86);
             }
             return ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue);
         }
@@ -579,6 +596,9 @@ namespace space_scanner::gui
 
             const bool disabled = (draw_item.itemState & ODS_DISABLED) != 0;
             const bool pressed = (draw_item.itemState & ODS_SELECTED) != 0;
+            const bool is_depth_step_button =
+                draw_item.hwndItem == m_depth_up_button ||
+                draw_item.hwndItem == m_depth_down_button;
             RECT rect = draw_item.rcItem;
             FillGdiRect(draw_item.hDC, rect, GetButtonFillColor(pressed, disabled));
             DrawGdiFrame(
@@ -600,7 +620,7 @@ namespace space_scanner::gui
                     ? ColorRefFromRgb(112, 125, 151)
                     : ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
 
-            if (pressed)
+            if (pressed && !is_depth_step_button)
             {
                 OffsetRect(&rect, 1, 1);
             }
@@ -612,7 +632,7 @@ namespace space_scanner::gui
                 &rect,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-            if ((draw_item.itemState & ODS_FOCUS) != 0)
+            if ((draw_item.itemState & ODS_FOCUS) != 0 && !is_depth_step_button)
             {
                 RECT focus_rect = draw_item.rcItem;
                 InflateRect(&focus_rect, -3, -3);
@@ -647,7 +667,10 @@ namespace space_scanner::gui
             FillGdiRect(
                 draw_item.hDC,
                 draw_item.rcItem,
-                ColorRefFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue));
+                ColorRefFromRgb(
+                    kHeaderPanelRed,
+                    kHeaderPanelGreen,
+                    kHeaderPanelBlue));
 
             RECT checkbox_rect = draw_item.rcItem;
             checkbox_rect.left += 2;
@@ -756,6 +779,33 @@ namespace space_scanner::gui
             InvalidateRect(checkbox, nullptr, TRUE);
         }
 
+        void ApplyEditTextInsets(
+            HWND edit,
+            int left_padding,
+            int top_padding,
+            int right_padding,
+            int bottom_padding) const
+        {
+            if (!edit)
+            {
+                return;
+            }
+
+            RECT client = {};
+            GetClientRect(edit, &client);
+            client.left += left_padding;
+            client.top += top_padding;
+            client.right = std::max(client.left + 1, client.right - right_padding);
+            client.bottom = std::max(client.top + 1, client.bottom - bottom_padding);
+
+            SendMessageW(edit, EM_SETRECT, 0, reinterpret_cast<LPARAM>(&client));
+            SendMessageW(
+                edit,
+                EM_SETMARGINS,
+                EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                MAKELPARAM(left_padding, right_padding));
+        }
+
         void CreateHeaderControls()
         {
             HFONT gui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -765,7 +815,7 @@ namespace space_scanner::gui
                 0,
                 L"EDIT",
                 initial_path.c_str(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_MULTILINE | ES_AUTOHSCROLL,
                 0,
                 0,
                 0,
@@ -806,7 +856,7 @@ namespace space_scanner::gui
             m_reset_button = CreateWindowExW(
                 0,
                 L"BUTTON",
-                L"Reset",
+                L"Reset treemap",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                 0,
                 0,
@@ -836,7 +886,7 @@ namespace space_scanner::gui
                 0,
                 L"EDIT",
                 depth_text.c_str(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_CENTER,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_MULTILINE | ES_AUTOHSCROLL | ES_CENTER,
                 0,
                 0,
                 0,
@@ -973,23 +1023,63 @@ namespace space_scanner::gui
             const int group_top = outer_padding + 4;
             const int max_control_area_width = std::max(
                 340,
-                width - (outer_padding * 2) - (inner_padding * 2) - 160);
+                width - (outer_padding * 2) - (inner_padding * 2) - 140);
+            const int min_control_area_width = std::min(560, max_control_area_width);
             const int control_area_width = std::clamp(
                 static_cast<int>((width - (outer_padding * 2) - (inner_padding * 2)) * 0.48f),
-                340,
-                std::min(640, max_control_area_width));
+                min_control_area_width,
+                std::min(680, max_control_area_width));
             const int control_left = width - outer_padding - inner_padding - control_area_width;
             const int scan_group_height = 40;
-            const int lower_group_top = group_top + scan_group_height + group_gap;
+            const int lower_row_vertical_offset = 3;
+            const int lower_group_top = group_top + scan_group_height + group_gap + lower_row_vertical_offset;
             const int lower_group_height = 30;
-            const int depth_group_width = std::clamp(control_area_width / 2, 210, 290);
-            const int display_group_left = control_left + depth_group_width + group_gap;
-            const int display_group_width = std::max(140, control_area_width - depth_group_width - group_gap);
+            const int header_info_left = outer_padding + inner_padding;
+            const int header_info_right = std::max(header_info_left + 120, control_left - 18);
+            const int header_text_vertical_offset = -5;
+            const int header_text_top = group_top + header_text_vertical_offset;
+
+            const int scan_group_left = control_left + 2;
+            const int scan_group_top_inner = group_top + 10;
+            const int browse_width = 94;
+            const int scan_width = 74;
+            const int reset_width = 112;
+            const int button_gap = 8;
+            const int browse_left = control_left + control_area_width - 12 - browse_width;
+            const int scan_left = browse_left - button_gap - scan_width;
+            const int edit_width = std::max(180, scan_left - button_gap - scan_group_left);
+
+            const int lower_row_left = control_left + 2;
+            const int display_checkbox_gap = 4;
+            const int lower_separator_leading_gap = 10;
+            const int lower_separator_trailing_gap = 10;
+            const int show_tooltip_width = 84;
+            const int show_status_bar_width = 108;
+            const int checkbox_group_width =
+                show_tooltip_width + display_checkbox_gap + show_status_bar_width;
+            const int display_group_left = lower_row_left;
+            const int display_group_width = checkbox_group_width;
+
+            const int depth_label_width = 38;
+            const int depth_edit_width = 42;
+            const int depth_button_width = 18;
+            const int depth_button_gap = 4;
+            const int depth_label_gap = 4;
+            const int depth_group_width =
+                depth_label_width + depth_label_gap + depth_edit_width + depth_button_gap + depth_button_width;
+            m_checkbox_depth_separator_x = static_cast<float>(
+                display_group_left + display_group_width + lower_separator_leading_gap);
+            const int depth_controls_left =
+                static_cast<int>(m_checkbox_depth_separator_x) + lower_separator_trailing_gap;
+            m_depth_reset_separator_x = static_cast<float>(
+                depth_controls_left + depth_group_width + lower_separator_leading_gap);
+            const int reset_left =
+                static_cast<int>(m_depth_reset_separator_x) + lower_separator_trailing_gap;
 
             m_header_info_rect = D2D1::RectF(
-                static_cast<float>(outer_padding + inner_padding),
-                static_cast<float>(group_top),
-                static_cast<float>(std::max(control_left - 18, outer_padding + inner_padding + 240)),
+                static_cast<float>(header_info_left),
+                static_cast<float>(header_text_top),
+                static_cast<float>(header_info_right),
                 static_cast<float>(outer_padding + static_cast<int>(kHeaderHeight) - 16));
             m_scan_group_rect = D2D1::RectF(
                 static_cast<float>(control_left),
@@ -997,9 +1087,9 @@ namespace space_scanner::gui
                 static_cast<float>(control_left + control_area_width),
                 static_cast<float>(group_top + scan_group_height));
             m_depth_group_rect = D2D1::RectF(
-                static_cast<float>(control_left),
+                static_cast<float>(depth_controls_left),
                 static_cast<float>(lower_group_top),
-                static_cast<float>(control_left + depth_group_width),
+                static_cast<float>(depth_controls_left + depth_group_width),
                 static_cast<float>(lower_group_top + lower_group_height));
             m_display_group_rect = D2D1::RectF(
                 static_cast<float>(display_group_left),
@@ -1007,37 +1097,20 @@ namespace space_scanner::gui
                 static_cast<float>(display_group_left + display_group_width),
                 static_cast<float>(lower_group_top + lower_group_height));
 
-            const int scan_group_left = control_left + 2;
-            const int scan_group_top_inner = group_top + 10;
-            const int browse_width = 94;
-            const int scan_width = 74;
-            const int button_gap = 8;
-            const int browse_left = control_left + control_area_width - 12 - browse_width;
-            const int scan_left = browse_left - button_gap - scan_width;
-            const int edit_width = std::max(180, scan_left - button_gap - scan_group_left);
-
-            const int depth_group_left = control_left + 2;
             const int depth_controls_top = lower_group_top + 1;
-            const int reset_width = 68;
-            const int depth_label_width = 36;
-            const int depth_edit_width = 38;
-            const int depth_button_width = 18;
-            const int depth_button_gap = 4;
-            const int reset_left = depth_group_left;
-            const int depth_label_left = reset_left + reset_width + 10;
-            const int depth_edit_left = depth_label_left + depth_label_width + 4;
+            const int depth_label_left = depth_controls_left;
+            const int depth_edit_left = depth_label_left + depth_label_width + depth_label_gap;
             const int depth_button_left = depth_edit_left + depth_edit_width + depth_button_gap;
 
-            const int display_group_inner_left = display_group_left + 2;
-            const int display_checkbox_gap = 6;
-            const int show_tooltip_width = 92;
-            const int show_status_bar_width = 116;
             const int show_tooltip_top = lower_group_top + 5;
             const int show_status_bar_top = show_tooltip_top;
+            const int show_tooltip_left = display_group_left + 4;
+            const int show_status_bar_left = show_tooltip_left + show_tooltip_width + display_checkbox_gap;
 
             if (m_path_edit)
             {
                 MoveWindow(m_path_edit, scan_group_left, scan_group_top_inner, edit_width, 28, TRUE);
+                ApplyEditTextInsets(m_path_edit, 8, 6, 8, 4);
             }
             if (m_scan_button)
             {
@@ -1053,11 +1126,12 @@ namespace space_scanner::gui
             }
             if (m_depth_label)
             {
-                MoveWindow(m_depth_label, depth_label_left, depth_controls_top + 5, depth_label_width, 18, TRUE);
+                MoveWindow(m_depth_label, depth_label_left, depth_controls_top + 6, depth_label_width, 18, TRUE);
             }
             if (m_depth_edit)
             {
                 MoveWindow(m_depth_edit, depth_edit_left, depth_controls_top, depth_edit_width, 28, TRUE);
+                ApplyEditTextInsets(m_depth_edit, 2, 5, 2, 4);
             }
             if (m_depth_up_button)
             {
@@ -1071,7 +1145,7 @@ namespace space_scanner::gui
             {
                 MoveWindow(
                     m_show_tooltip_check,
-                    display_group_inner_left,
+                    show_tooltip_left,
                     show_tooltip_top,
                     show_tooltip_width,
                     18,
@@ -1081,7 +1155,7 @@ namespace space_scanner::gui
             {
                 MoveWindow(
                     m_show_status_bar_check,
-                    display_group_inner_left + show_tooltip_width + display_checkbox_gap,
+                    show_status_bar_left,
                     show_status_bar_top,
                     show_status_bar_width,
                     18,
@@ -1172,7 +1246,17 @@ namespace space_scanner::gui
                 return;
             }
 
+            ApplyFreshScanResultView();
+        }
+
+        void ApplyFreshScanResultView()
+        {
+            m_has_error = false;
+            m_error_text.clear();
+            m_status_text = L"Ready";
+            m_rects.clear();
             ResetToFreshScanView();
+            SetScanControlsEnabled(true);
             RebuildAndRedraw();
         }
 
@@ -1201,7 +1285,10 @@ namespace space_scanner::gui
 
             const int clamped_depth_limit = std::clamp(depth_limit, 1, 32);
             const std::wstring depth_text = std::to_wstring(clamped_depth_limit);
+            m_updating_depth_edit = true;
             SetWindowTextW(m_depth_edit, depth_text.c_str());
+            m_updating_depth_edit = false;
+            ApplyDepthLimit(clamped_depth_limit);
         }
 
         void AdjustDepthLimit(int delta)
@@ -1230,14 +1317,15 @@ namespace space_scanner::gui
 
             wchar_t buffer[32] = {};
             GetWindowTextW(m_depth_edit, buffer, static_cast<int>(std::size(buffer)));
-            if (buffer[0] == L'\0')
+            const std::wstring text = TrimWhitespace(buffer);
+            if (text.empty())
             {
                 return false;
             }
 
             wchar_t* end = nullptr;
-            const long parsed = wcstol(buffer, &end, 10);
-            if (end == buffer || (end && *end != L'\0'))
+            const long parsed = wcstol(text.c_str(), &end, 10);
+            if (end == text.c_str() || (end && *end != L'\0'))
             {
                 return false;
             }
@@ -1351,6 +1439,11 @@ namespace space_scanner::gui
         {
             if (control_id == IDC_DEPTH_EDIT && control == m_depth_edit && notification_code == EN_CHANGE)
             {
+                if (m_updating_depth_edit)
+                {
+                    return;
+                }
+
                 int depth_limit = 0;
                 if (TryGetDepthLimitFromEdit(&depth_limit))
                 {
@@ -1404,7 +1497,7 @@ namespace space_scanner::gui
                 return;
             }
 
-            if (control_id == IDC_RESET_BUTTON && control == m_reset_button)
+            if (control_id == IDC_RESET_BUTTON && notification_code == BN_CLICKED)
             {
                 ResetTreemapView();
                 return;
@@ -1522,12 +1615,7 @@ namespace space_scanner::gui
             m_tree = std::move(payload->tree);
             m_tree_stats = m_tree->ComputeStats();
             m_used_mft_scan = payload->used_mft_scan;
-            m_has_error = false;
-            m_error_text.clear();
-            m_status_text = L"Ready";
-            ResetToFreshScanView();
-            SetScanControlsEnabled(true);
-            RebuildAndRedraw();
+            ApplyFreshScanResultView();
         }
 
         HRESULT CreateDeviceResources()
@@ -1599,6 +1687,13 @@ namespace space_scanner::gui
                 hr = m_render_target->CreateSolidColorBrush(
                     ColorFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue, 0.78f),
                     m_border_brush.GetAddressOf());
+                if (FAILED(hr))
+                {
+                    return hr;
+                }
+                hr = m_render_target->CreateSolidColorBrush(
+                    ColorFromRgb(142, 154, 171, 0.92f),
+                    m_separator_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
@@ -1756,6 +1851,7 @@ namespace space_scanner::gui
             m_panel_brush.Reset();
             m_canvas_brush.Reset();
             m_border_brush.Reset();
+            m_separator_brush.Reset();
             m_tile_brush.Reset();
             m_tile_text_brush.Reset();
             m_tile_secondary_text_brush.Reset();
@@ -2785,10 +2881,32 @@ namespace space_scanner::gui
             if (separator_x > m_header_info_rect.left && separator_x < header_rect.right)
             {
                 m_render_target->DrawLine(
-                    D2D1::Point2F(separator_x, header_rect.top + 14.0f),
-                    D2D1::Point2F(separator_x, header_rect.bottom - 14.0f),
-                    m_border_brush.Get(),
-                    1.0f);
+                    D2D1::Point2F(separator_x + 1.0f, header_rect.top + 14.0f),
+                    D2D1::Point2F(separator_x + 1.0f, header_rect.bottom - 14.0f),
+                    m_separator_brush.Get(),
+                    2.0f);
+            }
+
+            const float lower_separator_top = m_display_group_rect.top + 2.0f;
+            const float lower_separator_bottom = m_display_group_rect.bottom - 2.0f;
+            const float lower_separator_stroke_width = 2.0f;
+            if (m_checkbox_depth_separator_x > m_display_group_rect.left)
+            {
+                const float line_x = std::floor(m_checkbox_depth_separator_x) + 1.0f;
+                m_render_target->DrawLine(
+                    D2D1::Point2F(line_x, lower_separator_top),
+                    D2D1::Point2F(line_x, lower_separator_bottom),
+                    m_separator_brush.Get(),
+                    lower_separator_stroke_width);
+            }
+            if (m_depth_reset_separator_x > m_checkbox_depth_separator_x)
+            {
+                const float line_x = std::floor(m_depth_reset_separator_x) + 1.0f;
+                m_render_target->DrawLine(
+                    D2D1::Point2F(line_x, lower_separator_top),
+                    D2D1::Point2F(line_x, lower_separator_bottom),
+                    m_separator_brush.Get(),
+                    lower_separator_stroke_width);
             }
 
             DrawTextLine(
@@ -3217,6 +3335,7 @@ namespace space_scanner::gui
         ComPtr<ID2D1SolidColorBrush> m_panel_brush;
         ComPtr<ID2D1SolidColorBrush> m_canvas_brush;
         ComPtr<ID2D1SolidColorBrush> m_border_brush;
+        ComPtr<ID2D1SolidColorBrush> m_separator_brush;
         ComPtr<ID2D1SolidColorBrush> m_tile_brush;
         ComPtr<ID2D1SolidColorBrush> m_tile_text_brush;
         ComPtr<ID2D1SolidColorBrush> m_tile_secondary_text_brush;
@@ -3242,7 +3361,7 @@ namespace space_scanner::gui
         bool m_used_mft_scan = false;
         int m_hovered_index = -1;
         int m_hovered_breadcrumb_index = -1;
-        int m_max_depth = 3;
+        int m_max_depth = kDefaultMaxDepth;
         double m_elapsed_seconds = 0.0;
         uint64_t m_view_root_id = 0;
         std::wstring m_scan_path;
@@ -3256,6 +3375,7 @@ namespace space_scanner::gui
         std::vector<BreadcrumbStrip> m_breadcrumbs;
         bool m_show_tooltip = true;
         bool m_show_status_bar = false;
+        bool m_updating_depth_edit = false;
         bool m_tooltip_animation_active = false;
         D2D1_POINT_2F m_mouse_position = D2D1::Point2F(-1.0f, -1.0f);
         D2D1_POINT_2F m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
@@ -3268,6 +3388,8 @@ namespace space_scanner::gui
         D2D1_RECT_F m_scan_group_rect = D2D1::RectF(0, 0, 0, 0);
         D2D1_RECT_F m_depth_group_rect = D2D1::RectF(0, 0, 0, 0);
         D2D1_RECT_F m_display_group_rect = D2D1::RectF(0, 0, 0, 0);
+        float m_checkbox_depth_separator_x = 0.0f;
+        float m_depth_reset_separator_x = 0.0f;
     };
 
 } // namespace space_scanner::gui
