@@ -199,6 +199,11 @@ namespace space_scanner::gui
             alpha);
     }
 
+    COLORREF ColorRefFromRgb(BYTE red, BYTE green, BYTE blue)
+    {
+        return RGB(red, green, blue);
+    }
+
     D2D1_COLOR_F ParseHexColor(const std::string& value, float alpha = 1.0f)
     {
         if (value.size() != 7 || value[0] != '#')
@@ -304,7 +309,7 @@ namespace space_scanner::gui
 
     private:
         static constexpr float kOuterPadding = 18.0f;
-        static constexpr float kHeaderHeight = 124.0f;
+        static constexpr float kHeaderHeight = 118.0f;
         static constexpr float kTreemapTopSliceHeight = 22.0f;
         static constexpr float kTreemapSideSliceWidth = 3.0f;
         static constexpr float kTreemapBottomSliceHeight = 3.0f;
@@ -324,12 +329,34 @@ namespace space_scanner::gui
         static constexpr float kTooltipAnimationSmoothing = 0.38f;
         static constexpr float kTooltipAnimationSnapDistance = 1.5f;
         static constexpr size_t kMaxBreadcrumbStrips = 5;
+        static constexpr BYTE kHeaderPanelRed = 12;
+        static constexpr BYTE kHeaderPanelGreen = 18;
+        static constexpr BYTE kHeaderPanelBlue = 32;
+        static constexpr BYTE kControlPanelRed = 10;
+        static constexpr BYTE kControlPanelGreen = 15;
+        static constexpr BYTE kControlPanelBlue = 28;
+        static constexpr BYTE kControlSurfaceRed = 18;
+        static constexpr BYTE kControlSurfaceGreen = 26;
+        static constexpr BYTE kControlSurfaceBlue = 44;
+        static constexpr BYTE kControlTextRed = 232;
+        static constexpr BYTE kControlTextGreen = 241;
+        static constexpr BYTE kControlTextBlue = 255;
+        static constexpr BYTE kControlMutedRed = 160;
+        static constexpr BYTE kControlMutedGreen = 177;
+        static constexpr BYTE kControlMutedBlue = 207;
+        static constexpr BYTE kControlBorderRed = 74;
+        static constexpr BYTE kControlBorderGreen = 96;
+        static constexpr BYTE kControlBorderBlue = 132;
+        static constexpr BYTE kControlActiveRed = 104;
+        static constexpr BYTE kControlActiveGreen = 164;
+        static constexpr BYTE kControlActiveBlue = 232;
 
         LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param)
         {
             switch (message)
             {
             case WM_CREATE:
+                CreateControlThemeResources();
                 CreateHeaderControls();
                 if (!m_options.path.empty())
                 {
@@ -368,6 +395,15 @@ namespace space_scanner::gui
             case WM_COMMAND:
                 OnCommand(LOWORD(w_param), HIWORD(w_param), reinterpret_cast<HWND>(l_param));
                 return 0;
+            case WM_DRAWITEM:
+                return HandleDrawItem(reinterpret_cast<const DRAWITEMSTRUCT*>(l_param));
+            case WM_CTLCOLORSTATIC:
+            case WM_CTLCOLOREDIT:
+            case WM_CTLCOLORBTN:
+                return HandleControlColor(
+                    reinterpret_cast<HDC>(w_param),
+                    reinterpret_cast<HWND>(l_param),
+                    message);
             case WM_APP_SCAN_COMPLETE:
                 ApplyCompletedScan(false);
                 return 0;
@@ -386,6 +422,7 @@ namespace space_scanner::gui
                 break;
             case WM_DESTROY:
                 StopTooltipAnimation();
+                DestroyControlThemeResources();
                 DiscardDeviceResources();
                 PostQuitMessage(0);
                 return 0;
@@ -417,16 +454,315 @@ namespace space_scanner::gui
             return window->HandleMessage(message, w_param, l_param);
         }
 
+        void CreateControlThemeResources()
+        {
+            if (!m_header_background_brush)
+            {
+                m_header_background_brush = CreateSolidBrush(
+                    ColorRefFromRgb(
+                        kHeaderPanelRed,
+                        kHeaderPanelGreen,
+                        kHeaderPanelBlue));
+            }
+            if (!m_control_panel_brush)
+            {
+                m_control_panel_brush = CreateSolidBrush(
+                    ColorRefFromRgb(
+                        kControlPanelRed,
+                        kControlPanelGreen,
+                        kControlPanelBlue));
+            }
+            if (!m_control_surface_brush)
+            {
+                m_control_surface_brush = CreateSolidBrush(
+                    ColorRefFromRgb(
+                        kControlSurfaceRed,
+                        kControlSurfaceGreen,
+                        kControlSurfaceBlue));
+            }
+        }
+
+        void DestroyControlThemeResources()
+        {
+            if (m_header_background_brush)
+            {
+                DeleteObject(m_header_background_brush);
+                m_header_background_brush = nullptr;
+            }
+            if (m_control_panel_brush)
+            {
+                DeleteObject(m_control_panel_brush);
+                m_control_panel_brush = nullptr;
+            }
+            if (m_control_surface_brush)
+            {
+                DeleteObject(m_control_surface_brush);
+                m_control_surface_brush = nullptr;
+            }
+        }
+
+        LRESULT HandleControlColor(HDC hdc, HWND control, UINT message)
+        {
+            if (!hdc || !control)
+            {
+                return 0;
+            }
+
+            SetTextColor(hdc, ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
+
+            if (message == WM_CTLCOLOREDIT &&
+                (control == m_path_edit || control == m_depth_edit))
+            {
+                SetBkColor(hdc, ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue));
+                SetBkMode(hdc, OPAQUE);
+                return reinterpret_cast<LRESULT>(m_control_surface_brush);
+            }
+
+            SetBkMode(hdc, TRANSPARENT);
+            return reinterpret_cast<LRESULT>(GetStockObject(HOLLOW_BRUSH));
+        }
+
+        void FillGdiRect(HDC hdc, const RECT& rect, COLORREF color) const
+        {
+            HBRUSH brush = CreateSolidBrush(color);
+            if (!brush)
+            {
+                return;
+            }
+
+            FillRect(hdc, &rect, brush);
+            DeleteObject(brush);
+        }
+
+        void DrawGdiFrame(HDC hdc, const RECT& rect, COLORREF color) const
+        {
+            HPEN pen = CreatePen(PS_SOLID, 1, color);
+            if (!pen)
+            {
+                return;
+            }
+
+            const HGDIOBJ old_pen = SelectObject(hdc, pen);
+            const HGDIOBJ old_brush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
+            Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
+            SelectObject(hdc, old_brush);
+            SelectObject(hdc, old_pen);
+            DeleteObject(pen);
+        }
+
+        COLORREF GetButtonFillColor(bool pressed, bool disabled, bool checked = false) const
+        {
+            if (disabled)
+            {
+                return ColorRefFromRgb(27, 34, 52);
+            }
+            if (pressed)
+            {
+                return ColorRefFromRgb(32, 46, 70);
+            }
+            if (checked)
+            {
+                return ColorRefFromRgb(26, 40, 63);
+            }
+            return ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue);
+        }
+
+        void DrawCustomButton(const DRAWITEMSTRUCT& draw_item) const
+        {
+            if (!draw_item.hDC || !draw_item.hwndItem)
+            {
+                return;
+            }
+
+            const bool disabled = (draw_item.itemState & ODS_DISABLED) != 0;
+            const bool pressed = (draw_item.itemState & ODS_SELECTED) != 0;
+            RECT rect = draw_item.rcItem;
+            FillGdiRect(draw_item.hDC, rect, GetButtonFillColor(pressed, disabled));
+            DrawGdiFrame(
+                draw_item.hDC,
+                rect,
+                disabled
+                    ? ColorRefFromRgb(50, 60, 81)
+                    : ColorRefFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue));
+
+            wchar_t text[64] = {};
+            GetWindowTextW(draw_item.hwndItem, text, static_cast<int>(std::size(text)));
+
+            const HFONT font = reinterpret_cast<HFONT>(SendMessageW(draw_item.hwndItem, WM_GETFONT, 0, 0));
+            const HGDIOBJ old_font = font ? SelectObject(draw_item.hDC, font) : nullptr;
+            SetBkMode(draw_item.hDC, TRANSPARENT);
+            SetTextColor(
+                draw_item.hDC,
+                disabled
+                    ? ColorRefFromRgb(112, 125, 151)
+                    : ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
+
+            if (pressed)
+            {
+                OffsetRect(&rect, 1, 1);
+            }
+
+            DrawTextW(
+                draw_item.hDC,
+                text,
+                -1,
+                &rect,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+            if ((draw_item.itemState & ODS_FOCUS) != 0)
+            {
+                RECT focus_rect = draw_item.rcItem;
+                InflateRect(&focus_rect, -3, -3);
+                DrawFocusRect(draw_item.hDC, &focus_rect);
+            }
+
+            if (old_font)
+            {
+                SelectObject(draw_item.hDC, old_font);
+            }
+        }
+
+        void DrawCustomCheckbox(const DRAWITEMSTRUCT& draw_item) const
+        {
+            if (!draw_item.hDC || !draw_item.hwndItem)
+            {
+                return;
+            }
+
+            const bool disabled = (draw_item.itemState & ODS_DISABLED) != 0;
+            const bool pressed = (draw_item.itemState & ODS_SELECTED) != 0;
+            bool checked = false;
+            if (draw_item.hwndItem == m_show_tooltip_check)
+            {
+                checked = m_show_tooltip;
+            }
+            else if (draw_item.hwndItem == m_show_status_bar_check)
+            {
+                checked = m_show_status_bar;
+            }
+
+            FillGdiRect(
+                draw_item.hDC,
+                draw_item.rcItem,
+                ColorRefFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue));
+
+            RECT checkbox_rect = draw_item.rcItem;
+            checkbox_rect.left += 2;
+            checkbox_rect.top += 3;
+            checkbox_rect.right = checkbox_rect.left + 14;
+            checkbox_rect.bottom = checkbox_rect.top + 14;
+
+            FillGdiRect(draw_item.hDC, checkbox_rect, GetButtonFillColor(pressed, disabled, checked));
+            DrawGdiFrame(
+                draw_item.hDC,
+                checkbox_rect,
+                checked
+                    ? ColorRefFromRgb(kControlActiveRed, kControlActiveGreen, kControlActiveBlue)
+                    : ColorRefFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue));
+
+            if (checked)
+            {
+                HPEN pen = CreatePen(
+                    PS_SOLID,
+                    2,
+                    disabled
+                        ? ColorRefFromRgb(129, 142, 170)
+                        : ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
+                if (pen)
+                {
+                    const HGDIOBJ old_pen = SelectObject(draw_item.hDC, pen);
+                    MoveToEx(draw_item.hDC, checkbox_rect.left + 3, checkbox_rect.top + 8, nullptr);
+                    LineTo(draw_item.hDC, checkbox_rect.left + 6, checkbox_rect.bottom - 4);
+                    LineTo(draw_item.hDC, checkbox_rect.right - 3, checkbox_rect.top + 4);
+                    SelectObject(draw_item.hDC, old_pen);
+                    DeleteObject(pen);
+                }
+            }
+
+            RECT text_rect = draw_item.rcItem;
+            text_rect.left = checkbox_rect.right + 8;
+
+            wchar_t text[96] = {};
+            GetWindowTextW(draw_item.hwndItem, text, static_cast<int>(std::size(text)));
+
+            const HFONT font = reinterpret_cast<HFONT>(SendMessageW(draw_item.hwndItem, WM_GETFONT, 0, 0));
+            const HGDIOBJ old_font = font ? SelectObject(draw_item.hDC, font) : nullptr;
+            SetBkMode(draw_item.hDC, TRANSPARENT);
+            SetTextColor(
+                draw_item.hDC,
+                disabled
+                    ? ColorRefFromRgb(112, 125, 151)
+                    : ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
+            DrawTextW(
+                draw_item.hDC,
+                text,
+                -1,
+                &text_rect,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+            if ((draw_item.itemState & ODS_FOCUS) != 0)
+            {
+                RECT focus_rect = draw_item.rcItem;
+                InflateRect(&focus_rect, -1, -1);
+                DrawFocusRect(draw_item.hDC, &focus_rect);
+            }
+
+            if (old_font)
+            {
+                SelectObject(draw_item.hDC, old_font);
+            }
+        }
+
+        LRESULT HandleDrawItem(const DRAWITEMSTRUCT* draw_item) const
+        {
+            if (!draw_item)
+            {
+                return FALSE;
+            }
+
+            switch (draw_item->CtlID)
+            {
+            case IDC_SCAN_BUTTON:
+            case IDC_BROWSE_BUTTON:
+            case IDC_RESET_BUTTON:
+            case IDC_DEPTH_UP_BUTTON:
+            case IDC_DEPTH_DOWN_BUTTON:
+                DrawCustomButton(*draw_item);
+                return TRUE;
+            case IDC_SHOW_TOOLTIP_CHECK:
+            case IDC_SHOW_STATUS_BAR_CHECK:
+                DrawCustomCheckbox(*draw_item);
+                return TRUE;
+            default:
+                return FALSE;
+            }
+        }
+
+        void SetCheckboxState(HWND checkbox, bool checked) const
+        {
+            if (!checkbox)
+            {
+                return;
+            }
+
+            SendMessageW(
+                checkbox,
+                BM_SETCHECK,
+                checked ? BST_CHECKED : BST_UNCHECKED,
+                0);
+            InvalidateRect(checkbox, nullptr, TRUE);
+        }
+
         void CreateHeaderControls()
         {
             HFONT gui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const std::wstring initial_path = m_options.path.empty() ? GetDefaultPathFieldValue() : m_options.path;
 
             m_path_edit = CreateWindowExW(
-                WS_EX_CLIENTEDGE,
+                0,
                 L"EDIT",
                 initial_path.c_str(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
                 0,
                 0,
                 0,
@@ -440,7 +776,7 @@ namespace space_scanner::gui
                 0,
                 L"BUTTON",
                 L"Scan",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                 0,
                 0,
                 0,
@@ -454,7 +790,7 @@ namespace space_scanner::gui
                 0,
                 L"BUTTON",
                 L"Browse...",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                 0,
                 0,
                 0,
@@ -468,7 +804,7 @@ namespace space_scanner::gui
                 0,
                 L"BUTTON",
                 L"Reset",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                 0,
                 0,
                 0,
@@ -494,10 +830,10 @@ namespace space_scanner::gui
 
             const std::wstring depth_text = std::to_wstring(m_max_depth);
             m_depth_edit = CreateWindowExW(
-                WS_EX_CLIENTEDGE,
+                0,
                 L"EDIT",
                 depth_text.c_str(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | ES_CENTER,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_CENTER,
                 0,
                 0,
                 0,
@@ -511,7 +847,7 @@ namespace space_scanner::gui
                 0,
                 L"BUTTON",
                 L"\x25B2",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                 0,
                 0,
                 0,
@@ -525,7 +861,7 @@ namespace space_scanner::gui
                 0,
                 L"BUTTON",
                 L"\x25BC",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                 0,
                 0,
                 0,
@@ -539,7 +875,7 @@ namespace space_scanner::gui
                 0,
                 L"BUTTON",
                 L"Show tooltip",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
                 0,
                 0,
                 0,
@@ -553,7 +889,7 @@ namespace space_scanner::gui
                 0,
                 L"BUTTON",
                 L"Show status bar",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
                 0,
                 0,
                 0,
@@ -602,11 +938,7 @@ namespace space_scanner::gui
                     WM_SETFONT,
                     reinterpret_cast<WPARAM>(gui_font),
                     TRUE);
-                SendMessageW(
-                    m_show_tooltip_check,
-                    BM_SETCHECK,
-                    m_show_tooltip ? BST_CHECKED : BST_UNCHECKED,
-                    0);
+                SetCheckboxState(m_show_tooltip_check, m_show_tooltip);
             }
             if (m_show_status_bar_check)
             {
@@ -615,11 +947,7 @@ namespace space_scanner::gui
                     WM_SETFONT,
                     reinterpret_cast<WPARAM>(gui_font),
                     TRUE);
-                SendMessageW(
-                    m_show_status_bar_check,
-                    BM_SETCHECK,
-                    m_show_status_bar ? BST_CHECKED : BST_UNCHECKED,
-                    0);
+                SetCheckboxState(m_show_status_bar_check, m_show_status_bar);
             }
 
             UpdateHeaderControlsLayout();
@@ -636,69 +964,125 @@ namespace space_scanner::gui
             GetClientRect(m_hwnd, &client);
             const int width = std::max<LONG>(client.right - client.left, 1);
 
-            const int edit_left = 360;
-            const int top = 22;
-            const int second_row_top = 54;
-            const int browse_width = 92;
-            const int scan_width = 72;
-            const int reset_width = 72;
-            const int depth_label_width = 42;
-            const int depth_edit_width = 40;
+            const int outer_padding = static_cast<int>(kOuterPadding);
+            const int inner_padding = 22;
+            const int group_gap = 6;
+            const int group_top = outer_padding + 4;
+            const int max_control_area_width = std::max(
+                340,
+                width - (outer_padding * 2) - (inner_padding * 2) - 160);
+            const int control_area_width = std::clamp(
+                static_cast<int>((width - (outer_padding * 2) - (inner_padding * 2)) * 0.48f),
+                340,
+                std::min(640, max_control_area_width));
+            const int control_left = width - outer_padding - inner_padding - control_area_width;
+            const int scan_group_height = 40;
+            const int lower_group_top = group_top + scan_group_height + group_gap;
+            const int lower_group_height = 30;
+            const int depth_group_width = std::clamp(control_area_width / 2, 210, 290);
+            const int display_group_left = control_left + depth_group_width + group_gap;
+            const int display_group_width = std::max(140, control_area_width - depth_group_width - group_gap);
+
+            m_header_info_rect = D2D1::RectF(
+                static_cast<float>(outer_padding + inner_padding),
+                static_cast<float>(group_top),
+                static_cast<float>(std::max(control_left - 18, outer_padding + inner_padding + 240)),
+                static_cast<float>(outer_padding + static_cast<int>(kHeaderHeight) - 16));
+            m_scan_group_rect = D2D1::RectF(
+                static_cast<float>(control_left),
+                static_cast<float>(group_top),
+                static_cast<float>(control_left + control_area_width),
+                static_cast<float>(group_top + scan_group_height));
+            m_depth_group_rect = D2D1::RectF(
+                static_cast<float>(control_left),
+                static_cast<float>(lower_group_top),
+                static_cast<float>(control_left + depth_group_width),
+                static_cast<float>(lower_group_top + lower_group_height));
+            m_display_group_rect = D2D1::RectF(
+                static_cast<float>(display_group_left),
+                static_cast<float>(lower_group_top),
+                static_cast<float>(display_group_left + display_group_width),
+                static_cast<float>(lower_group_top + lower_group_height));
+
+            const int scan_group_left = control_left + 2;
+            const int scan_group_top_inner = group_top + 10;
+            const int browse_width = 94;
+            const int scan_width = 74;
+            const int button_gap = 8;
+            const int browse_left = control_left + control_area_width - 12 - browse_width;
+            const int scan_left = browse_left - button_gap - scan_width;
+            const int edit_width = std::max(180, scan_left - button_gap - scan_group_left);
+
+            const int depth_group_left = control_left + 2;
+            const int depth_controls_top = lower_group_top + 1;
+            const int reset_width = 68;
+            const int depth_label_width = 36;
+            const int depth_edit_width = 38;
             const int depth_button_width = 18;
             const int depth_button_gap = 4;
-            const int show_status_bar_width = 124;
-            const int show_tooltip_width = 102;
-            const int gap = 8;
-            const int right_padding = static_cast<int>(kOuterPadding);
-            const int browse_left = width - right_padding - browse_width;
-            const int scan_left = browse_left - gap - scan_width;
-            const int edit_width = std::max(160, scan_left - gap - edit_left);
-            const int depth_button_left = browse_left + browse_width - depth_button_width;
-            const int depth_edit_left = depth_button_left - depth_button_gap - depth_edit_width;
-            const int depth_label_left = depth_edit_left - gap - depth_label_width;
-            const int reset_left = depth_label_left - gap - reset_width;
-            const int show_status_bar_left = reset_left - gap - show_status_bar_width;
-            const int show_tooltip_left = show_status_bar_left - gap - show_tooltip_width;
+            const int reset_left = depth_group_left;
+            const int depth_label_left = reset_left + reset_width + 10;
+            const int depth_edit_left = depth_label_left + depth_label_width + 4;
+            const int depth_button_left = depth_edit_left + depth_edit_width + depth_button_gap;
+
+            const int display_group_inner_left = display_group_left + 2;
+            const int display_checkbox_gap = 6;
+            const int show_tooltip_width = 92;
+            const int show_status_bar_width = 116;
+            const int show_tooltip_top = lower_group_top + 5;
+            const int show_status_bar_top = show_tooltip_top;
 
             if (m_path_edit)
             {
-                MoveWindow(m_path_edit, edit_left, top, edit_width, 26, TRUE);
+                MoveWindow(m_path_edit, scan_group_left, scan_group_top_inner, edit_width, 28, TRUE);
             }
             if (m_scan_button)
             {
-                MoveWindow(m_scan_button, scan_left, top, scan_width, 26, TRUE);
+                MoveWindow(m_scan_button, scan_left, scan_group_top_inner, scan_width, 28, TRUE);
             }
             if (m_reset_button)
             {
-                MoveWindow(m_reset_button, reset_left, second_row_top, reset_width, 26, TRUE);
+                MoveWindow(m_reset_button, reset_left, depth_controls_top, reset_width, 28, TRUE);
             }
             if (m_browse_button)
             {
-                MoveWindow(m_browse_button, browse_left, top, browse_width, 26, TRUE);
+                MoveWindow(m_browse_button, browse_left, scan_group_top_inner, browse_width, 28, TRUE);
             }
             if (m_depth_label)
             {
-                MoveWindow(m_depth_label, depth_label_left, second_row_top + 4, depth_label_width, 18, TRUE);
+                MoveWindow(m_depth_label, depth_label_left, depth_controls_top + 5, depth_label_width, 18, TRUE);
             }
             if (m_depth_edit)
             {
-                MoveWindow(m_depth_edit, depth_edit_left, second_row_top, depth_edit_width, 26, TRUE);
+                MoveWindow(m_depth_edit, depth_edit_left, depth_controls_top, depth_edit_width, 28, TRUE);
             }
             if (m_depth_up_button)
             {
-                MoveWindow(m_depth_up_button, depth_button_left, second_row_top, depth_button_width, 12, TRUE);
+                MoveWindow(m_depth_up_button, depth_button_left, depth_controls_top, depth_button_width, 13, TRUE);
             }
             if (m_depth_down_button)
             {
-                MoveWindow(m_depth_down_button, depth_button_left, second_row_top + 13, depth_button_width, 13, TRUE);
+                MoveWindow(m_depth_down_button, depth_button_left, depth_controls_top + 14, depth_button_width, 14, TRUE);
             }
             if (m_show_tooltip_check)
             {
-                MoveWindow(m_show_tooltip_check, show_tooltip_left, second_row_top + 2, show_tooltip_width, 22, TRUE);
+                MoveWindow(
+                    m_show_tooltip_check,
+                    display_group_inner_left,
+                    show_tooltip_top,
+                    show_tooltip_width,
+                    18,
+                    TRUE);
             }
             if (m_show_status_bar_check)
             {
-                MoveWindow(m_show_status_bar_check, show_status_bar_left, second_row_top + 2, show_status_bar_width, 22, TRUE);
+                MoveWindow(
+                    m_show_status_bar_check,
+                    display_group_inner_left + show_tooltip_width + display_checkbox_gap,
+                    show_status_bar_top,
+                    show_status_bar_width,
+                    18,
+                    TRUE);
             }
         }
 
@@ -986,8 +1370,8 @@ namespace space_scanner::gui
 
             if (control_id == IDC_SHOW_TOOLTIP_CHECK && control == m_show_tooltip_check && notification_code == BN_CLICKED)
             {
-                m_show_tooltip =
-                    SendMessageW(m_show_tooltip_check, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                m_show_tooltip = !m_show_tooltip;
+                SetCheckboxState(m_show_tooltip_check, m_show_tooltip);
                 if (!m_show_tooltip)
                 {
                     StopTooltipAnimation();
@@ -1004,8 +1388,8 @@ namespace space_scanner::gui
 
             if (control_id == IDC_SHOW_STATUS_BAR_CHECK && control == m_show_status_bar_check && notification_code == BN_CLICKED)
             {
-                m_show_status_bar =
-                    SendMessageW(m_show_status_bar_check, BM_GETCHECK, 0, 0) == BST_CHECKED;
+                m_show_status_bar = !m_show_status_bar;
+                SetCheckboxState(m_show_status_bar_check, m_show_status_bar);
                 RebuildLayout();
                 InvalidateCanvas();
                 return;
@@ -1188,22 +1572,30 @@ namespace space_scanner::gui
                 {
                     return hr;
                 }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(150, 171, 204), m_muted_brush.GetAddressOf());
+                hr = m_render_target->CreateSolidColorBrush(
+                    ColorFromRgb(kControlMutedRed, kControlMutedGreen, kControlMutedBlue),
+                    m_muted_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
                 }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(21, 33, 53, 0.94f), m_panel_brush.GetAddressOf());
+                hr = m_render_target->CreateSolidColorBrush(
+                    ColorFromRgb(kHeaderPanelRed, kHeaderPanelGreen, kHeaderPanelBlue, 0.96f),
+                    m_panel_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
                 }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(10, 18, 32, 0.97f), m_canvas_brush.GetAddressOf());
+                hr = m_render_target->CreateSolidColorBrush(
+                    ColorFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue, 0.98f),
+                    m_canvas_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
                 }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(72, 94, 134, 0.55f), m_border_brush.GetAddressOf());
+                hr = m_render_target->CreateSolidColorBrush(
+                    ColorFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue, 0.55f),
+                    m_border_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
@@ -1253,17 +1645,19 @@ namespace space_scanner::gui
                 {
                     return hr;
                 }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(90, 185, 255, 0.16f), m_glow_a_brush.GetAddressOf());
+                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(88, 172, 232, 0.14f), m_glow_a_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
                 }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(96, 244, 197, 0.12f), m_glow_b_brush.GetAddressOf());
+                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(72, 138, 198, 0.12f), m_glow_b_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
                 }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(18, 31, 49, 0.78f), m_header_action_brush.GetAddressOf());
+                hr = m_render_target->CreateSolidColorBrush(
+                    ColorFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue, 0.82f),
+                    m_header_action_brush.GetAddressOf());
                 if (FAILED(hr))
                 {
                     return hr;
@@ -2002,11 +2396,24 @@ namespace space_scanner::gui
             return label.substr(0, best) + L"..." + size_suffix;
         }
 
+        void DrawPanelRect(
+            const D2D1_RECT_F& rect,
+            ID2D1Brush* fill_brush,
+            ID2D1Brush* border_brush,
+            float stroke_width = 1.0f)
+        {
+            if (!fill_brush || !border_brush)
+            {
+                return;
+            }
+
+            m_render_target->FillRectangle(rect, fill_brush);
+            m_render_target->DrawRectangle(rect, border_brush, stroke_width);
+        }
+
         void DrawTreemap()
         {
-            const D2D1_ROUNDED_RECT canvas_panel = D2D1::RoundedRect(m_canvas_rect, 16.0f, 16.0f);
-            m_render_target->FillRoundedRectangle(canvas_panel, m_canvas_brush.Get());
-            m_render_target->DrawRoundedRectangle(canvas_panel, m_border_brush.Get(), 1.2f);
+            DrawPanelRect(m_canvas_rect, m_canvas_brush.Get(), m_border_brush.Get(), 1.2f);
 
             if (m_scan_in_progress)
             {
@@ -2259,9 +2666,31 @@ namespace space_scanner::gui
                         const std::wstring size_text = HumanizeBytes(rect.size);
                         const float margin = 6.0f;
                         const float size_height = 14.0f;
-                        const float gap = 2.0f;
+                        const float gap = 4.0f;
                         const float block_height = std::min(tile_height - 12.0f, 42.0f);
                         const float block_top = draw_rect.top + std::max(4.0f, (tile_height - block_height) * 0.42f);
+                        const bool can_stack_label_and_size =
+                            tile_height >= 48.0f &&
+                            MeasureTextWidth(size_text, m_small_format.Get()) <= (tile_width - (margin * 2.0f));
+                        if (!can_stack_label_and_size)
+                        {
+                            const D2D1_RECT_F size_rect = D2D1::RectF(
+                                draw_rect.left + margin,
+                                draw_rect.top + 3.0f,
+                                draw_rect.right - margin,
+                                draw_rect.bottom - 3.0f);
+                            DrawTileTextLayout(
+                                size_text,
+                                m_small_format.Get(),
+                                size_rect,
+                                m_tile_secondary_text_brush.Get(),
+                                m_tile_text_outline_brush.Get(),
+                                DWRITE_TEXT_ALIGNMENT_CENTER,
+                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+                                DWRITE_WORD_WRAPPING_NO_WRAP);
+                            continue;
+                        }
+
                         const D2D1_RECT_F label_rect = D2D1::RectF(
                             draw_rect.left + margin,
                             block_top,
@@ -2297,18 +2726,19 @@ namespace space_scanner::gui
                         const std::wstring size_text = HumanizeBytes(rect.size);
                         const bool can_show_label = tile_width >= 44.0f && tile_height >= 24.0f;
                         const bool can_show_size = tile_width >= 32.0f && tile_height >= 14.0f;
-                        if (can_show_label && can_show_size)
+                        const bool can_stack_label_and_size = can_show_label && can_show_size && tile_height >= 28.0f;
+                        if (can_stack_label_and_size)
                         {
-                            const float block_height = std::min(tile_height - 4.0f, 22.0f);
+                            const float block_height = std::min(tile_height - 5.0f, 24.0f);
                             const float block_top = draw_rect.top + std::max(1.0f, (tile_height - block_height) * 0.5f);
                             const D2D1_RECT_F label_rect = D2D1::RectF(
                                 draw_rect.left + 4.0f,
                                 block_top,
                                 draw_rect.right - 4.0f,
-                                block_top + 10.0f);
+                                block_top + 9.0f);
                             const D2D1_RECT_F size_rect = D2D1::RectF(
                                 draw_rect.left + 4.0f,
-                                block_top + 10.0f,
+                                block_top + 11.0f,
                                 draw_rect.right - 4.0f,
                                 block_top + block_height);
                             DrawTileTextLayout(
@@ -2356,24 +2786,19 @@ namespace space_scanner::gui
         {
             const D2D1_RECT_F header_rect = D2D1::RectF(
                 kOuterPadding,
-                kOuterPadding,
+                kOuterPadding - 8.0f,
                 m_canvas_rect.right,
-                kOuterPadding + kHeaderHeight - 12.0f);
-            const D2D1_ROUNDED_RECT panel = D2D1::RoundedRect(header_rect, 20.0f, 20.0f);
-            m_render_target->FillRoundedRectangle(panel, m_panel_brush.Get());
-            m_render_target->DrawRoundedRectangle(panel, m_border_brush.Get(), 1.2f);
-
-            m_render_target->FillEllipse(
-                D2D1::Ellipse(D2D1::Point2F(header_rect.left + 140.0f, header_rect.top + 38.0f), 130.0f, 46.0f),
-                m_glow_a_brush.Get());
-            m_render_target->FillEllipse(
-                D2D1::Ellipse(D2D1::Point2F(header_rect.right - 140.0f, header_rect.top + 34.0f), 150.0f, 54.0f),
-                m_glow_b_brush.Get());
+                kOuterPadding + kHeaderHeight - 8.0f);
+            DrawPanelRect(header_rect, m_panel_brush.Get(), m_border_brush.Get(), 1.2f);
 
             DrawTextLine(
                 L"SpaceScanner",
                 m_title_format.Get(),
-                D2D1::RectF(header_rect.left + 22.0f, header_rect.top + 12.0f, header_rect.left + 300.0f, header_rect.top + 44.0f),
+                D2D1::RectF(
+                    m_header_info_rect.left,
+                    m_header_info_rect.top,
+                    m_header_info_rect.right,
+                    m_header_info_rect.top + 34.0f),
                 m_text_brush.Get());
 
             const Node* focused_node = m_tree && m_view_root_id != 0
@@ -2382,9 +2807,6 @@ namespace space_scanner::gui
             const std::wstring focused_path = focused_node
                 ? m_tree->BuildPath(m_view_root_id)
                 : (m_options.path.empty() ? L"(no path selected)" : m_options.path);
-            const std::wstring focused_name = focused_node
-                ? (focused_node->name.empty() ? focused_path : focused_node->name)
-                : (m_options.path.empty() ? L"(no path selected)" : m_options.path);
             const std::wstring focused_size = focused_node
                 ? HumanizeBytes(focused_node->size)
                 : L"-";
@@ -2392,7 +2814,11 @@ namespace space_scanner::gui
             DrawTextLine(
                 focused_path,
                 m_small_format.Get(),
-                D2D1::RectF(header_rect.left + 24.0f, header_rect.top + 58.0f, header_rect.right - 24.0f, header_rect.top + 74.0f),
+                D2D1::RectF(
+                    m_header_info_rect.left,
+                    m_header_info_rect.top + 42.0f,
+                    m_header_info_rect.right,
+                    m_header_info_rect.top + 58.0f),
                 m_muted_brush.Get());
 
             std::wstringstream summary;
@@ -2403,9 +2829,8 @@ namespace space_scanner::gui
             }
             else if (m_tree)
             {
-                const Node* root = m_tree->GetNode(m_view_root_id);
                 summary << L"Backend: " << (m_used_mft_scan ? L"NTFS MFT" : L"Directory")
-                    << L"  |  Focus size: " << (root ? HumanizeBytes(root->size) : L"-")
+                    << L"  |  Focus size: " << focused_size
                     << L"  |  Nodes: " << m_tree->NodeCount()
                     << L"  |  Scan: " << FormatSeconds(m_elapsed_seconds);
             }
@@ -2421,20 +2846,11 @@ namespace space_scanner::gui
             DrawTextLine(
                 summary.str(),
                 m_body_format.Get(),
-                D2D1::RectF(header_rect.left + 24.0f, header_rect.top + 80.0f, header_rect.right - 24.0f, header_rect.top + 100.0f),
-                m_muted_brush.Get());
-
-            const std::wstring hint = L"Click a directory to zoom in. Right-click or Backspace to go up. Home returns to the scan root.";
-            const std::wstring reset_hint = L"Reset returns to the scan root at the current depth and clears revealed levels.";
-            DrawTextLine(
-                hint,
-                m_small_format.Get(),
-                D2D1::RectF(header_rect.left + 24.0f, header_rect.bottom - 30.0f, header_rect.right - 24.0f, header_rect.bottom - 16.0f),
-                m_muted_brush.Get());
-            DrawTextLine(
-                reset_hint,
-                m_small_format.Get(),
-                D2D1::RectF(header_rect.left + 24.0f, header_rect.bottom - 16.0f, header_rect.right - 24.0f, header_rect.bottom - 2.0f),
+                D2D1::RectF(
+                    m_header_info_rect.left,
+                    m_header_info_rect.top + 68.0f,
+                    m_header_info_rect.right,
+                    m_header_info_rect.top + 86.0f),
                 m_muted_brush.Get());
         }
 
@@ -2723,9 +3139,7 @@ namespace space_scanner::gui
                 return;
             }
 
-            const D2D1_ROUNDED_RECT status_panel = D2D1::RoundedRect(m_status_bar_rect, 12.0f, 12.0f);
-            m_render_target->FillRoundedRectangle(status_panel, m_panel_brush.Get());
-            m_render_target->DrawRoundedRectangle(status_panel, m_border_brush.Get(), 1.0f);
+            DrawPanelRect(m_status_bar_rect, m_panel_brush.Get(), m_border_brush.Get(), 1.0f);
 
             std::wstring name_text;
             std::wstring size_text;
@@ -2785,6 +3199,9 @@ namespace space_scanner::gui
         HWND m_depth_down_button = nullptr;
         HWND m_show_tooltip_check = nullptr;
         HWND m_show_status_bar_check = nullptr;
+        HBRUSH m_header_background_brush = nullptr;
+        HBRUSH m_control_panel_brush = nullptr;
+        HBRUSH m_control_surface_brush = nullptr;
         std::shared_ptr<SharedScanState> m_shared_scan_state;
         bool m_requested_path_is_ntfs = false;
 
@@ -2846,6 +3263,10 @@ namespace space_scanner::gui
         D2D1_RECT_F m_status_bar_rect = D2D1::RectF(0, 0, 0, 0);
         D2D1_RECT_F m_treemap_content_rect = D2D1::RectF(0, 0, 0, 0);
         D2D1_RECT_F m_focus_up_rect = D2D1::RectF(0, 0, 0, 0);
+        D2D1_RECT_F m_header_info_rect = D2D1::RectF(0, 0, 0, 0);
+        D2D1_RECT_F m_scan_group_rect = D2D1::RectF(0, 0, 0, 0);
+        D2D1_RECT_F m_depth_group_rect = D2D1::RectF(0, 0, 0, 0);
+        D2D1_RECT_F m_display_group_rect = D2D1::RectF(0, 0, 0, 0);
     };
 
 } // namespace space_scanner::gui
