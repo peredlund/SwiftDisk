@@ -52,3 +52,14 @@ Returns: Description.
 ```
 
 - Use `//` comments only for short inline explanations.
+
+## OpenAI Codex Windows App Instructions
+
+Before running `cmake --build` or other MSBuild-based commands in PowerShell, work around duplicate `PATH`/`Path` process variables with:
+
+```powershell
+[System.Environment]::SetEnvironmentVariable('PATH', $env:Path, 'Process')
+[System.Environment]::SetEnvironmentVariable('Path', $null, 'Process')
+```
+
+Then run the build command.
