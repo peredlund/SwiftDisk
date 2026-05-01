@@ -517,7 +517,7 @@ namespace space_scanner::gui
 
             SetTextColor(hdc, ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
 
-            if (message == WM_CTLCOLOREDIT &&
+            if ((message == WM_CTLCOLOREDIT || message == WM_CTLCOLORSTATIC) &&
                 (control == m_path_edit || control == m_depth_edit))
             {
                 SetBkColor(hdc, ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue));
@@ -1523,6 +1523,9 @@ namespace space_scanner::gui
         {
             m_scan_in_progress = true;
             m_has_error = false;
+            ClearHoverState();
+            m_rects.clear();
+            m_breadcrumbs.clear();
             m_status_text = L"Scanning " + m_options.path + L" ...";
             SetScanControlsEnabled(false);
             InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -2054,6 +2057,11 @@ namespace space_scanner::gui
 
         int HitTestTreemap(float x, float y) const
         {
+            if (m_scan_in_progress || !m_tree)
+            {
+                return -1;
+            }
+
             if (x < m_treemap_content_rect.left || x > m_treemap_content_rect.right ||
                 y < m_treemap_content_rect.top || y > m_treemap_content_rect.bottom)
             {
@@ -2076,6 +2084,11 @@ namespace space_scanner::gui
 
         int HitTestBreadcrumb(float x, float y) const
         {
+            if (m_scan_in_progress || !m_tree)
+            {
+                return -1;
+            }
+
             for (int index = 0; index < static_cast<int>(m_breadcrumbs.size()); ++index)
             {
                 if (PointInRect(m_breadcrumbs[static_cast<size_t>(index)].rect, x, y))
@@ -3061,6 +3074,11 @@ namespace space_scanner::gui
             bool* follow_tooltip) const
         {
             if (!name_text || !size_text || !hovered_bounds || !follow_tooltip)
+            {
+                return false;
+            }
+
+            if (m_scan_in_progress || !m_tree)
             {
                 return false;
             }
