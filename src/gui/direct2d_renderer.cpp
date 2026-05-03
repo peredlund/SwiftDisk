@@ -8,6 +8,7 @@
 #include <cwchar>
 #include <memory>
 #include <sstream>
+#include <utility>
 
 namespace space_scanner::gui
 {
@@ -17,6 +18,16 @@ namespace space_scanner::gui
     {
         float width_including_trailing_whitespace = 0.0f;
         float height = 0.0f;
+    };
+
+    struct HoverTooltipLayout
+    {
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> name_layout;
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> size_layout;
+        RenderRect shadow_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect tooltip_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderPoint name_origin = MakeRenderPoint(0, 0);
+        RenderPoint size_origin = MakeRenderPoint(0, 0);
     };
 
 
@@ -39,10 +50,13 @@ namespace space_scanner::gui
         bool HasRenderTarget() const;
         HRESULT Resize(HWND hwnd);
         void Paint(HWND hwnd, const MainWindowDrawingState& state);
+        RenderRect GetHoverTooltipBounds(HWND hwnd, const MainWindowDrawingState& state);
         void BeginDraw();
         void SetIdentityTransform();
         void Clear(const D2D1_COLOR_F& color);
         bool EndDrawNeedsRecreate();
+        void PushClip(const RenderRect& rect);
+        void PopClip();
         void FillRectangle(const RenderRect& rect, ID2D1SolidColorBrush* brush);
         void DrawRectangle(const RenderRect& rect, ID2D1SolidColorBrush* brush, float stroke_width = 1.0f);
         void FillRoundedRectangle(const RenderRect& rect, float radius_x, float radius_y, ID2D1SolidColorBrush* brush);
@@ -88,6 +102,7 @@ namespace space_scanner::gui
             float tooltip_width,
             float tooltip_height,
             bool follow_tooltip) const;
+        bool BuildHoverTooltipLayout(const MainWindowDrawingState& state, HoverTooltipLayout* layout) const;
         void DrawHoverTooltip(const MainWindowDrawingState& state);
         void DrawStatusBar(const MainWindowDrawingState& state);
 
@@ -100,6 +115,7 @@ namespace space_scanner::gui
         Microsoft::WRL::ComPtr<ID2D1Factory> m_d2d_factory;
         Microsoft::WRL::ComPtr<IDWriteFactory> m_dwrite_factory;
         Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> m_render_target;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_window_background_brush;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_text_brush;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_muted_brush;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_panel_brush;
@@ -140,6 +156,33 @@ namespace space_scanner::gui
     D2D1_RECT_F ToD2DRect(const RenderRect& rect)
     {
         return D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom);
+    }
+
+    bool IsRenderRectEmpty(const RenderRect& rect)
+    {
+        return rect.left >= rect.right || rect.top >= rect.bottom;
+    }
+
+    bool RenderRectsIntersect(const RenderRect& left, const RenderRect& right)
+    {
+        if (IsRenderRectEmpty(left) || IsRenderRectEmpty(right))
+        {
+            return false;
+        }
+
+        return left.left < right.right &&
+            left.right > right.left &&
+            left.top < right.bottom &&
+            left.bottom > right.top;
+    }
+
+    RenderRect InflateRenderRect(const RenderRect& rect, float amount)
+    {
+        return MakeRenderRect(
+            rect.left - amount,
+            rect.top - amount,
+            rect.right + amount,
+            rect.bottom + amount);
     }
 
     }
@@ -193,6 +236,16 @@ namespace space_scanner::gui
                 return hr;
             }
 
+            hr = CreateBrush(
+                m_window_background_brush,
+                MakeD2DColor(
+                    palette.window_background_red,
+                    palette.window_background_green,
+                    palette.window_background_blue));
+            if (FAILED(hr))
+            {
+                return hr;
+            }
             hr = CreateBrush(m_text_brush, MakeD2DColor(232, 241, 255));
             if (FAILED(hr))
             {
@@ -339,6 +392,7 @@ namespace space_scanner::gui
     void Direct2DRenderer::DiscardDeviceResources()
     {
         m_render_target.Reset();
+        m_window_background_brush.Reset();
         m_text_brush.Reset();
         m_muted_brush.Reset();
         m_panel_brush.Reset();
@@ -407,6 +461,24 @@ namespace space_scanner::gui
         if (m_render_target)
         {
             m_render_target->Clear(color);
+        }
+    }
+
+    void Direct2DRenderer::PushClip(const RenderRect& rect)
+    {
+        if (m_render_target && !IsRenderRectEmpty(rect))
+        {
+            m_render_target->PushAxisAlignedClip(
+                ToD2DRect(rect),
+                D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        }
+    }
+
+    void Direct2DRenderer::PopClip()
+    {
+        if (m_render_target)
+        {
+            m_render_target->PopAxisAlignedClip();
         }
     }
 
@@ -876,6 +948,11 @@ namespace space_scanner::gui
         m_renderer->Paint(hwnd, state);
     }
 
+    RenderRect MainWindowPainter::GetHoverTooltipBounds(HWND hwnd, const MainWindowDrawingState& state)
+    {
+        return m_renderer->GetHoverTooltipBounds(hwnd, state);
+    }
+
     void Direct2DRenderer::Paint(HWND hwnd, const MainWindowDrawingState& state)
     {
         HRESULT hr = CreateDeviceResources(hwnd, state.palette);
@@ -886,21 +963,58 @@ namespace space_scanner::gui
 
         BeginDraw();
         SetIdentityTransform();
-        Clear(ColorFromRgb(
-            state.palette.window_background_red,
-            state.palette.window_background_green,
-            state.palette.window_background_blue));
+        const bool has_clip = !IsRenderRectEmpty(state.paint_rect);
+        if (has_clip)
+        {
+            PushClip(state.paint_rect);
+            FillRectangle(state.paint_rect, m_window_background_brush.Get());
+        }
+        else
+        {
+            Clear(ColorFromRgb(
+                state.palette.window_background_red,
+                state.palette.window_background_green,
+                state.palette.window_background_blue));
+        }
 
         DrawHeader(state);
         DrawTreemap(state);
         DrawStatusBar(state);
         DrawHoverTooltip(state);
 
+        if (has_clip)
+        {
+            PopClip();
+        }
+
         if (EndDrawNeedsRecreate())
         {
             DiscardDeviceResources();
         }
     }
+
+    RenderRect Direct2DRenderer::GetHoverTooltipBounds(HWND hwnd, const MainWindowDrawingState& state)
+    {
+        HRESULT hr = CreateDeviceResources(hwnd, state.palette);
+        if (FAILED(hr))
+        {
+            return MakeRenderRect(0, 0, 0, 0);
+        }
+
+        HoverTooltipLayout layout;
+        if (!BuildHoverTooltipLayout(state, &layout))
+        {
+            return MakeRenderRect(0, 0, 0, 0);
+        }
+
+        const RenderRect bounds = MakeRenderRect(
+            std::min(layout.shadow_rect.left, layout.tooltip_rect.left),
+            std::min(layout.shadow_rect.top, layout.tooltip_rect.top),
+            std::max(layout.shadow_rect.right, layout.tooltip_rect.right),
+            std::max(layout.shadow_rect.bottom, layout.tooltip_rect.bottom));
+        return InflateRenderRect(bounds, 3.0f);
+    }
+
     std::wstring Direct2DRenderer::BuildDirectoryHeaderText(
         const std::wstring& label,
         uint64_t size,
@@ -962,6 +1076,11 @@ void Direct2DRenderer::DrawPanelRect(
 
 void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
 {
+    if (!IsRenderRectEmpty(state.paint_rect) && !RenderRectsIntersect(state.canvas_rect, state.paint_rect))
+    {
+        return;
+    }
+
     DrawPanelRect(state.canvas_rect, m_canvas_brush.Get(), m_border_brush.Get(), 1.2f);
 
     if (state.scan_in_progress)
@@ -1054,6 +1173,12 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
         for (size_t index = 0; index < (*state.breadcrumbs).size(); ++index)
         {
             const BreadcrumbStrip& strip = (*state.breadcrumbs)[index];
+            if (!IsRenderRectEmpty(state.paint_rect) &&
+                !RenderRectsIntersect(InflateRenderRect(strip.frame_rect, 12.0f), state.paint_rect))
+            {
+                continue;
+            }
+
             const bool is_hovered = static_cast<int>(index) == state.hovered_breadcrumb_index;
             const bool is_active_level = strip.node_id == state.view_root_id;
 
@@ -1123,6 +1248,11 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
         }
     }
 
+    if (!IsRenderRectEmpty(state.paint_rect) && !RenderRectsIntersect(state.treemap_content_rect, state.paint_rect))
+    {
+        return;
+    }
+
     m_tile_brush->SetColor(ParseHexColor(frame_style.fill_color));
     FillRectangle(state.treemap_content_rect, m_tile_brush.Get());
 
@@ -1134,6 +1264,11 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
             state.treemap_content_rect.top + static_cast<float>(rect.y),
             state.treemap_content_rect.left + static_cast<float>(rect.x + rect.width),
             state.treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
+        if (!IsRenderRectEmpty(state.paint_rect) &&
+            !RenderRectsIntersect(InflateRenderRect(draw_rect, 3.0f), state.paint_rect))
+        {
+            continue;
+        }
 
         m_tile_brush->SetColor(ParseHexColor(rect.fill_color));
         FillRectangle(draw_rect, m_tile_brush.Get());
@@ -1334,6 +1469,11 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
         kOuterPadding - 8.0f,
         state.canvas_rect.right,
         kOuterPadding + kHeaderHeight - 8.0f);
+    if (!IsRenderRectEmpty(state.paint_rect) && !RenderRectsIntersect(header_rect, state.paint_rect))
+    {
+        return;
+    }
+
     DrawPanelRect(header_rect, m_panel_brush.Get(), m_border_brush.Get(), 1.2f);
 
     const float separator_x = std::floor((state.header_info_rect.right + state.scan_group_rect.left) * 0.5f);
@@ -1535,11 +1675,17 @@ RenderPoint Direct2DRenderer::ResolveTooltipPosition(const MainWindowDrawingStat
     return MakeRenderPoint(tooltip_left, tooltip_top);
 }
 
-void Direct2DRenderer::DrawHoverTooltip(const MainWindowDrawingState& state)
+bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& state, HoverTooltipLayout* layout) const
 {
+    if (!layout)
+    {
+        return false;
+    }
+
+    *layout = HoverTooltipLayout();
     if (!state.show_tooltip)
     {
-        return;
+        return false;
     }
 
     std::wstring name_text;
@@ -1548,25 +1694,44 @@ void Direct2DRenderer::DrawHoverTooltip(const MainWindowDrawingState& state)
     bool follow_tooltip = false;
     if (!TryGetHoverDisplayInfo(state, &name_text, &size_text, &hovered_bounds, &follow_tooltip))
     {
-        return;
+        return false;
     }
 
     const float available_tooltip_width = std::max(48.0f, (state.canvas_rect.right - state.canvas_rect.left) - 12.0f);
     const float max_tooltip_width = std::min(420.0f, std::max(28.0f, available_tooltip_width - (kTooltipPaddingX * 2.0f)));
     const float max_tooltip_height = std::max(48.0f, (state.canvas_rect.bottom - state.canvas_rect.top) - 24.0f);
 
-    const RenderTextMetrics name_metrics = MeasureTextLayout(
+    ComPtr<IDWriteTextLayout> name_layout = CreateTextLayout(
         name_text,
         RenderTextFormat::Small,
-        max_tooltip_width,
-        max_tooltip_height,
+        MakeRenderRect(0.0f, 0.0f, max_tooltip_width, max_tooltip_height),
         DWRITE_WORD_WRAPPING_WRAP);
-    const RenderTextMetrics size_metrics = MeasureTextLayout(
+    ComPtr<IDWriteTextLayout> size_layout = CreateTextLayout(
         size_text,
         RenderTextFormat::Small,
-        max_tooltip_width,
-        22.0f,
+        MakeRenderRect(0.0f, 0.0f, max_tooltip_width, 22.0f),
         DWRITE_WORD_WRAPPING_NO_WRAP);
+    if (!name_layout || !size_layout)
+    {
+        return false;
+    }
+
+    DWRITE_TEXT_METRICS raw_name_metrics = {};
+    DWRITE_TEXT_METRICS raw_size_metrics = {};
+    if (FAILED(name_layout->GetMetrics(&raw_name_metrics)) ||
+        FAILED(size_layout->GetMetrics(&raw_size_metrics)))
+    {
+        return false;
+    }
+
+    const RenderTextMetrics name_metrics = RenderTextMetrics{
+        raw_name_metrics.widthIncludingTrailingWhitespace,
+        raw_name_metrics.height
+    };
+    const RenderTextMetrics size_metrics = RenderTextMetrics{
+        raw_size_metrics.widthIncludingTrailingWhitespace,
+        raw_size_metrics.height
+    };
     const float text_width = std::max(
         std::max(
             name_metrics.width_including_trailing_whitespace,
@@ -1595,50 +1760,81 @@ void Direct2DRenderer::DrawHoverTooltip(const MainWindowDrawingState& state)
         tooltip_top,
         tooltip_left + tooltip_width,
         tooltip_top + tooltip_height);
-    FillRoundedRectangle(
-        shadow_rect,
-        kTooltipCornerRadius,
-        kTooltipCornerRadius,
-        m_tooltip_shadow_brush.Get());
-    FillRoundedRectangle(
-        tooltip_rect,
-        kTooltipCornerRadius,
-        kTooltipCornerRadius,
-        m_tooltip_background_brush.Get());
-    DrawRoundedRectangle(
-        tooltip_rect,
-        kTooltipCornerRadius,
-        kTooltipCornerRadius,
-        m_tooltip_border_brush.Get(),
-        1.0f);
-
     const RenderPoint name_origin = MakeRenderPoint(
         tooltip_left + kTooltipPaddingX,
         tooltip_top + kTooltipPaddingY);
     const RenderPoint size_origin = MakeRenderPoint(
         tooltip_left + kTooltipPaddingX,
         tooltip_top + kTooltipPaddingY + name_height + kTooltipLineGap);
-    DrawTextLayoutAt(
-        name_text,
-        RenderTextFormat::Small,
-        max_tooltip_width,
-        max_tooltip_height,
-        DWRITE_WORD_WRAPPING_WRAP,
-        name_origin,
-        m_tooltip_text_brush.Get());
-    DrawTextLayoutAt(
-        size_text,
-        RenderTextFormat::Small,
-        max_tooltip_width,
-        22.0f,
-        DWRITE_WORD_WRAPPING_NO_WRAP,
-        size_origin,
-        m_tooltip_secondary_text_brush.Get());
+
+    layout->name_layout = std::move(name_layout);
+    layout->size_layout = std::move(size_layout);
+    layout->shadow_rect = shadow_rect;
+    layout->tooltip_rect = tooltip_rect;
+    layout->name_origin = name_origin;
+    layout->size_origin = size_origin;
+    return true;
+}
+
+void Direct2DRenderer::DrawHoverTooltip(const MainWindowDrawingState& state)
+{
+    HoverTooltipLayout layout;
+    if (!BuildHoverTooltipLayout(state, &layout))
+    {
+        return;
+    }
+
+    const RenderRect tooltip_bounds = MakeRenderRect(
+        std::min(layout.shadow_rect.left, layout.tooltip_rect.left),
+        std::min(layout.shadow_rect.top, layout.tooltip_rect.top),
+        std::max(layout.shadow_rect.right, layout.tooltip_rect.right),
+        std::max(layout.shadow_rect.bottom, layout.tooltip_rect.bottom));
+    if (!IsRenderRectEmpty(state.paint_rect) &&
+        !RenderRectsIntersect(InflateRenderRect(tooltip_bounds, 2.0f), state.paint_rect))
+    {
+        return;
+    }
+
+    FillRoundedRectangle(
+        layout.shadow_rect,
+        kTooltipCornerRadius,
+        kTooltipCornerRadius,
+        m_tooltip_shadow_brush.Get());
+    FillRoundedRectangle(
+        layout.tooltip_rect,
+        kTooltipCornerRadius,
+        kTooltipCornerRadius,
+        m_tooltip_background_brush.Get());
+    DrawRoundedRectangle(
+        layout.tooltip_rect,
+        kTooltipCornerRadius,
+        kTooltipCornerRadius,
+        m_tooltip_border_brush.Get(),
+        1.0f);
+
+    if (m_render_target && layout.name_layout && layout.size_layout)
+    {
+        m_render_target->DrawTextLayout(
+            ToD2DPoint(layout.name_origin),
+            layout.name_layout.Get(),
+            m_tooltip_text_brush.Get(),
+            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        m_render_target->DrawTextLayout(
+            ToD2DPoint(layout.size_origin),
+            layout.size_layout.Get(),
+            m_tooltip_secondary_text_brush.Get(),
+            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    }
 }
 
 void Direct2DRenderer::DrawStatusBar(const MainWindowDrawingState& state)
 {
     if (!state.show_status_bar)
+    {
+        return;
+    }
+
+    if (!IsRenderRectEmpty(state.paint_rect) && !RenderRectsIntersect(state.status_bar_rect, state.paint_rect))
     {
         return;
     }

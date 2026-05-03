@@ -70,6 +70,7 @@ namespace space_scanner::gui
         RenderRect header_info_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect scan_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect display_group_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect paint_rect = MakeRenderRect(0, 0, 0, 0);
         float checkbox_depth_separator_x = 0.0f;
         float depth_reset_separator_x = 0.0f;
     };
@@ -93,6 +94,7 @@ namespace space_scanner::gui
         bool HasRenderTarget() const;
         HRESULT Resize(HWND hwnd);
         void Paint(HWND hwnd, const MainWindowDrawingState& state);
+        RenderRect GetHoverTooltipBounds(HWND hwnd, const MainWindowDrawingState& state);
 
     private:
         std::unique_ptr<Direct2DRenderer> m_renderer;

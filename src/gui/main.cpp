@@ -203,6 +203,52 @@ namespace space_scanner::gui
         return result;
     }
 
+    RenderRect RectToRenderRect(const RECT& rect)
+    {
+        return MakeRenderRect(
+            static_cast<float>(rect.left),
+            static_cast<float>(rect.top),
+            static_cast<float>(rect.right),
+            static_cast<float>(rect.bottom));
+    }
+
+    bool IsRenderRectEmpty(const RenderRect& rect)
+    {
+        return rect.left >= rect.right || rect.top >= rect.bottom;
+    }
+
+    RenderRect UnionRenderRect(const RenderRect& left, const RenderRect& right)
+    {
+        if (IsRenderRectEmpty(left))
+        {
+            return right;
+        }
+        if (IsRenderRectEmpty(right))
+        {
+            return left;
+        }
+
+        return MakeRenderRect(
+            std::min(left.left, right.left),
+            std::min(left.top, right.top),
+            std::max(left.right, right.right),
+            std::max(left.bottom, right.bottom));
+    }
+
+    RenderRect InflateRenderRect(const RenderRect& rect, float amount)
+    {
+        if (IsRenderRectEmpty(rect))
+        {
+            return rect;
+        }
+
+        return MakeRenderRect(
+            rect.left - amount,
+            rect.top - amount,
+            rect.right + amount,
+            rect.bottom + amount);
+    }
+
     class MainWindow
     {
     public:
@@ -330,8 +376,14 @@ namespace space_scanner::gui
             case WM_MOUSELEAVE:
                 if (m_hovered_index != -1 || m_hovered_breadcrumb_index != -1)
                 {
+                    const int old_hovered_index = m_hovered_index;
+                    const int old_hovered_breadcrumb_index = m_hovered_breadcrumb_index;
+                    const RenderRect old_tooltip_bounds = m_tooltip_redraw_bounds;
                     ClearHoverState();
-                    InvalidateCanvas();
+                    InvalidateHoverTransition(
+                        old_hovered_index,
+                        old_hovered_breadcrumb_index,
+                        old_tooltip_bounds);
                 }
                 return 0;
             case WM_LBUTTONDOWN:
@@ -1170,6 +1222,7 @@ namespace space_scanner::gui
             m_mouse_position = MakeRenderPoint(-1.0f, -1.0f);
             m_tooltip_position = MakeRenderPoint(-1.0f, -1.0f);
             m_tooltip_target_position = MakeRenderPoint(-1.0f, -1.0f);
+            ResetTooltipRedrawBounds();
             StopTooltipAnimation();
         }
 
@@ -1427,11 +1480,13 @@ namespace space_scanner::gui
                 if (!m_show_tooltip)
                 {
                     StopTooltipAnimation();
+                    ResetTooltipRedrawBounds();
                 }
                 else if (m_hovered_index >= 0 || m_hovered_breadcrumb_index >= 0)
                 {
                     m_tooltip_position = m_mouse_position;
                     m_tooltip_target_position = m_mouse_position;
+                    m_tooltip_redraw_bounds = MeasureTooltipBoundsAt(m_tooltip_position);
                     StartTooltipAnimation();
                 }
                 InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -1604,6 +1659,91 @@ namespace space_scanner::gui
                 redraw_rect.bottom = std::max(redraw_rect.bottom, status_rect.bottom);
             }
             InvalidateRect(m_hwnd, &redraw_rect, FALSE);
+        }
+
+        RenderRect MeasureTooltipBoundsAt(const RenderPoint& tooltip_position)
+        {
+            if (!m_hwnd || !m_show_tooltip)
+            {
+                return MakeRenderRect(0, 0, 0, 0);
+            }
+
+            MainWindowDrawingState state = BuildDrawingState();
+            state.tooltip_position = tooltip_position;
+            return m_painter.GetHoverTooltipBounds(m_hwnd, state);
+        }
+
+        void InvalidateTooltipTransition(const RenderRect& old_bounds, const RenderPoint& new_position)
+        {
+            RenderRect new_bounds = MeasureTooltipBoundsAt(new_position);
+            RenderRect redraw_bounds = UnionRenderRect(old_bounds, new_bounds);
+            if (IsRenderRectEmpty(redraw_bounds))
+            {
+                m_tooltip_redraw_bounds = new_bounds;
+                return;
+            }
+
+            RECT redraw_rect = RectFToRect(redraw_bounds);
+            InvalidateRect(m_hwnd, &redraw_rect, FALSE);
+            m_tooltip_redraw_bounds = new_bounds;
+        }
+
+        RenderRect GetTreemapRectBounds(int rect_index) const
+        {
+            if (rect_index < 0 || rect_index >= static_cast<int>(m_rects.size()))
+            {
+                return MakeRenderRect(0, 0, 0, 0);
+            }
+
+            const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(rect_index)];
+            return MakeRenderRect(
+                m_treemap_content_rect.left + static_cast<float>(rect.x),
+                m_treemap_content_rect.top + static_cast<float>(rect.y),
+                m_treemap_content_rect.left + static_cast<float>(rect.x + rect.width),
+                m_treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
+        }
+
+        RenderRect GetHoverVisualBounds(int rect_index, int breadcrumb_index) const
+        {
+            if (breadcrumb_index >= 0 && breadcrumb_index < static_cast<int>(m_breadcrumbs.size()))
+            {
+                return InflateRenderRect(m_breadcrumbs[static_cast<size_t>(breadcrumb_index)].frame_rect, 12.0f);
+            }
+
+            return InflateRenderRect(GetTreemapRectBounds(rect_index), 4.0f);
+        }
+
+        void InvalidateHoverTransition(
+            int old_hovered_index,
+            int old_hovered_breadcrumb_index,
+            const RenderRect& old_tooltip_bounds)
+        {
+            RenderRect redraw_bounds = UnionRenderRect(
+                old_tooltip_bounds,
+                m_tooltip_redraw_bounds);
+            redraw_bounds = UnionRenderRect(
+                redraw_bounds,
+                GetHoverVisualBounds(old_hovered_index, old_hovered_breadcrumb_index));
+            redraw_bounds = UnionRenderRect(
+                redraw_bounds,
+                GetHoverVisualBounds(m_hovered_index, m_hovered_breadcrumb_index));
+            if (m_show_status_bar)
+            {
+                redraw_bounds = UnionRenderRect(redraw_bounds, m_status_bar_rect);
+            }
+
+            if (IsRenderRectEmpty(redraw_bounds))
+            {
+                return;
+            }
+
+            RECT redraw_rect = RectFToRect(redraw_bounds);
+            InvalidateRect(m_hwnd, &redraw_rect, FALSE);
+        }
+
+        void ResetTooltipRedrawBounds()
+        {
+            m_tooltip_redraw_bounds = MakeRenderRect(0, 0, 0, 0);
         }
 
         void UpdateCanvasRect()
@@ -1814,27 +1954,36 @@ namespace space_scanner::gui
             const bool hovered_changed = hovered != m_hovered_index || hovered_breadcrumb != m_hovered_breadcrumb_index;
             if (hovered_changed)
             {
+                const int old_hovered_index = m_hovered_index;
+                const int old_hovered_breadcrumb_index = m_hovered_breadcrumb_index;
+                const RenderRect old_tooltip_bounds = m_tooltip_redraw_bounds;
                 m_hovered_index = hovered;
                 m_hovered_breadcrumb_index = hovered_breadcrumb;
                 if (hovered_breadcrumb >= 0)
                 {
                     m_tooltip_position = new_mouse_position;
                     m_tooltip_target_position = new_mouse_position;
+                    m_tooltip_redraw_bounds = MeasureTooltipBoundsAt(m_tooltip_position);
                     StartTooltipAnimation();
                 }
                 else if (hovered >= 0)
                 {
                     m_tooltip_position = new_mouse_position;
                     m_tooltip_target_position = new_mouse_position;
+                    m_tooltip_redraw_bounds = MeasureTooltipBoundsAt(m_tooltip_position);
                     StartTooltipAnimation();
                 }
                 else
                 {
                     m_tooltip_position = MakeRenderPoint(-1.0f, -1.0f);
                     m_tooltip_target_position = MakeRenderPoint(-1.0f, -1.0f);
+                    ResetTooltipRedrawBounds();
                     StopTooltipAnimation();
                 }
-                InvalidateCanvas();
+                InvalidateHoverTransition(
+                    old_hovered_index,
+                    old_hovered_breadcrumb_index,
+                    old_tooltip_bounds);
             }
             else
             {
@@ -2049,17 +2198,18 @@ namespace space_scanner::gui
             const float delta_x = m_tooltip_target_position.x - m_tooltip_position.x;
             const float delta_y = m_tooltip_target_position.y - m_tooltip_position.y;
             const float distance_squared = (delta_x * delta_x) + (delta_y * delta_y);
+            const RenderRect old_tooltip_bounds = m_tooltip_redraw_bounds;
             if (distance_squared <= (kTooltipAnimationSnapDistance * kTooltipAnimationSnapDistance))
             {
                 m_tooltip_position = m_tooltip_target_position;
                 StopTooltipAnimation();
-                InvalidateCanvas();
+                InvalidateTooltipTransition(old_tooltip_bounds, m_tooltip_position);
                 return;
             }
 
             m_tooltip_position.x += delta_x * kTooltipAnimationSmoothing;
             m_tooltip_position.y += delta_y * kTooltipAnimationSmoothing;
-            InvalidateCanvas();
+            InvalidateTooltipTransition(old_tooltip_bounds, m_tooltip_position);
         }
 
         MainWindowDrawingState BuildDrawingState() const
@@ -2125,7 +2275,17 @@ namespace space_scanner::gui
             PAINTSTRUCT paint = {};
             BeginPaint(m_hwnd, &paint);
             UpdateCanvasRect();
-            m_painter.Paint(m_hwnd, BuildDrawingState());
+            MainWindowDrawingState state = BuildDrawingState();
+            state.paint_rect = RectToRenderRect(paint.rcPaint);
+            m_painter.Paint(m_hwnd, state);
+            if (m_show_tooltip && (m_hovered_index >= 0 || m_hovered_breadcrumb_index >= 0))
+            {
+                m_tooltip_redraw_bounds = m_painter.GetHoverTooltipBounds(m_hwnd, state);
+            }
+            else
+            {
+                ResetTooltipRedrawBounds();
+            }
             EndPaint(m_hwnd, &paint);
         }
 
@@ -2172,6 +2332,7 @@ namespace space_scanner::gui
         RenderPoint m_mouse_position = MakeRenderPoint(-1.0f, -1.0f);
         RenderPoint m_tooltip_position = MakeRenderPoint(-1.0f, -1.0f);
         RenderPoint m_tooltip_target_position = MakeRenderPoint(-1.0f, -1.0f);
+        RenderRect m_tooltip_redraw_bounds = MakeRenderRect(0, 0, 0, 0);
         RenderRect m_canvas_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect m_status_bar_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect m_treemap_content_rect = MakeRenderRect(0, 0, 0, 0);
