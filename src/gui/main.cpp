@@ -1193,6 +1193,18 @@ namespace space_scanner::gui
             {
                 EnableWindow(m_reset_button, enabled && m_tree != nullptr);
             }
+            if (m_depth_edit)
+            {
+                EnableWindow(m_depth_edit, enabled);
+            }
+            if (m_depth_up_button)
+            {
+                EnableWindow(m_depth_up_button, enabled);
+            }
+            if (m_depth_down_button)
+            {
+                EnableWindow(m_depth_down_button, enabled);
+            }
             if (m_browse_button)
             {
                 EnableWindow(m_browse_button, enabled);
