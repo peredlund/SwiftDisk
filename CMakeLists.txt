@@ -46,6 +46,9 @@ else()
 endif()
 
 add_executable(space_scanner_gui WIN32
+    src/gui/direct2d_renderer.cpp
+    src/gui/direct2d_renderer.h
+    src/gui/drawing_state.h
     src/gui/main.cpp
 )
 

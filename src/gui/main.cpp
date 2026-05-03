@@ -2,8 +2,6 @@
 #include <windowsx.h>
 #include <shellapi.h>
 #include <shobjidl.h>
-#include <d2d1.h>
-#include <dwrite.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -18,6 +16,8 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include "gui/direct2d_renderer.h"
 
 #include "common/file_tree.h"
 #include "common/stopwatch.h"
@@ -183,63 +183,17 @@ namespace space_scanner::gui
         return buffer;
     }
 
-    std::wstring FormatSeconds(double seconds)
-    {
-        wchar_t buffer[64] = {};
-        swprintf_s(buffer, L"%.2f s", seconds);
-        return buffer;
-    }
-
-    D2D1_COLOR_F ColorFromRgb(BYTE red, BYTE green, BYTE blue, float alpha = 1.0f)
-    {
-        return D2D1::ColorF(
-            static_cast<float>(red) / 255.0f,
-            static_cast<float>(green) / 255.0f,
-            static_cast<float>(blue) / 255.0f,
-            alpha);
-    }
-
     COLORREF ColorRefFromRgb(BYTE red, BYTE green, BYTE blue)
     {
         return RGB(red, green, blue);
     }
 
-    D2D1_COLOR_F ParseHexColor(const std::string& value, float alpha = 1.0f)
-    {
-        if (value.size() != 7 || value[0] != '#')
-        {
-            return ColorFromRgb(120, 150, 190, alpha);
-        }
-
-        auto hex = [](char ch) -> uint8_t
-            {
-                if (ch >= '0' && ch <= '9')
-                {
-                    return static_cast<uint8_t>(ch - '0');
-                }
-                if (ch >= 'a' && ch <= 'f')
-                {
-                    return static_cast<uint8_t>(10 + ch - 'a');
-                }
-                if (ch >= 'A' && ch <= 'F')
-                {
-                    return static_cast<uint8_t>(10 + ch - 'A');
-                }
-                return 0;
-            };
-
-        const BYTE red = static_cast<BYTE>((hex(value[1]) << 4) | hex(value[2]));
-        const BYTE green = static_cast<BYTE>((hex(value[3]) << 4) | hex(value[4]));
-        const BYTE blue = static_cast<BYTE>((hex(value[5]) << 4) | hex(value[6]));
-        return ColorFromRgb(red, green, blue, alpha);
-    }
-
-    bool PointInRect(const D2D1_RECT_F& rect, float x, float y)
+    bool PointInRect(const RenderRect& rect, float x, float y)
     {
         return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     }
 
-    RECT RectFToRect(const D2D1_RECT_F& rect)
+    RECT RectFToRect(const RenderRect& rect)
     {
         RECT result = {};
         result.left = static_cast<LONG>(std::floor(rect.left));
@@ -248,16 +202,6 @@ namespace space_scanner::gui
         result.bottom = static_cast<LONG>(std::ceil(rect.bottom));
         return result;
     }
-
-    struct BreadcrumbStrip
-    {
-        uint64_t node_id = 0;
-        D2D1_RECT_F rect = D2D1::RectF(0, 0, 0, 0);
-        D2D1_RECT_F frame_rect = D2D1::RectF(0, 0, 0, 0);
-        D2D1_RECT_F content_rect = D2D1::RectF(0, 0, 0, 0);
-        std::wstring text;
-        visualization::TreemapVisualStyle style;
-    };
 
     class MainWindow
     {
@@ -1076,22 +1020,22 @@ namespace space_scanner::gui
             const int reset_left =
                 static_cast<int>(m_depth_reset_separator_x) + lower_separator_trailing_gap;
 
-            m_header_info_rect = D2D1::RectF(
+            m_header_info_rect = MakeRenderRect(
                 static_cast<float>(header_info_left),
                 static_cast<float>(header_text_top),
                 static_cast<float>(header_info_right),
                 static_cast<float>(outer_padding + static_cast<int>(kHeaderHeight) - 16));
-            m_scan_group_rect = D2D1::RectF(
+            m_scan_group_rect = MakeRenderRect(
                 static_cast<float>(control_left),
                 static_cast<float>(group_top),
                 static_cast<float>(control_left + control_area_width),
                 static_cast<float>(group_top + scan_group_height));
-            m_depth_group_rect = D2D1::RectF(
+            m_depth_group_rect = MakeRenderRect(
                 static_cast<float>(depth_controls_left),
                 static_cast<float>(lower_group_top),
                 static_cast<float>(depth_controls_left + depth_group_width),
                 static_cast<float>(lower_group_top + lower_group_height));
-            m_display_group_rect = D2D1::RectF(
+            m_display_group_rect = MakeRenderRect(
                 static_cast<float>(display_group_left),
                 static_cast<float>(lower_group_top),
                 static_cast<float>(display_group_left + display_group_width),
@@ -1223,9 +1167,9 @@ namespace space_scanner::gui
         {
             m_hovered_index = -1;
             m_hovered_breadcrumb_index = -1;
-            m_mouse_position = D2D1::Point2F(-1.0f, -1.0f);
-            m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
-            m_tooltip_target_position = D2D1::Point2F(-1.0f, -1.0f);
+            m_mouse_position = MakeRenderPoint(-1.0f, -1.0f);
+            m_tooltip_position = MakeRenderPoint(-1.0f, -1.0f);
+            m_tooltip_target_position = MakeRenderPoint(-1.0f, -1.0f);
             StopTooltipAnimation();
         }
 
@@ -1633,272 +1577,16 @@ namespace space_scanner::gui
             ApplyFreshScanResultView();
         }
 
-        HRESULT CreateDeviceResources()
-        {
-            if (!m_d2d_factory)
-            {
-                HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, m_d2d_factory.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-            }
-
-            if (!m_dwrite_factory)
-            {
-                HRESULT hr = DWriteCreateFactory(
-                    DWRITE_FACTORY_TYPE_SHARED,
-                    __uuidof(IDWriteFactory),
-                    reinterpret_cast<IUnknown**>(m_dwrite_factory.GetAddressOf()));
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-            }
-
-            if (!m_render_target)
-            {
-                RECT client = {};
-                GetClientRect(m_hwnd, &client);
-                const D2D1_SIZE_U size = D2D1::SizeU(
-                    static_cast<UINT>(std::max<LONG>(client.right - client.left, 1)),
-                    static_cast<UINT>(std::max<LONG>(client.bottom - client.top, 1)));
-
-                HRESULT hr = m_d2d_factory->CreateHwndRenderTarget(
-                    D2D1::RenderTargetProperties(),
-                    D2D1::HwndRenderTargetProperties(m_hwnd, size),
-                    m_render_target.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(232, 241, 255), m_text_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(
-                    ColorFromRgb(kControlMutedRed, kControlMutedGreen, kControlMutedBlue),
-                    m_muted_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(
-                    ColorFromRgb(kHeaderPanelRed, kHeaderPanelGreen, kHeaderPanelBlue),
-                    m_panel_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(
-                    ColorFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue),
-                    m_canvas_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(
-                    ColorFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue, 0.78f),
-                    m_border_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(
-                    ColorFromRgb(142, 154, 171, 0.92f),
-                    m_separator_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(120, 160, 215), m_tile_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(232, 241, 255), m_tile_text_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(150, 171, 204), m_tile_secondary_text_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(8, 17, 29, 0.72f), m_tile_text_outline_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(8, 17, 29, 0.36f), m_tile_text_plate_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(250, 252, 255, 0.95f), m_hover_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(150, 205, 255, 0.24f), m_active_level_glow_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(6, 10, 18, 0.48f), m_active_level_shadow_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(255, 140, 140), m_error_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(
-                    ColorFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue, 0.82f),
-                    m_header_action_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(255, 255, 255, 0.98f), m_tooltip_background_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(166, 172, 181, 0.95f), m_tooltip_border_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(42, 42, 42, 0.96f), m_tooltip_text_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(86, 86, 86, 0.96f), m_tooltip_secondary_text_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-                hr = m_render_target->CreateSolidColorBrush(ColorFromRgb(0, 0, 0, 0.18f), m_tooltip_shadow_brush.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-
-                hr = m_dwrite_factory->CreateTextFormat(
-                    L"Segoe UI Variable Display",
-                    nullptr,
-                    DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                    DWRITE_FONT_STYLE_NORMAL,
-                    DWRITE_FONT_STRETCH_NORMAL,
-                    28.0f,
-                    L"",
-                    m_title_format.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    hr = m_dwrite_factory->CreateTextFormat(
-                        L"Segoe UI",
-                        nullptr,
-                        DWRITE_FONT_WEIGHT_SEMI_BOLD,
-                        DWRITE_FONT_STYLE_NORMAL,
-                        DWRITE_FONT_STRETCH_NORMAL,
-                        28.0f,
-                        L"",
-                        m_title_format.GetAddressOf());
-                    if (FAILED(hr))
-                    {
-                        return hr;
-                    }
-                }
-
-                hr = m_dwrite_factory->CreateTextFormat(
-                    L"Segoe UI",
-                    nullptr,
-                    DWRITE_FONT_WEIGHT_NORMAL,
-                    DWRITE_FONT_STYLE_NORMAL,
-                    DWRITE_FONT_STRETCH_NORMAL,
-                    14.0f,
-                    L"",
-                    m_body_format.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-
-                hr = m_dwrite_factory->CreateTextFormat(
-                    L"Segoe UI",
-                    nullptr,
-                    DWRITE_FONT_WEIGHT_NORMAL,
-                    DWRITE_FONT_STYLE_NORMAL,
-                    DWRITE_FONT_STRETCH_NORMAL,
-                    12.0f,
-                    L"",
-                    m_small_format.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-
-                m_body_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-                m_small_format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-
-                hr = m_dwrite_factory->CreateEllipsisTrimmingSign(m_small_format.Get(), m_ellipsis_trimming_sign.GetAddressOf());
-                if (FAILED(hr))
-                {
-                    return hr;
-                }
-            }
-
-            return S_OK;
-        }
-
         void DiscardDeviceResources()
         {
-            m_render_target.Reset();
-            m_text_brush.Reset();
-            m_muted_brush.Reset();
-            m_panel_brush.Reset();
-            m_canvas_brush.Reset();
-            m_border_brush.Reset();
-            m_separator_brush.Reset();
-            m_tile_brush.Reset();
-            m_tile_text_brush.Reset();
-            m_tile_secondary_text_brush.Reset();
-            m_tile_text_outline_brush.Reset();
-            m_tile_text_plate_brush.Reset();
-            m_hover_brush.Reset();
-            m_active_level_glow_brush.Reset();
-            m_active_level_shadow_brush.Reset();
-            m_error_brush.Reset();
-            m_header_action_brush.Reset();
-            m_tooltip_background_brush.Reset();
-            m_tooltip_border_brush.Reset();
-            m_tooltip_text_brush.Reset();
-            m_tooltip_secondary_text_brush.Reset();
-            m_tooltip_shadow_brush.Reset();
-            m_title_format.Reset();
-            m_body_format.Reset();
-            m_small_format.Reset();
-            m_ellipsis_trimming_sign.Reset();
+            m_painter.DiscardDeviceResources();
         }
-
         void OnSize()
         {
             UpdateHeaderControlsLayout();
-            if (m_render_target)
+            if (m_painter.HasRenderTarget())
             {
-                RECT client = {};
-                GetClientRect(m_hwnd, &client);
-                const D2D1_SIZE_U size = D2D1::SizeU(
-                    static_cast<UINT>(std::max<LONG>(client.right - client.left, 1)),
-                    static_cast<UINT>(std::max<LONG>(client.bottom - client.top, 1)));
-                m_render_target->Resize(size);
+                m_painter.Resize(m_hwnd);
             }
             RebuildLayout();
             InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -1930,7 +1618,7 @@ namespace space_scanner::gui
 
             if (m_show_status_bar)
             {
-                m_status_bar_rect = D2D1::RectF(
+                m_status_bar_rect = MakeRenderRect(
                     kOuterPadding,
                     status_bar_top,
                     std::max(width - kOuterPadding, kOuterPadding + 1.0f),
@@ -1938,10 +1626,10 @@ namespace space_scanner::gui
             }
             else
             {
-                m_status_bar_rect = D2D1::RectF(0, 0, 0, 0);
+                m_status_bar_rect = MakeRenderRect(0, 0, 0, 0);
             }
 
-            m_canvas_rect = D2D1::RectF(
+            m_canvas_rect = MakeRenderRect(
                 kOuterPadding,
                 kOuterPadding + kHeaderHeight,
                 std::max(width - kOuterPadding, kOuterPadding + 1.0f),
@@ -1953,7 +1641,7 @@ namespace space_scanner::gui
         void RebuildLayout()
         {
             UpdateCanvasRect();
-            m_focus_up_rect = D2D1::RectF(0, 0, 0, 0);
+            m_focus_up_rect = MakeRenderRect(0, 0, 0, 0);
             m_treemap_content_rect = m_canvas_rect;
             m_breadcrumbs.clear();
             if (!m_tree)
@@ -1989,7 +1677,7 @@ namespace space_scanner::gui
                 truncated = true;
             }
 
-            D2D1_RECT_F nested_rect = D2D1::RectF(
+            RenderRect nested_rect = MakeRenderRect(
                 m_canvas_rect.left + 1.0f,
                 m_canvas_rect.top + 1.0f,
                 m_canvas_rect.right - 1.0f,
@@ -2008,12 +1696,12 @@ namespace space_scanner::gui
                 BreadcrumbStrip strip;
                 strip.node_id = node_id;
                 strip.frame_rect = nested_rect;
-                strip.rect = D2D1::RectF(
+                strip.rect = MakeRenderRect(
                     nested_rect.left,
                     nested_rect.top,
                     nested_rect.right,
                     std::min(nested_rect.bottom, nested_rect.top + kTreemapTopSliceHeight));
-                strip.content_rect = D2D1::RectF(
+                strip.content_rect = MakeRenderRect(
                     nested_rect.left + kTreemapSideSliceWidth,
                     strip.rect.bottom,
                     nested_rect.right - kTreemapSideSliceWidth,
@@ -2119,7 +1807,7 @@ namespace space_scanner::gui
             track.hwndTrack = m_hwnd;
             TrackMouseEvent(&track);
 
-            const D2D1_POINT_2F new_mouse_position = D2D1::Point2F(static_cast<float>(x), static_cast<float>(y));
+            const RenderPoint new_mouse_position = MakeRenderPoint(static_cast<float>(x), static_cast<float>(y));
             m_mouse_position = new_mouse_position;
             const int hovered_breadcrumb = HitTestBreadcrumb(static_cast<float>(x), static_cast<float>(y));
             const int hovered = HitTestTreemap(static_cast<float>(x), static_cast<float>(y));
@@ -2138,20 +1826,12 @@ namespace space_scanner::gui
                 {
                     m_tooltip_position = new_mouse_position;
                     m_tooltip_target_position = new_mouse_position;
-                    const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(hovered)];
-                    if (ShouldFollowTooltip(rect))
-                    {
-                        StartTooltipAnimation();
-                    }
-                    else
-                    {
-                        StopTooltipAnimation();
-                    }
+                    StartTooltipAnimation();
                 }
                 else
                 {
-                    m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
-                    m_tooltip_target_position = D2D1::Point2F(-1.0f, -1.0f);
+                    m_tooltip_position = MakeRenderPoint(-1.0f, -1.0f);
+                    m_tooltip_target_position = MakeRenderPoint(-1.0f, -1.0f);
                     StopTooltipAnimation();
                 }
                 InvalidateCanvas();
@@ -2161,21 +1841,8 @@ namespace space_scanner::gui
                 m_hovered_breadcrumb_index = hovered_breadcrumb;
                 if (hovered >= 0)
                 {
-                    const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(hovered)];
-                    if (hovered_breadcrumb >= 0)
-                    {
-                        m_tooltip_target_position = new_mouse_position;
-                        StartTooltipAnimation();
-                    }
-                    else if (ShouldFollowTooltip(rect))
-                    {
-                        m_tooltip_target_position = new_mouse_position;
-                        StartTooltipAnimation();
-                    }
-                    else
-                    {
-                        StopTooltipAnimation();
-                    }
+                    m_tooltip_target_position = new_mouse_position;
+                    StartTooltipAnimation();
                 }
                 else if (hovered_breadcrumb >= 0)
                 {
@@ -2337,671 +2004,6 @@ namespace space_scanner::gui
             }
         }
 
-        void DrawTextLine(
-            const std::wstring& text,
-            IDWriteTextFormat* format,
-            const D2D1_RECT_F& bounds,
-            ID2D1Brush* brush)
-        {
-            if (!format || !brush)
-            {
-                return;
-            }
-            m_render_target->DrawTextW(
-                text.c_str(),
-                static_cast<UINT32>(text.size()),
-                format,
-                bounds,
-                brush,
-                D2D1_DRAW_TEXT_OPTIONS_CLIP);
-        }
-
-        void DrawTileTextLayout(
-            const std::wstring& text,
-            IDWriteTextFormat* format,
-            const D2D1_RECT_F& bounds,
-            ID2D1Brush* text_brush,
-            ID2D1Brush* outline_brush,
-            DWRITE_TEXT_ALIGNMENT text_alignment = DWRITE_TEXT_ALIGNMENT_LEADING,
-            DWRITE_PARAGRAPH_ALIGNMENT paragraph_alignment = DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
-            DWRITE_WORD_WRAPPING word_wrapping = DWRITE_WORD_WRAPPING_NO_WRAP)
-        {
-            if (!format || !text_brush || !outline_brush || !m_dwrite_factory)
-            {
-                return;
-            }
-
-            ComPtr<IDWriteTextLayout> layout;
-            const float width = std::max(bounds.right - bounds.left, 1.0f);
-            const float height = std::max(bounds.bottom - bounds.top, 1.0f);
-            HRESULT hr = m_dwrite_factory->CreateTextLayout(
-                text.c_str(),
-                static_cast<UINT32>(text.size()),
-                format,
-                width,
-                height,
-                layout.GetAddressOf());
-            if (FAILED(hr) || !layout)
-            {
-                return;
-            }
-
-            DWRITE_TRIMMING trimming = {};
-            trimming.granularity = DWRITE_TRIMMING_GRANULARITY_CHARACTER;
-            layout->SetWordWrapping(word_wrapping);
-            layout->SetTextAlignment(text_alignment);
-            layout->SetParagraphAlignment(paragraph_alignment);
-            if (word_wrapping == DWRITE_WORD_WRAPPING_NO_WRAP)
-            {
-                layout->SetTrimming(&trimming, m_ellipsis_trimming_sign.Get());
-            }
-
-            const D2D1_POINT_2F shadow_origin = D2D1::Point2F(bounds.left + 1.0f, bounds.top + 1.0f);
-            const D2D1_POINT_2F origin = D2D1::Point2F(bounds.left, bounds.top);
-            m_render_target->DrawTextLayout(shadow_origin, layout.Get(), outline_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
-            m_render_target->DrawTextLayout(origin, layout.Get(), text_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
-        }
-
-        void DrawTileTextLine(
-            const std::wstring& text,
-            IDWriteTextFormat* format,
-            const D2D1_RECT_F& bounds,
-            ID2D1Brush* text_brush,
-            ID2D1Brush* outline_brush,
-            DWRITE_TEXT_ALIGNMENT text_alignment = DWRITE_TEXT_ALIGNMENT_LEADING)
-        {
-            DrawTileTextLayout(
-                text,
-                format,
-                bounds,
-                text_brush,
-                outline_brush,
-                text_alignment,
-                DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
-                DWRITE_WORD_WRAPPING_NO_WRAP);
-        }
-
-        float MeasureTextWidth(
-            const std::wstring& text,
-            IDWriteTextFormat* format) const
-        {
-            if (text.empty() || !format || !m_dwrite_factory)
-            {
-                return 0.0f;
-            }
-
-            ComPtr<IDWriteTextLayout> layout;
-            HRESULT hr = m_dwrite_factory->CreateTextLayout(
-                text.c_str(),
-                static_cast<UINT32>(text.size()),
-                format,
-                4096.0f,
-                64.0f,
-                layout.GetAddressOf());
-            if (FAILED(hr) || !layout)
-            {
-                return 0.0f;
-            }
-
-            layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-            DWRITE_TEXT_METRICS metrics = {};
-            if (FAILED(layout->GetMetrics(&metrics)))
-            {
-                return 0.0f;
-            }
-
-            return metrics.widthIncludingTrailingWhitespace;
-        }
-
-        std::wstring BuildDirectoryHeaderText(
-            const std::wstring& label,
-            uint64_t size,
-            float available_width) const
-        {
-            const std::wstring size_suffix = L" - " + HumanizeBytes(size);
-            const std::wstring full_text = label + size_suffix;
-            if (MeasureTextWidth(full_text, m_small_format.Get()) <= available_width)
-            {
-                return full_text;
-            }
-
-            constexpr size_t kMinimumReservedNameCharacters = 5;
-            const float suffix_width = MeasureTextWidth(size_suffix, m_small_format.Get());
-            if (suffix_width >= available_width)
-            {
-                return label;
-            }
-
-            size_t low = 0;
-            size_t high = label.size();
-            size_t best = 0;
-            while (low <= high)
-            {
-                const size_t mid = low + ((high - low) / 2);
-                const std::wstring candidate = label.substr(0, mid) + L"..." + size_suffix;
-                if (MeasureTextWidth(candidate, m_small_format.Get()) <= available_width)
-                {
-                    best = mid;
-                    low = mid + 1;
-                }
-                else
-                {
-                    if (mid == 0)
-                    {
-                        break;
-                    }
-                    high = mid - 1;
-                }
-            }
-
-            if (best < kMinimumReservedNameCharacters)
-            {
-                return label;
-            }
-
-            return label.substr(0, best) + L"..." + size_suffix;
-        }
-
-        void DrawPanelRect(
-            const D2D1_RECT_F& rect,
-            ID2D1Brush* fill_brush,
-            ID2D1Brush* border_brush,
-            float stroke_width = 1.0f)
-        {
-            if (!fill_brush || !border_brush)
-            {
-                return;
-            }
-
-            m_render_target->FillRectangle(rect, fill_brush);
-            m_render_target->DrawRectangle(rect, border_brush, stroke_width);
-        }
-
-        void DrawTreemap()
-        {
-            DrawPanelRect(m_canvas_rect, m_canvas_brush.Get(), m_border_brush.Get(), 1.2f);
-
-            if (m_scan_in_progress)
-            {
-                DrawTextLine(
-                    L"Scanning...",
-                    m_title_format.Get(),
-                    D2D1::RectF(m_canvas_rect.left + 24.0f, m_canvas_rect.top + 28.0f, m_canvas_rect.right - 24.0f, m_canvas_rect.top + 70.0f),
-                    m_text_brush.Get());
-                DrawTextLine(
-                    m_status_text,
-                    m_body_format.Get(),
-                    D2D1::RectF(m_canvas_rect.left + 24.0f, m_canvas_rect.top + 76.0f, m_canvas_rect.right - 24.0f, m_canvas_rect.top + 100.0f),
-                    m_muted_brush.Get());
-                return;
-            }
-
-            if (m_has_error)
-            {
-                DrawTextLine(
-                    L"Scan failed",
-                    m_title_format.Get(),
-                    D2D1::RectF(m_canvas_rect.left + 24.0f, m_canvas_rect.top + 28.0f, m_canvas_rect.right - 24.0f, m_canvas_rect.top + 70.0f),
-                    m_error_brush.Get());
-                DrawTextLine(
-                    m_error_text,
-                    m_body_format.Get(),
-                    D2D1::RectF(m_canvas_rect.left + 24.0f, m_canvas_rect.top + 76.0f, m_canvas_rect.right - 24.0f, m_canvas_rect.bottom - 24.0f),
-                    m_muted_brush.Get());
-                return;
-            }
-
-            if (!m_tree)
-            {
-                DrawTextLine(
-                    L"No scan data yet",
-                    m_title_format.Get(),
-                    D2D1::RectF(m_canvas_rect.left + 24.0f, m_canvas_rect.top + 28.0f, m_canvas_rect.right - 24.0f, m_canvas_rect.top + 70.0f),
-                    m_text_brush.Get());
-                DrawTextLine(
-                    L"Choose a folder above, then click Scan or Browse to start.",
-                    m_body_format.Get(),
-                    D2D1::RectF(m_canvas_rect.left + 24.0f, m_canvas_rect.top + 78.0f, m_canvas_rect.right - 24.0f, m_canvas_rect.top + 104.0f),
-                    m_muted_brush.Get());
-                return;
-            }
-
-            const Node* focused_node = m_tree->GetNode(m_view_root_id);
-            const std::wstring focused_path = focused_node
-                ? m_tree->BuildPath(m_view_root_id)
-                : (m_options.path.empty() ? L"(no path selected)" : m_options.path);
-            const std::wstring focused_name = focused_node
-                ? (focused_node->name.empty() ? focused_path : focused_node->name)
-                : (m_options.path.empty() ? L"(no path selected)" : m_options.path);
-            const std::wstring focused_size = focused_node ? HumanizeBytes(focused_node->size) : L"-";
-
-        const visualization::TreemapVisualStyle frame_style = visualization::BuildTreemapVisualStyle(
-            focused_name,
-            focused_path,
-            true);
-            if (m_breadcrumbs.empty())
-            {
-                const D2D1_RECT_F shadow_rect = D2D1::RectF(
-                    m_focus_up_rect.left + 8.0f,
-                    m_focus_up_rect.top + 8.0f,
-                    m_focus_up_rect.right + 8.0f,
-                    m_focus_up_rect.bottom + 8.0f);
-                m_render_target->FillRectangle(shadow_rect, m_active_level_shadow_brush.Get());
-                const D2D1_RECT_F glow_rect = D2D1::RectF(
-                    m_focus_up_rect.left - 2.0f,
-                    m_focus_up_rect.top - 2.0f,
-                    m_focus_up_rect.right + 2.0f,
-                    m_focus_up_rect.bottom + 2.0f);
-                m_render_target->DrawRectangle(glow_rect, m_active_level_glow_brush.Get(), 5.5f);
-                m_header_action_brush->SetColor(ParseHexColor(frame_style.fill_color));
-                m_render_target->FillRectangle(m_focus_up_rect, m_header_action_brush.Get());
-                m_render_target->DrawRectangle(m_focus_up_rect, m_hover_brush.Get(), 2.8f);
-                m_tile_text_brush->SetColor(ParseHexColor(frame_style.label_text_color));
-                m_tile_text_outline_brush->SetColor(ParseHexColor(frame_style.text_outline_color, 0.78f));
-                std::wstring frame_text = focused_name + L" - " + focused_size;
-                DrawTileTextLine(
-                    frame_text,
-                    m_small_format.Get(),
-                    D2D1::RectF(m_focus_up_rect.left + 8.0f, m_focus_up_rect.top + 3.0f, m_focus_up_rect.right - 8.0f, m_focus_up_rect.bottom - 3.0f),
-                    m_tile_text_brush.Get(),
-                    m_tile_text_outline_brush.Get());
-            }
-            else
-            {
-                for (size_t index = 0; index < m_breadcrumbs.size(); ++index)
-                {
-                    const BreadcrumbStrip& strip = m_breadcrumbs[index];
-                    const bool is_hovered = static_cast<int>(index) == m_hovered_breadcrumb_index;
-                    const bool is_active_level = strip.node_id == m_view_root_id;
-
-                    const D2D1_RECT_F left_slice_rect = D2D1::RectF(
-                        strip.frame_rect.left,
-                        strip.rect.bottom,
-                        strip.content_rect.left,
-                        strip.frame_rect.bottom - kTreemapBottomSliceHeight);
-                    const D2D1_RECT_F right_slice_rect = D2D1::RectF(
-                        strip.content_rect.right,
-                        strip.rect.bottom,
-                        strip.frame_rect.right,
-                        strip.frame_rect.bottom - kTreemapBottomSliceHeight);
-                    const D2D1_RECT_F bottom_slice_rect = D2D1::RectF(
-                        strip.frame_rect.left,
-                        strip.frame_rect.bottom - kTreemapBottomSliceHeight,
-                        strip.frame_rect.right,
-                        strip.frame_rect.bottom);
-
-                    if (is_active_level)
-                    {
-                        const D2D1_RECT_F shadow_rect = D2D1::RectF(
-                            strip.frame_rect.left + 8.0f,
-                            strip.frame_rect.top + 8.0f,
-                            strip.frame_rect.right + 8.0f,
-                            strip.frame_rect.bottom + 8.0f);
-                        m_render_target->FillRectangle(shadow_rect, m_active_level_shadow_brush.Get());
-                        const D2D1_RECT_F glow_rect = D2D1::RectF(
-                            strip.frame_rect.left - 2.0f,
-                            strip.frame_rect.top - 2.0f,
-                            strip.frame_rect.right + 2.0f,
-                            strip.frame_rect.bottom + 2.0f);
-                        m_render_target->DrawRectangle(glow_rect, m_active_level_glow_brush.Get(), 5.5f);
-                    }
-
-                m_header_action_brush->SetColor(ParseHexColor(strip.style.fill_color, 0.88f));
-                m_render_target->FillRectangle(left_slice_rect, m_header_action_brush.Get());
-                m_render_target->FillRectangle(right_slice_rect, m_header_action_brush.Get());
-                m_render_target->FillRectangle(bottom_slice_rect, m_header_action_brush.Get());
-
-                m_header_action_brush->SetColor(ParseHexColor(strip.style.fill_color));
-                m_render_target->FillRectangle(strip.rect, m_header_action_brush.Get());
-                m_tile_text_plate_brush->SetColor(ParseHexColor(strip.style.text_plate_color, 0.42f));
-                const D2D1_ROUNDED_RECT strip_plate_rect = D2D1::RoundedRect(
-                    D2D1::RectF(
-                        strip.rect.left + 1.0f,
-                        strip.rect.top + 1.0f,
-                        std::max(strip.rect.left + 2.0f, strip.rect.right - 1.0f),
-                        std::max(strip.rect.top + 2.0f, strip.rect.bottom - 1.0f)),
-                    2.0f,
-                    2.0f);
-                m_render_target->FillRoundedRectangle(strip_plate_rect, m_tile_text_plate_brush.Get());
-                m_render_target->DrawRectangle(
-                    strip.rect,
-                    is_hovered ? m_hover_brush.Get() : m_border_brush.Get(),
-                    is_hovered ? 1.6f : 0.9f);
-                    if (is_active_level)
-                    {
-                        m_render_target->DrawRectangle(strip.frame_rect, m_hover_brush.Get(), 2.8f);
-                    }
-
-                    m_tile_text_brush->SetColor(ParseHexColor(strip.style.label_text_color));
-                    m_tile_text_outline_brush->SetColor(ParseHexColor(strip.style.text_outline_color, 0.78f));
-                    DrawTileTextLine(
-                        strip.text,
-                        m_small_format.Get(),
-                        D2D1::RectF(strip.rect.left + 8.0f, strip.rect.top + 3.0f, strip.rect.right - 8.0f, strip.rect.bottom - 3.0f),
-                        m_tile_text_brush.Get(),
-                        m_tile_text_outline_brush.Get());
-                }
-            }
-
-            m_tile_brush->SetColor(ParseHexColor(frame_style.fill_color));
-            m_render_target->FillRectangle(m_treemap_content_rect, m_tile_brush.Get());
-
-            for (size_t index = 0; index < m_rects.size(); ++index)
-            {
-                const visualization::TreemapRect& rect = m_rects[index];
-                const D2D1_RECT_F draw_rect = D2D1::RectF(
-                    m_treemap_content_rect.left + static_cast<float>(rect.x),
-                    m_treemap_content_rect.top + static_cast<float>(rect.y),
-                    m_treemap_content_rect.left + static_cast<float>(rect.x + rect.width),
-                    m_treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
-
-                m_tile_brush->SetColor(ParseHexColor(rect.fill_color));
-                m_render_target->FillRectangle(draw_rect, m_tile_brush.Get());
-
-                const bool is_hovered = static_cast<int>(index) == m_hovered_index;
-                ID2D1Brush* border_brush = is_hovered ? m_hover_brush.Get() : m_border_brush.Get();
-                const float stroke_width = is_hovered ? 2.0f : 0.75f;
-                const float tile_width = draw_rect.right - draw_rect.left;
-                const float tile_height = draw_rect.bottom - draw_rect.top;
-                const bool is_view_root = rect.node_id == m_view_root_id;
-                const bool is_directory_header = rect.is_dir && !is_view_root;
-
-                if (is_directory_header && tile_width >= 4.0f && tile_height >= 4.0f)
-                {
-                    const float header_height = std::min(
-                        std::max(3.0f, static_cast<float>(m_layout_options.directory_header_height) - 2.0f),
-                        std::max(0.0f, tile_height - 2.0f));
-                    if (header_height > 0.0f)
-                    {
-                        m_tile_text_plate_brush->SetColor(ParseHexColor(rect.text_plate_color, 0.42f));
-                        const D2D1_ROUNDED_RECT header_rect = D2D1::RoundedRect(
-                            D2D1::RectF(
-                                draw_rect.left + 1.0f,
-                                draw_rect.top + 1.0f,
-                                std::max(draw_rect.left + 2.0f, draw_rect.right - 1.0f),
-                                std::min(draw_rect.bottom - 1.0f, draw_rect.top + 1.0f + header_height)),
-                            2.0f,
-                            2.0f);
-                        m_render_target->FillRoundedRectangle(header_rect, m_tile_text_plate_brush.Get());
-                    }
-                }
-
-                m_render_target->DrawRectangle(draw_rect, border_brush, stroke_width);
-
-                if (tile_width >= 56.0f && tile_height >= 18.0f)
-                {
-                    m_tile_text_brush->SetColor(ParseHexColor(rect.label_text_color));
-                    m_tile_secondary_text_brush->SetColor(ParseHexColor(rect.secondary_text_color));
-                    m_tile_text_outline_brush->SetColor(ParseHexColor(rect.text_outline_color, 0.78f));
-                    m_tile_text_plate_brush->SetColor(ParseHexColor(rect.text_plate_color, 0.34f));
-
-                    const bool is_leaf_file = !rect.is_dir;
-                    const bool show_label = tile_width >= 92.0f && tile_height >= 34.0f && !is_directory_header;
-                    if (!is_leaf_file && !is_view_root && !is_directory_header)
-                    {
-                        const float plate_height = show_label ? 30.0f : 16.0f;
-                        const D2D1_ROUNDED_RECT plate_rect = D2D1::RoundedRect(
-                            D2D1::RectF(
-                                draw_rect.left + 2.0f,
-                                draw_rect.top + 2.0f,
-                                std::max(draw_rect.left + 4.0f, draw_rect.right - 2.0f),
-                                std::min(draw_rect.bottom - 2.0f, draw_rect.top + 2.0f + plate_height)),
-                            2.0f,
-                            2.0f);
-                        m_render_target->FillRoundedRectangle(plate_rect, m_tile_text_plate_brush.Get());
-                    }
-
-                    if (is_directory_header)
-                    {
-                        const D2D1_RECT_F header_rect = D2D1::RectF(
-                            draw_rect.left + 6.0f,
-                            draw_rect.top + 2.0f,
-                            draw_rect.right - 6.0f,
-                            draw_rect.top + 16.0f);
-                        const float header_width = std::max(0.0f, header_rect.right - header_rect.left);
-                        const std::wstring header_text = BuildDirectoryHeaderText(
-                            rect.label,
-                            rect.size,
-                            header_width);
-
-                        DrawTileTextLine(
-                            header_text,
-                            m_small_format.Get(),
-                            header_rect,
-                            m_tile_text_brush.Get(),
-                            m_tile_text_outline_brush.Get(),
-                            DWRITE_TEXT_ALIGNMENT_LEADING);
-                    }
-                    else if (!is_view_root && tile_width >= 64.0f && tile_height >= 40.0f)
-                    {
-                        const std::wstring size_text = HumanizeBytes(rect.size);
-                        const float margin = 6.0f;
-                        const float size_height = 14.0f;
-                        const float gap = 4.0f;
-                        const float block_height = std::min(tile_height - 12.0f, 42.0f);
-                        const float block_top = draw_rect.top + std::max(4.0f, (tile_height - block_height) * 0.42f);
-                        const bool can_stack_label_and_size =
-                            tile_height >= 48.0f &&
-                            MeasureTextWidth(size_text, m_small_format.Get()) <= (tile_width - (margin * 2.0f));
-                        if (!can_stack_label_and_size)
-                        {
-                            const D2D1_RECT_F size_rect = D2D1::RectF(
-                                draw_rect.left + margin,
-                                draw_rect.top + 3.0f,
-                                draw_rect.right - margin,
-                                draw_rect.bottom - 3.0f);
-                            DrawTileTextLayout(
-                                size_text,
-                                m_small_format.Get(),
-                                size_rect,
-                                m_tile_secondary_text_brush.Get(),
-                                m_tile_text_outline_brush.Get(),
-                                DWRITE_TEXT_ALIGNMENT_CENTER,
-                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
-                                DWRITE_WORD_WRAPPING_NO_WRAP);
-                            continue;
-                        }
-
-                        const D2D1_RECT_F label_rect = D2D1::RectF(
-                            draw_rect.left + margin,
-                            block_top,
-                            draw_rect.right - margin,
-                            block_top + block_height - size_height - gap);
-                        const D2D1_RECT_F size_rect = D2D1::RectF(
-                            draw_rect.left + margin,
-                            block_top + block_height - size_height,
-                            draw_rect.right - margin,
-                            block_top + block_height);
-
-                        DrawTileTextLayout(
-                            rect.label,
-                            m_small_format.Get(),
-                            label_rect,
-                            m_tile_text_brush.Get(),
-                            m_tile_text_outline_brush.Get(),
-                            DWRITE_TEXT_ALIGNMENT_CENTER,
-                            DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
-                            DWRITE_WORD_WRAPPING_NO_WRAP);
-                        DrawTileTextLayout(
-                            size_text,
-                            m_small_format.Get(),
-                            size_rect,
-                            m_tile_secondary_text_brush.Get(),
-                            m_tile_text_outline_brush.Get(),
-                            DWRITE_TEXT_ALIGNMENT_CENTER,
-                            DWRITE_PARAGRAPH_ALIGNMENT_NEAR,
-                            DWRITE_WORD_WRAPPING_NO_WRAP);
-                    }
-                    else
-                    {
-                        const std::wstring size_text = HumanizeBytes(rect.size);
-                        const bool can_show_label = tile_width >= 44.0f && tile_height >= 24.0f;
-                        const bool can_show_size = tile_width >= 32.0f && tile_height >= 14.0f;
-                        const bool can_stack_label_and_size = can_show_label && can_show_size && tile_height >= 28.0f;
-                        if (can_stack_label_and_size)
-                        {
-                            const float block_height = std::min(tile_height - 5.0f, 24.0f);
-                            const float block_top = draw_rect.top + std::max(1.0f, (tile_height - block_height) * 0.5f);
-                            const D2D1_RECT_F label_rect = D2D1::RectF(
-                                draw_rect.left + 4.0f,
-                                block_top,
-                                draw_rect.right - 4.0f,
-                                block_top + 9.0f);
-                            const D2D1_RECT_F size_rect = D2D1::RectF(
-                                draw_rect.left + 4.0f,
-                                block_top + 11.0f,
-                                draw_rect.right - 4.0f,
-                                block_top + block_height);
-                            DrawTileTextLayout(
-                                rect.label,
-                                m_small_format.Get(),
-                                label_rect,
-                                m_tile_text_brush.Get(),
-                                m_tile_text_outline_brush.Get(),
-                                DWRITE_TEXT_ALIGNMENT_CENTER,
-                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
-                                DWRITE_WORD_WRAPPING_NO_WRAP);
-                            DrawTileTextLayout(
-                                size_text,
-                                m_small_format.Get(),
-                                size_rect,
-                                m_tile_secondary_text_brush.Get(),
-                                m_tile_text_outline_brush.Get(),
-                                DWRITE_TEXT_ALIGNMENT_CENTER,
-                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
-                                DWRITE_WORD_WRAPPING_NO_WRAP);
-                        }
-                        else if (can_show_size)
-                        {
-                            const D2D1_RECT_F size_rect = D2D1::RectF(
-                                draw_rect.left + 3.0f,
-                                draw_rect.top + 1.0f,
-                                draw_rect.right - 3.0f,
-                                draw_rect.bottom - 1.0f);
-                            DrawTileTextLayout(
-                                size_text,
-                                m_small_format.Get(),
-                                size_rect,
-                                m_tile_secondary_text_brush.Get(),
-                                m_tile_text_outline_brush.Get(),
-                                DWRITE_TEXT_ALIGNMENT_CENTER,
-                                DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
-                                DWRITE_WORD_WRAPPING_NO_WRAP);
-                        }
-                    }
-                }
-            }
-        }
-
-        void DrawHeader()
-        {
-            const D2D1_RECT_F header_rect = D2D1::RectF(
-                kOuterPadding,
-                kOuterPadding - 8.0f,
-                m_canvas_rect.right,
-                kOuterPadding + kHeaderHeight - 8.0f);
-            DrawPanelRect(header_rect, m_panel_brush.Get(), m_border_brush.Get(), 1.2f);
-
-            const float separator_x = std::floor((m_header_info_rect.right + m_scan_group_rect.left) * 0.5f);
-            if (separator_x > m_header_info_rect.left && separator_x < header_rect.right)
-            {
-                m_render_target->DrawLine(
-                    D2D1::Point2F(separator_x + 1.0f, header_rect.top + 14.0f),
-                    D2D1::Point2F(separator_x + 1.0f, header_rect.bottom - 14.0f),
-                    m_separator_brush.Get(),
-                    2.0f);
-            }
-
-            const float lower_separator_top = m_display_group_rect.top + 2.0f;
-            const float lower_separator_bottom = m_display_group_rect.bottom - 2.0f;
-            const float lower_separator_stroke_width = 2.0f;
-            if (m_checkbox_depth_separator_x > m_display_group_rect.left)
-            {
-                const float line_x = std::floor(m_checkbox_depth_separator_x) + 1.0f;
-                m_render_target->DrawLine(
-                    D2D1::Point2F(line_x, lower_separator_top),
-                    D2D1::Point2F(line_x, lower_separator_bottom),
-                    m_separator_brush.Get(),
-                    lower_separator_stroke_width);
-            }
-            if (m_depth_reset_separator_x > m_checkbox_depth_separator_x)
-            {
-                const float line_x = std::floor(m_depth_reset_separator_x) + 1.0f;
-                m_render_target->DrawLine(
-                    D2D1::Point2F(line_x, lower_separator_top),
-                    D2D1::Point2F(line_x, lower_separator_bottom),
-                    m_separator_brush.Get(),
-                    lower_separator_stroke_width);
-            }
-
-            DrawTextLine(
-                L"SpaceScanner",
-                m_title_format.Get(),
-                D2D1::RectF(
-                    m_header_info_rect.left,
-                    m_header_info_rect.top,
-                    m_header_info_rect.right,
-                    m_header_info_rect.top + 34.0f),
-                m_text_brush.Get());
-
-            const Node* focused_node = m_tree && m_view_root_id != 0
-                ? m_tree->GetNode(m_view_root_id)
-                : nullptr;
-            const std::wstring focused_path = focused_node
-                ? m_tree->BuildPath(m_view_root_id)
-                : (m_options.path.empty() ? L"(no path selected)" : m_options.path);
-            const std::wstring focused_size = focused_node
-                ? HumanizeBytes(focused_node->size)
-                : L"-";
-
-            DrawTextLine(
-                focused_path,
-                m_small_format.Get(),
-                D2D1::RectF(
-                    m_header_info_rect.left,
-                    m_header_info_rect.top + 42.0f,
-                    m_header_info_rect.right,
-                    m_header_info_rect.top + 58.0f),
-                m_muted_brush.Get());
-
-            std::wstringstream summary;
-            if (m_scan_in_progress)
-            {
-                summary << L"Backend: " << (m_requested_path_is_ntfs ? L"NTFS MFT" : L"Directory")
-                    << L"  |  Status: scanning";
-            }
-            else if (m_tree)
-            {
-                summary << L"Backend: " << (m_used_mft_scan ? L"NTFS MFT" : L"Directory")
-                    << L"  |  Focus size: " << focused_size
-                    << L"  |  Nodes: " << m_tree->NodeCount()
-                    << L"  |  Scan: " << FormatSeconds(m_elapsed_seconds);
-            }
-            else if (m_has_error)
-            {
-                summary << L"Status: failed";
-            }
-            else
-            {
-                summary << L"Status: idle";
-            }
-
-            DrawTextLine(
-                summary.str(),
-                m_body_format.Get(),
-                D2D1::RectF(
-                    m_header_info_rect.left,
-                    m_header_info_rect.top + 68.0f,
-                    m_header_info_rect.right,
-                    m_header_info_rect.top + 86.0f),
-                m_muted_brush.Get());
-        }
-
-        bool ShouldFollowTooltip(const visualization::TreemapRect&) const
-        {
-            return true;
-        }
-
         void StartTooltipAnimation()
         {
             if (!m_show_tooltip || m_tooltip_animation_active || !m_hwnd)
@@ -3044,16 +2046,6 @@ namespace space_scanner::gui
                 return;
             }
 
-            if (!breadcrumb_hovered)
-            {
-                const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
-                if (!ShouldFollowTooltip(rect))
-                {
-                    StopTooltipAnimation();
-                    return;
-                }
-            }
-
             const float delta_x = m_tooltip_target_position.x - m_tooltip_position.x;
             const float delta_y = m_tooltip_target_position.y - m_tooltip_position.y;
             const float distance_squared = (delta_x * delta_x) + (delta_y * delta_y);
@@ -3070,272 +2062,70 @@ namespace space_scanner::gui
             InvalidateCanvas();
         }
 
-        D2D1_RECT_F GetHoveredRectBounds(const visualization::TreemapRect& rect) const
+        MainWindowDrawingState BuildDrawingState() const
         {
-            return D2D1::RectF(
-                m_treemap_content_rect.left + static_cast<float>(rect.x),
-                m_treemap_content_rect.top + static_cast<float>(rect.y),
-                m_treemap_content_rect.left + static_cast<float>(rect.x + rect.width),
-                m_treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
+            MainWindowDrawingState state;
+            state.palette = GetRenderPalette();
+            state.scan_in_progress = m_scan_in_progress;
+            state.has_error = m_has_error;
+            state.requested_path_is_ntfs = m_requested_path_is_ntfs;
+            state.used_mft_scan = m_used_mft_scan;
+            state.show_tooltip = m_show_tooltip;
+            state.show_status_bar = m_show_status_bar;
+            state.hovered_index = m_hovered_index;
+            state.hovered_breadcrumb_index = m_hovered_breadcrumb_index;
+            state.elapsed_seconds = m_elapsed_seconds;
+            state.view_root_id = m_view_root_id;
+            state.selected_path = m_options.path;
+            state.status_text = m_status_text;
+            state.error_text = m_error_text;
+            state.tree = m_tree.get();
+            state.layout_options = m_layout_options;
+            state.rects = &m_rects;
+            state.breadcrumbs = &m_breadcrumbs;
+            state.tooltip_position = m_tooltip_position;
+            state.canvas_rect = m_canvas_rect;
+            state.status_bar_rect = m_status_bar_rect;
+            state.treemap_content_rect = m_treemap_content_rect;
+            state.focus_up_rect = m_focus_up_rect;
+            state.header_info_rect = m_header_info_rect;
+            state.scan_group_rect = m_scan_group_rect;
+            state.display_group_rect = m_display_group_rect;
+            state.checkbox_depth_separator_x = m_checkbox_depth_separator_x;
+            state.depth_reset_separator_x = m_depth_reset_separator_x;
+            return state;
         }
 
-        bool TryGetHoverDisplayInfo(
-            std::wstring* name_text,
-            std::wstring* size_text,
-            D2D1_RECT_F* hovered_bounds,
-            bool* follow_tooltip) const
+        RenderVisualPalette GetRenderPalette() const
         {
-            if (!name_text || !size_text || !hovered_bounds || !follow_tooltip)
-            {
-                return false;
-            }
-
-            if (m_scan_in_progress || !m_tree)
-            {
-                return false;
-            }
-
-            if (m_hovered_breadcrumb_index >= 0 && m_hovered_breadcrumb_index < static_cast<int>(m_breadcrumbs.size()))
-            {
-                const BreadcrumbStrip& strip = m_breadcrumbs[static_cast<size_t>(m_hovered_breadcrumb_index)];
-                *hovered_bounds = strip.rect;
-                *follow_tooltip = true;
-
-                if (m_tree)
-                {
-                    const Node* node = m_tree->GetNode(strip.node_id);
-                    const std::wstring path = m_tree->BuildPath(strip.node_id);
-                    *name_text = path.empty() ? strip.text : path;
-                    *size_text = L"Size: " + (node ? HumanizeBytes(node->size) : L"-");
-                }
-                else
-                {
-                    *name_text = strip.text;
-                    *size_text = L"Size: -";
-                }
-                return true;
-            }
-
-            if (m_hovered_index >= 0 && m_hovered_index < static_cast<int>(m_rects.size()))
-            {
-                const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(m_hovered_index)];
-                *hovered_bounds = GetHoveredRectBounds(rect);
-                *follow_tooltip = ShouldFollowTooltip(rect);
-                *name_text = rect.path.empty() ? rect.label : rect.path;
-                *size_text = L"Size: " + HumanizeBytes(rect.size);
-                return true;
-            }
-
-            return false;
-        }
-
-        D2D1_POINT_2F ResolveTooltipPosition(
-            const D2D1_POINT_2F& anchor,
-            const D2D1_RECT_F& hovered_rect,
-            float tooltip_width,
-            float tooltip_height,
-            bool follow_tooltip) const
-        {
-            float tooltip_left = anchor.x + kTooltipOffsetX;
-            float tooltip_top = anchor.y + kTooltipOffsetY;
-
-            if (tooltip_left + tooltip_width > m_canvas_rect.right - kTooltipInnerMargin)
-            {
-                tooltip_left = anchor.x - tooltip_width - 10.0f;
-            }
-            if (tooltip_top + tooltip_height > m_canvas_rect.bottom - kTooltipInnerMargin)
-            {
-                tooltip_top = anchor.y - tooltip_height - 10.0f;
-            }
-
-            if (!follow_tooltip)
-            {
-                const float hovered_width = hovered_rect.right - hovered_rect.left;
-                const float hovered_height = hovered_rect.bottom - hovered_rect.top;
-                if (hovered_width >= tooltip_width + (kTooltipInnerMargin * 2.0f) &&
-                    hovered_height >= tooltip_height + (kTooltipInnerMargin * 2.0f))
-                {
-                    const float min_hovered_left = hovered_rect.left + kTooltipInnerMargin;
-                    const float max_hovered_left = hovered_rect.right - tooltip_width - kTooltipInnerMargin;
-                    const float min_hovered_top = hovered_rect.top + kTooltipInnerMargin;
-                    const float max_hovered_top = hovered_rect.bottom - tooltip_height - kTooltipInnerMargin;
-                    tooltip_left = std::clamp(tooltip_left, min_hovered_left, max_hovered_left);
-                    tooltip_top = std::clamp(tooltip_top, min_hovered_top, max_hovered_top);
-                }
-            }
-
-            const float min_tooltip_left = m_canvas_rect.left + kTooltipInnerMargin;
-            const float max_tooltip_left = std::max(min_tooltip_left, m_canvas_rect.right - tooltip_width - kTooltipInnerMargin);
-            const float min_tooltip_top = m_canvas_rect.top + kTooltipInnerMargin;
-            const float max_tooltip_top = std::max(min_tooltip_top, m_canvas_rect.bottom - tooltip_height - kTooltipInnerMargin);
-            tooltip_left = std::clamp(tooltip_left, min_tooltip_left, max_tooltip_left);
-            tooltip_top = std::clamp(tooltip_top, min_tooltip_top, max_tooltip_top);
-
-            return D2D1::Point2F(tooltip_left, tooltip_top);
-        }
-
-        void DrawHoverTooltip()
-        {
-            if (!m_show_tooltip)
-            {
-                return;
-            }
-            if (!m_dwrite_factory || !m_small_format || !m_tooltip_background_brush || !m_tooltip_border_brush ||
-                !m_tooltip_text_brush || !m_tooltip_secondary_text_brush || !m_tooltip_shadow_brush)
-            {
-                return;
-            }
-
-            std::wstring name_text;
-            std::wstring size_text;
-            D2D1_RECT_F hovered_bounds = m_canvas_rect;
-            bool follow_tooltip = false;
-            if (!TryGetHoverDisplayInfo(&name_text, &size_text, &hovered_bounds, &follow_tooltip))
-            {
-                return;
-            }
-
-            const float available_tooltip_width = std::max(48.0f, (m_canvas_rect.right - m_canvas_rect.left) - 12.0f);
-            const float max_tooltip_width = std::min(420.0f, std::max(28.0f, available_tooltip_width - (kTooltipPaddingX * 2.0f)));
-            const float max_tooltip_height = std::max(48.0f, (m_canvas_rect.bottom - m_canvas_rect.top) - 24.0f);
-
-            ComPtr<IDWriteTextLayout> name_layout;
-            HRESULT hr = m_dwrite_factory->CreateTextLayout(
-                name_text.c_str(),
-                static_cast<UINT32>(name_text.size()),
-                m_small_format.Get(),
-                max_tooltip_width,
-                max_tooltip_height,
-                name_layout.GetAddressOf());
-            if (FAILED(hr) || !name_layout)
-            {
-                return;
-            }
-            name_layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
-
-            ComPtr<IDWriteTextLayout> size_layout;
-            hr = m_dwrite_factory->CreateTextLayout(
-                size_text.c_str(),
-                static_cast<UINT32>(size_text.size()),
-                m_small_format.Get(),
-                max_tooltip_width,
-                22.0f,
-                size_layout.GetAddressOf());
-            if (FAILED(hr) || !size_layout)
-            {
-                return;
-            }
-            size_layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-
-            DWRITE_TEXT_METRICS name_metrics = {};
-            DWRITE_TEXT_METRICS size_metrics = {};
-            if (FAILED(name_layout->GetMetrics(&name_metrics)) || FAILED(size_layout->GetMetrics(&size_metrics)))
-            {
-                return;
-            }
-
-            const float text_width = std::max(
-                std::max(name_metrics.widthIncludingTrailingWhitespace, size_metrics.widthIncludingTrailingWhitespace),
-                96.0f);
-            const float name_height = std::max(name_metrics.height, 16.0f);
-            const float size_height = std::max(size_metrics.height, 14.0f);
-            const float tooltip_width = std::min(available_tooltip_width, text_width + (kTooltipPaddingX * 2.0f));
-            const float tooltip_height = (kTooltipPaddingY * 2.0f) + name_height + kTooltipLineGap + size_height;
-            const D2D1_POINT_2F tooltip_origin = ResolveTooltipPosition(
-                m_tooltip_position,
-                hovered_bounds,
-                tooltip_width,
-                tooltip_height,
-                follow_tooltip);
-            const float tooltip_left = tooltip_origin.x;
-            const float tooltip_top = tooltip_origin.y;
-
-            const D2D1_ROUNDED_RECT shadow_rect = D2D1::RoundedRect(
-                D2D1::RectF(
-                    tooltip_left + 2.0f,
-                    tooltip_top + 3.0f,
-                    tooltip_left + tooltip_width + 2.0f,
-                    tooltip_top + tooltip_height + 3.0f),
-                kTooltipCornerRadius,
-                kTooltipCornerRadius);
-            const D2D1_ROUNDED_RECT tooltip_rect = D2D1::RoundedRect(
-                D2D1::RectF(
-                    tooltip_left,
-                    tooltip_top,
-                    tooltip_left + tooltip_width,
-                    tooltip_top + tooltip_height),
-                kTooltipCornerRadius,
-                kTooltipCornerRadius);
-            m_render_target->FillRoundedRectangle(shadow_rect, m_tooltip_shadow_brush.Get());
-            m_render_target->FillRoundedRectangle(tooltip_rect, m_tooltip_background_brush.Get());
-            m_render_target->DrawRoundedRectangle(tooltip_rect, m_tooltip_border_brush.Get(), 1.0f);
-
-            const D2D1_POINT_2F name_origin = D2D1::Point2F(
-                tooltip_left + kTooltipPaddingX,
-                tooltip_top + kTooltipPaddingY);
-            const D2D1_POINT_2F size_origin = D2D1::Point2F(
-                tooltip_left + kTooltipPaddingX,
-                tooltip_top + kTooltipPaddingY + name_height + kTooltipLineGap);
-            m_render_target->DrawTextLayout(name_origin, name_layout.Get(), m_tooltip_text_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
-            m_render_target->DrawTextLayout(size_origin, size_layout.Get(), m_tooltip_secondary_text_brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
-        }
-
-        void DrawStatusBar()
-        {
-            if (!m_show_status_bar)
-            {
-                return;
-            }
-
-            DrawPanelRect(m_status_bar_rect, m_panel_brush.Get(), m_border_brush.Get(), 1.0f);
-
-            std::wstring name_text;
-            std::wstring size_text;
-            D2D1_RECT_F hovered_bounds = m_status_bar_rect;
-            bool follow_tooltip = true;
-            if (!TryGetHoverDisplayInfo(&name_text, &size_text, &hovered_bounds, &follow_tooltip))
-            {
-                return;
-            }
-
-            const std::wstring status_text = name_text + L" - " + size_text.substr(6);
-            const D2D1_RECT_F text_rect = D2D1::RectF(
-                m_status_bar_rect.left + 12.0f,
-                m_status_bar_rect.top + kStatusBarTextVerticalPadding,
-                m_status_bar_rect.right - 12.0f,
-                m_status_bar_rect.bottom - kStatusBarTextVerticalPadding);
-            DrawTextLine(status_text, m_small_format.Get(), text_rect, m_text_brush.Get());
+            return RenderVisualPalette{
+                kWindowBackgroundRed,
+                kWindowBackgroundGreen,
+                kWindowBackgroundBlue,
+                kHeaderPanelRed,
+                kHeaderPanelGreen,
+                kHeaderPanelBlue,
+                kControlPanelRed,
+                kControlPanelGreen,
+                kControlPanelBlue,
+                kControlSurfaceRed,
+                kControlSurfaceGreen,
+                kControlSurfaceBlue,
+                kControlMutedRed,
+                kControlMutedGreen,
+                kControlMutedBlue,
+                kControlBorderRed,
+                kControlBorderGreen,
+                kControlBorderBlue
+            };
         }
 
         void OnPaint()
         {
             PAINTSTRUCT paint = {};
             BeginPaint(m_hwnd, &paint);
-
-            HRESULT hr = CreateDeviceResources();
-            if (SUCCEEDED(hr))
-            {
-                m_render_target->BeginDraw();
-                m_render_target->SetTransform(D2D1::Matrix3x2F::Identity());
-                m_render_target->Clear(
-                    ColorFromRgb(
-                        kWindowBackgroundRed,
-                        kWindowBackgroundGreen,
-                        kWindowBackgroundBlue));
-
-                UpdateCanvasRect();
-                DrawHeader();
-                DrawTreemap();
-                DrawStatusBar();
-                DrawHoverTooltip();
-
-                hr = m_render_target->EndDraw();
-                if (hr == D2DERR_RECREATE_TARGET)
-                {
-                    DiscardDeviceResources();
-                }
-            }
-
+            UpdateCanvasRect();
+            m_painter.Paint(m_hwnd, BuildDrawingState());
             EndPaint(m_hwnd, &paint);
         }
 
@@ -3356,35 +2146,7 @@ namespace space_scanner::gui
         HBRUSH m_control_surface_brush = nullptr;
         std::shared_ptr<SharedScanState> m_shared_scan_state;
         bool m_requested_path_is_ntfs = false;
-
-        ComPtr<ID2D1Factory> m_d2d_factory;
-        ComPtr<IDWriteFactory> m_dwrite_factory;
-        ComPtr<ID2D1HwndRenderTarget> m_render_target;
-        ComPtr<ID2D1SolidColorBrush> m_text_brush;
-        ComPtr<ID2D1SolidColorBrush> m_muted_brush;
-        ComPtr<ID2D1SolidColorBrush> m_panel_brush;
-        ComPtr<ID2D1SolidColorBrush> m_canvas_brush;
-        ComPtr<ID2D1SolidColorBrush> m_border_brush;
-        ComPtr<ID2D1SolidColorBrush> m_separator_brush;
-        ComPtr<ID2D1SolidColorBrush> m_tile_brush;
-        ComPtr<ID2D1SolidColorBrush> m_tile_text_brush;
-        ComPtr<ID2D1SolidColorBrush> m_tile_secondary_text_brush;
-        ComPtr<ID2D1SolidColorBrush> m_tile_text_outline_brush;
-        ComPtr<ID2D1SolidColorBrush> m_tile_text_plate_brush;
-        ComPtr<ID2D1SolidColorBrush> m_hover_brush;
-        ComPtr<ID2D1SolidColorBrush> m_active_level_glow_brush;
-        ComPtr<ID2D1SolidColorBrush> m_active_level_shadow_brush;
-        ComPtr<ID2D1SolidColorBrush> m_error_brush;
-        ComPtr<ID2D1SolidColorBrush> m_header_action_brush;
-        ComPtr<ID2D1SolidColorBrush> m_tooltip_background_brush;
-        ComPtr<ID2D1SolidColorBrush> m_tooltip_border_brush;
-        ComPtr<ID2D1SolidColorBrush> m_tooltip_text_brush;
-        ComPtr<ID2D1SolidColorBrush> m_tooltip_secondary_text_brush;
-        ComPtr<ID2D1SolidColorBrush> m_tooltip_shadow_brush;
-        ComPtr<IDWriteTextFormat> m_title_format;
-        ComPtr<IDWriteTextFormat> m_body_format;
-        ComPtr<IDWriteTextFormat> m_small_format;
-        ComPtr<IDWriteInlineObject> m_ellipsis_trimming_sign;
+        MainWindowPainter m_painter;
 
         bool m_scan_in_progress = false;
         bool m_has_error = false;
@@ -3407,17 +2169,17 @@ namespace space_scanner::gui
         bool m_show_status_bar = false;
         bool m_updating_depth_edit = false;
         bool m_tooltip_animation_active = false;
-        D2D1_POINT_2F m_mouse_position = D2D1::Point2F(-1.0f, -1.0f);
-        D2D1_POINT_2F m_tooltip_position = D2D1::Point2F(-1.0f, -1.0f);
-        D2D1_POINT_2F m_tooltip_target_position = D2D1::Point2F(-1.0f, -1.0f);
-        D2D1_RECT_F m_canvas_rect = D2D1::RectF(0, 0, 0, 0);
-        D2D1_RECT_F m_status_bar_rect = D2D1::RectF(0, 0, 0, 0);
-        D2D1_RECT_F m_treemap_content_rect = D2D1::RectF(0, 0, 0, 0);
-        D2D1_RECT_F m_focus_up_rect = D2D1::RectF(0, 0, 0, 0);
-        D2D1_RECT_F m_header_info_rect = D2D1::RectF(0, 0, 0, 0);
-        D2D1_RECT_F m_scan_group_rect = D2D1::RectF(0, 0, 0, 0);
-        D2D1_RECT_F m_depth_group_rect = D2D1::RectF(0, 0, 0, 0);
-        D2D1_RECT_F m_display_group_rect = D2D1::RectF(0, 0, 0, 0);
+        RenderPoint m_mouse_position = MakeRenderPoint(-1.0f, -1.0f);
+        RenderPoint m_tooltip_position = MakeRenderPoint(-1.0f, -1.0f);
+        RenderPoint m_tooltip_target_position = MakeRenderPoint(-1.0f, -1.0f);
+        RenderRect m_canvas_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_status_bar_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_treemap_content_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_focus_up_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_header_info_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_scan_group_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_depth_group_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_display_group_rect = MakeRenderRect(0, 0, 0, 0);
         float m_checkbox_depth_separator_x = 0.0f;
         float m_depth_reset_separator_x = 0.0f;
     };
