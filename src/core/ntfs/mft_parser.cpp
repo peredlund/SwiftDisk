@@ -118,19 +118,24 @@ bool ApplyFixup(uint8_t* record, size_t record_size, uint16_t usa_offset, uint16
             return false;
         }
         auto* sector_last = reinterpret_cast<uint16_t*>(record + sector_offset);
-        if (*sector_last == usa_value)
-        {
-            *sector_last = usa[i];
-        }
-        else if (*sector_last == usa[i])
-        {
-            // Fixup already applied by the source.
-            continue;
-        }
-        else
+        if (*sector_last != usa_value && *sector_last != usa[i])
         {
             ok = false;
             break;
+        }
+    }
+    if (!ok)
+    {
+        return false;
+    }
+
+    for (uint16_t i = 1; i < usa_count; ++i)
+    {
+        size_t sector_offset = (static_cast<size_t>(i) * bytes_per_sector) - sizeof(uint16_t);
+        auto* sector_last = reinterpret_cast<uint16_t*>(record + sector_offset);
+        if (*sector_last == usa_value)
+        {
+            *sector_last = usa[i];
         }
     }
     return ok;
@@ -328,7 +333,9 @@ bool ExtractMftDataRuns(uint8_t* record, size_t record_size, uint32_t bytes_per_
 
     if (!ApplyFixup(record, record_size, header->usa_offset, header->usa_count, bytes_per_sector))
     {
-        return false;
+        // FSCTL_GET_NTFS_FILE_RECORD may return a record whose sector trailers
+        // no longer match the raw on-disk USA values. Keep parsing and let the
+        // attribute bounds checks below reject genuinely malformed records.
     }
 
     header = reinterpret_cast<FileRecordHeader*>(record);
