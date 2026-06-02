@@ -343,6 +343,7 @@ namespace space_scanner::gui
         static constexpr float kTooltipAnimationSmoothing = 0.38f;
         static constexpr float kTooltipAnimationSnapDistance = 1.5f;
         static constexpr size_t kMaxBreadcrumbStrips = 5;
+        static constexpr const wchar_t* kControlWindowPropName = L"SpaceScannerMainWindow";
         static constexpr BYTE kWindowBackgroundRed = 23;
         static constexpr BYTE kWindowBackgroundGreen = 27;
         static constexpr BYTE kWindowBackgroundBlue = 32;
@@ -370,6 +371,9 @@ namespace space_scanner::gui
         static constexpr BYTE kControlActiveRed = 104;
         static constexpr BYTE kControlActiveGreen = 132;
         static constexpr BYTE kControlActiveBlue = 176;
+        static constexpr BYTE kControlHoverRed = 66;
+        static constexpr BYTE kControlHoverGreen = 76;
+        static constexpr BYTE kControlHoverBlue = 90;
 
         LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param)
         {
@@ -448,6 +452,7 @@ namespace space_scanner::gui
                 break;
             case WM_DESTROY:
                 StopTooltipAnimation();
+                DestroyControlHoverTracking();
                 DestroyControlThemeResources();
                 DiscardDeviceResources();
                 PostQuitMessage(0);
@@ -506,6 +511,14 @@ namespace space_scanner::gui
                         kControlSurfaceGreen,
                         kControlSurfaceBlue));
             }
+            if (!m_control_hover_brush)
+            {
+                m_control_hover_brush = CreateSolidBrush(
+                    ColorRefFromRgb(
+                        kControlHoverRed,
+                        kControlHoverGreen,
+                        kControlHoverBlue));
+            }
         }
 
         void DestroyControlThemeResources()
@@ -525,6 +538,11 @@ namespace space_scanner::gui
                 DeleteObject(m_control_surface_brush);
                 m_control_surface_brush = nullptr;
             }
+            if (m_control_hover_brush)
+            {
+                DeleteObject(m_control_hover_brush);
+                m_control_hover_brush = nullptr;
+            }
         }
 
         LRESULT HandleControlColor(HDC hdc, HWND control, UINT message)
@@ -539,9 +557,14 @@ namespace space_scanner::gui
             if ((message == WM_CTLCOLOREDIT || message == WM_CTLCOLORSTATIC) &&
                 (control == m_path_edit || control == m_depth_edit))
             {
-                SetBkColor(hdc, ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue));
+                const bool hovered = IsControlHovered(control) && IsWindowEnabled(control);
+                SetBkColor(
+                    hdc,
+                    hovered
+                        ? ColorRefFromRgb(kControlHoverRed, kControlHoverGreen, kControlHoverBlue)
+                        : ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue));
                 SetBkMode(hdc, OPAQUE);
-                return reinterpret_cast<LRESULT>(m_control_surface_brush);
+                return reinterpret_cast<LRESULT>(hovered ? m_control_hover_brush : m_control_surface_brush);
             }
 
             if (message == WM_CTLCOLORSTATIC && control == m_depth_label)
@@ -589,7 +612,7 @@ namespace space_scanner::gui
             DeleteObject(pen);
         }
 
-        COLORREF GetButtonFillColor(bool pressed, bool disabled, bool checked = false) const
+        COLORREF GetButtonFillColor(bool pressed, bool disabled, bool hovered, bool checked = false) const
         {
             if (disabled)
             {
@@ -601,9 +624,26 @@ namespace space_scanner::gui
             }
             if (checked)
             {
-                return ColorRefFromRgb(62, 72, 86);
+                return hovered ? ColorRefFromRgb(74, 88, 108) : ColorRefFromRgb(62, 72, 86);
+            }
+            if (hovered)
+            {
+                return ColorRefFromRgb(kControlHoverRed, kControlHoverGreen, kControlHoverBlue);
             }
             return ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue);
+        }
+
+        COLORREF GetButtonBorderColor(bool disabled, bool hovered, bool checked = false) const
+        {
+            if (disabled)
+            {
+                return ColorRefFromRgb(50, 60, 81);
+            }
+            if (hovered || checked)
+            {
+                return ColorRefFromRgb(kControlActiveRed, kControlActiveGreen, kControlActiveBlue);
+            }
+            return ColorRefFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue);
         }
 
         void DrawCustomButton(const DRAWITEMSTRUCT& draw_item) const
@@ -615,17 +655,16 @@ namespace space_scanner::gui
 
             const bool disabled = (draw_item.itemState & ODS_DISABLED) != 0;
             const bool pressed = (draw_item.itemState & ODS_SELECTED) != 0;
+            const bool hovered = IsControlHovered(draw_item.hwndItem) && !disabled;
             const bool is_depth_step_button =
                 draw_item.hwndItem == m_depth_up_button ||
                 draw_item.hwndItem == m_depth_down_button;
             RECT rect = draw_item.rcItem;
-            FillGdiRect(draw_item.hDC, rect, GetButtonFillColor(pressed, disabled));
+            FillGdiRect(draw_item.hDC, rect, GetButtonFillColor(pressed, disabled, hovered));
             DrawGdiFrame(
                 draw_item.hDC,
                 rect,
-                disabled
-                    ? ColorRefFromRgb(50, 60, 81)
-                    : ColorRefFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue));
+                GetButtonBorderColor(disabled, hovered));
 
             wchar_t text[64] = {};
             GetWindowTextW(draw_item.hwndItem, text, static_cast<int>(std::size(text)));
@@ -673,6 +712,7 @@ namespace space_scanner::gui
 
             const bool disabled = (draw_item.itemState & ODS_DISABLED) != 0;
             const bool pressed = (draw_item.itemState & ODS_SELECTED) != 0;
+            const bool hovered = IsControlHovered(draw_item.hwndItem) && !disabled;
             bool checked = false;
             if (draw_item.hwndItem == m_show_tooltip_check)
             {
@@ -690,6 +730,13 @@ namespace space_scanner::gui
                     kHeaderPanelRed,
                     kHeaderPanelGreen,
                     kHeaderPanelBlue));
+            if (hovered)
+            {
+                FillGdiRect(
+                    draw_item.hDC,
+                    draw_item.rcItem,
+                    ColorRefFromRgb(kControlBackplateRed, kControlBackplateGreen, kControlBackplateBlue));
+            }
 
             RECT checkbox_rect = draw_item.rcItem;
             checkbox_rect.left += 2;
@@ -697,13 +744,11 @@ namespace space_scanner::gui
             checkbox_rect.right = checkbox_rect.left + 14;
             checkbox_rect.bottom = checkbox_rect.top + 14;
 
-            FillGdiRect(draw_item.hDC, checkbox_rect, GetButtonFillColor(pressed, disabled, checked));
+            FillGdiRect(draw_item.hDC, checkbox_rect, GetButtonFillColor(pressed, disabled, hovered, checked));
             DrawGdiFrame(
                 draw_item.hDC,
                 checkbox_rect,
-                checked
-                    ? ColorRefFromRgb(kControlActiveRed, kControlActiveGreen, kControlActiveBlue)
-                    : ColorRefFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue));
+                GetButtonBorderColor(disabled, hovered, checked));
 
             if (checked)
             {
@@ -796,6 +841,247 @@ namespace space_scanner::gui
                 checked ? BST_CHECKED : BST_UNCHECKED,
                 0);
             InvalidateRect(checkbox, nullptr, TRUE);
+        }
+
+        bool IsControlHovered(HWND control) const
+        {
+            return control && control == m_hovered_control;
+        }
+
+        bool IsTrackedControl(HWND control) const
+        {
+            return control == m_path_edit ||
+                control == m_scan_button ||
+                control == m_browse_button ||
+                control == m_reset_button ||
+                control == m_depth_edit ||
+                control == m_depth_up_button ||
+                control == m_depth_down_button ||
+                control == m_show_tooltip_check ||
+                control == m_show_status_bar_check;
+        }
+
+        bool IsEditControl(HWND control) const
+        {
+            return control == m_path_edit || control == m_depth_edit;
+        }
+
+        void InvalidateTrackedControl(HWND control) const
+        {
+            if (!control || !IsTrackedControl(control))
+            {
+                return;
+            }
+
+            if (IsEditControl(control))
+            {
+                RedrawWindow(control, nullptr, nullptr, RDW_INVALIDATE | RDW_FRAME);
+                return;
+            }
+
+            InvalidateRect(control, nullptr, TRUE);
+        }
+
+        void SetHoveredControl(HWND control)
+        {
+            if (control && (!IsTrackedControl(control) || !IsWindowEnabled(control)))
+            {
+                control = nullptr;
+            }
+
+            if (m_hovered_control == control)
+            {
+                return;
+            }
+
+            HWND old_hovered_control = m_hovered_control;
+            m_hovered_control = control;
+            InvalidateTrackedControl(old_hovered_control);
+            InvalidateTrackedControl(m_hovered_control);
+        }
+
+        void OnControlMouseMove(HWND control)
+        {
+            SetHoveredControl(control);
+
+            TRACKMOUSEEVENT track = {};
+            track.cbSize = sizeof(track);
+            track.dwFlags = TME_LEAVE;
+            track.hwndTrack = control;
+            TrackMouseEvent(&track);
+        }
+
+        void OnControlMouseLeave(HWND control)
+        {
+            if (m_hovered_control == control)
+            {
+                SetHoveredControl(nullptr);
+            }
+        }
+
+        void FillEditPadding(HDC hdc, const RECT& client, const RECT& text_rect, COLORREF color) const
+        {
+            RECT top_rect = client;
+            top_rect.bottom = std::clamp(text_rect.top, client.top, client.bottom);
+            FillGdiRect(hdc, top_rect, color);
+
+            RECT bottom_rect = client;
+            bottom_rect.top = std::clamp(text_rect.bottom, client.top, client.bottom);
+            FillGdiRect(hdc, bottom_rect, color);
+
+            RECT left_rect = client;
+            left_rect.top = top_rect.bottom;
+            left_rect.right = std::clamp(text_rect.left, client.left, client.right);
+            left_rect.bottom = bottom_rect.top;
+            FillGdiRect(hdc, left_rect, color);
+
+            RECT right_rect = client;
+            right_rect.left = std::clamp(text_rect.right, client.left, client.right);
+            right_rect.top = top_rect.bottom;
+            right_rect.bottom = bottom_rect.top;
+            FillGdiRect(hdc, right_rect, color);
+        }
+
+        void PaintEditPadding(HWND control) const
+        {
+            if (!IsEditControl(control))
+            {
+                return;
+            }
+
+            RECT client = {};
+            GetClientRect(control, &client);
+            RECT text_rect = {};
+            SendMessageW(control, EM_GETRECT, 0, reinterpret_cast<LPARAM>(&text_rect));
+
+            const bool hovered = IsControlHovered(control) && IsWindowEnabled(control);
+            const COLORREF color = hovered
+                ? ColorRefFromRgb(kControlHoverRed, kControlHoverGreen, kControlHoverBlue)
+                : ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue);
+
+            HDC hdc = GetDC(control);
+            if (!hdc)
+            {
+                return;
+            }
+
+            FillEditPadding(hdc, client, text_rect, color);
+            ReleaseDC(control, hdc);
+        }
+
+        WNDPROC GetOriginalControlProc(HWND control) const
+        {
+            for (const auto& subclassed_control : m_subclassed_controls)
+            {
+                if (subclassed_control.first == control)
+                {
+                    return subclassed_control.second;
+                }
+            }
+
+            return nullptr;
+        }
+
+        static LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
+        {
+            auto* window = reinterpret_cast<MainWindow*>(GetPropW(hwnd, kControlWindowPropName));
+            if (!window)
+            {
+                return DefWindowProcW(hwnd, message, w_param, l_param);
+            }
+
+            return window->HandleControlMessage(hwnd, message, w_param, l_param);
+        }
+
+        LRESULT HandleControlMessage(HWND control, UINT message, WPARAM w_param, LPARAM l_param)
+        {
+            WNDPROC original_proc = GetOriginalControlProc(control);
+            if (!original_proc)
+            {
+                return DefWindowProcW(control, message, w_param, l_param);
+            }
+
+            switch (message)
+            {
+            case WM_MOUSEMOVE:
+                OnControlMouseMove(control);
+                break;
+            case WM_MOUSELEAVE:
+                OnControlMouseLeave(control);
+                break;
+            case WM_PAINT:
+            {
+                const LRESULT result = CallWindowProcW(original_proc, control, message, w_param, l_param);
+                PaintEditPadding(control);
+                return result;
+            }
+            case WM_NCDESTROY:
+                OnControlMouseLeave(control);
+                break;
+            default:
+                break;
+            }
+
+            return CallWindowProcW(original_proc, control, message, w_param, l_param);
+        }
+
+        void AddControlHoverTracking(HWND control)
+        {
+            if (!control || GetPropW(control, kControlWindowPropName))
+            {
+                return;
+            }
+
+            SetPropW(control, kControlWindowPropName, this);
+            WNDPROC original_proc = reinterpret_cast<WNDPROC>(
+                SetWindowLongPtrW(
+                    control,
+                    GWLP_WNDPROC,
+                    reinterpret_cast<LONG_PTR>(&MainWindow::ControlWindowProc)));
+            if (!original_proc)
+            {
+                RemovePropW(control, kControlWindowPropName);
+                return;
+            }
+
+            m_subclassed_controls.emplace_back(control, original_proc);
+        }
+
+        void CreateControlHoverTracking()
+        {
+            AddControlHoverTracking(m_path_edit);
+            AddControlHoverTracking(m_scan_button);
+            AddControlHoverTracking(m_browse_button);
+            AddControlHoverTracking(m_reset_button);
+            AddControlHoverTracking(m_depth_edit);
+            AddControlHoverTracking(m_depth_up_button);
+            AddControlHoverTracking(m_depth_down_button);
+            AddControlHoverTracking(m_show_tooltip_check);
+            AddControlHoverTracking(m_show_status_bar_check);
+        }
+
+        void DestroyControlHoverTracking()
+        {
+            SetHoveredControl(nullptr);
+            for (const auto& subclassed_control : m_subclassed_controls)
+            {
+                HWND control = subclassed_control.first;
+                if (!control || !IsWindow(control))
+                {
+                    continue;
+                }
+
+                if (GetWindowLongPtrW(control, GWLP_WNDPROC) ==
+                    reinterpret_cast<LONG_PTR>(&MainWindow::ControlWindowProc))
+                {
+                    SetWindowLongPtrW(
+                        control,
+                        GWLP_WNDPROC,
+                        reinterpret_cast<LONG_PTR>(subclassed_control.second));
+                }
+                RemovePropW(control, kControlWindowPropName);
+            }
+            m_subclassed_controls.clear();
         }
 
         void ApplyEditTextInsets(
@@ -1022,6 +1308,7 @@ namespace space_scanner::gui
                 SetCheckboxState(m_show_status_bar_check, m_show_status_bar);
             }
 
+            CreateControlHoverTracking();
             UpdateHeaderControlsLayout();
         }
 
@@ -1235,6 +1522,10 @@ namespace space_scanner::gui
             if (m_show_status_bar_check)
             {
                 EnableWindow(m_show_status_bar_check, enabled);
+            }
+            if (m_hovered_control && !IsWindowEnabled(m_hovered_control))
+            {
+                SetHoveredControl(nullptr);
             }
         }
 
@@ -2343,6 +2634,7 @@ namespace space_scanner::gui
         HBRUSH m_header_background_brush = nullptr;
         HBRUSH m_control_panel_brush = nullptr;
         HBRUSH m_control_surface_brush = nullptr;
+        HBRUSH m_control_hover_brush = nullptr;
         std::shared_ptr<SharedScanState> m_shared_scan_state;
         bool m_requested_path_is_ntfs = false;
         MainWindowPainter m_painter;
@@ -2350,6 +2642,7 @@ namespace space_scanner::gui
         bool m_scan_in_progress = false;
         bool m_has_error = false;
         bool m_used_mft_scan = false;
+        HWND m_hovered_control = nullptr;
         int m_hovered_index = -1;
         int m_hovered_breadcrumb_index = -1;
         int m_max_depth = kDefaultMaxDepth;
@@ -2382,6 +2675,7 @@ namespace space_scanner::gui
         RenderRect m_display_group_rect = MakeRenderRect(0, 0, 0, 0);
         float m_checkbox_depth_separator_x = 0.0f;
         float m_depth_reset_separator_x = 0.0f;
+        std::vector<std::pair<HWND, WNDPROC>> m_subclassed_controls;
     };
 
 } // namespace space_scanner::gui
