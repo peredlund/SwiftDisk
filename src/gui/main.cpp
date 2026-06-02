@@ -249,6 +249,29 @@ namespace space_scanner::gui
             rect.bottom + amount);
     }
 
+    float GetWindowDpiScale(HWND hwnd)
+    {
+        if (!hwnd)
+        {
+            return 1.0f;
+        }
+
+        HDC hdc = GetDC(hwnd);
+        if (!hdc)
+        {
+            return 1.0f;
+        }
+
+        const int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+        ReleaseDC(hwnd, hdc);
+        return std::clamp(static_cast<float>(dpi) / 96.0f, 1.0f, 4.0f);
+    }
+
+    float ScaleForDpi(float value, float dpi_scale)
+    {
+        return value * dpi_scale;
+    }
+
     class MainWindow
     {
     public:
@@ -1705,12 +1728,15 @@ namespace space_scanner::gui
 
         RenderRect GetHoverVisualBounds(int rect_index, int breadcrumb_index) const
         {
+            const float dpi_scale = GetWindowDpiScale(m_hwnd);
             if (breadcrumb_index >= 0 && breadcrumb_index < static_cast<int>(m_breadcrumbs.size()))
             {
-                return InflateRenderRect(m_breadcrumbs[static_cast<size_t>(breadcrumb_index)].frame_rect, 12.0f);
+                return InflateRenderRect(
+                    m_breadcrumbs[static_cast<size_t>(breadcrumb_index)].frame_rect,
+                    ScaleForDpi(12.0f, dpi_scale));
             }
 
-            return InflateRenderRect(GetTreemapRectBounds(rect_index), 4.0f);
+            return InflateRenderRect(GetTreemapRectBounds(rect_index), ScaleForDpi(4.0f, dpi_scale));
         }
 
         void InvalidateHoverTransition(
@@ -1752,9 +1778,13 @@ namespace space_scanner::gui
             GetClientRect(m_hwnd, &client);
             const float width = static_cast<float>(std::max<LONG>(client.right - client.left, 1));
             const float height = static_cast<float>(std::max<LONG>(client.bottom - client.top, 1));
+            const float dpi_scale = GetWindowDpiScale(m_hwnd);
+            const float status_bar_height = ScaleForDpi(kStatusBarHeight, dpi_scale);
+            const float status_bar_gap = ScaleForDpi(kStatusBarGap, dpi_scale);
+            const float status_bar_bottom_padding = ScaleForDpi(kStatusBarBottomPadding, dpi_scale);
             const float status_bar_top = std::max(
                 kOuterPadding + kHeaderHeight + 1.0f,
-                height - kStatusBarBottomPadding - kStatusBarHeight);
+                height - status_bar_bottom_padding - status_bar_height);
 
             if (m_show_status_bar)
             {
@@ -1762,7 +1792,7 @@ namespace space_scanner::gui
                     kOuterPadding,
                     status_bar_top,
                     std::max(width - kOuterPadding, kOuterPadding + 1.0f),
-                    std::max(status_bar_top + kStatusBarHeight, status_bar_top + 1.0f));
+                    std::max(status_bar_top + status_bar_height, status_bar_top + 1.0f));
             }
             else
             {
@@ -1774,7 +1804,7 @@ namespace space_scanner::gui
                 kOuterPadding + kHeaderHeight,
                 std::max(width - kOuterPadding, kOuterPadding + 1.0f),
                 std::max(
-                    (m_show_status_bar ? status_bar_top - kStatusBarGap : height - kOuterPadding),
+                    (m_show_status_bar ? status_bar_top - status_bar_gap : height - kOuterPadding),
                     kOuterPadding + kHeaderHeight + 1.0f));
         }
 
@@ -1822,6 +1852,10 @@ namespace space_scanner::gui
                 m_canvas_rect.top + 1.0f,
                 m_canvas_rect.right - 1.0f,
                 m_canvas_rect.bottom - 1.0f);
+            const float dpi_scale = GetWindowDpiScale(m_hwnd);
+            const float treemap_top_slice_height = ScaleForDpi(kTreemapTopSliceHeight, dpi_scale);
+            const float treemap_side_slice_width = ScaleForDpi(kTreemapSideSliceWidth, dpi_scale);
+            const float treemap_bottom_slice_height = ScaleForDpi(kTreemapBottomSliceHeight, dpi_scale);
 
             const size_t visible_count = ancestors.size() - start_index;
             for (size_t i = 0; i < visible_count; ++i)
@@ -1840,12 +1874,12 @@ namespace space_scanner::gui
                     nested_rect.left,
                     nested_rect.top,
                     nested_rect.right,
-                    std::min(nested_rect.bottom, nested_rect.top + kTreemapTopSliceHeight));
+                    std::min(nested_rect.bottom, nested_rect.top + treemap_top_slice_height));
                 strip.content_rect = MakeRenderRect(
-                    nested_rect.left + kTreemapSideSliceWidth,
+                    nested_rect.left + treemap_side_slice_width,
                     strip.rect.bottom,
-                    nested_rect.right - kTreemapSideSliceWidth,
-                    nested_rect.bottom - kTreemapBottomSliceHeight);
+                    nested_rect.right - treemap_side_slice_width,
+                    nested_rect.bottom - treemap_bottom_slice_height);
 
                 std::wstring text = node->name.empty() ? m_tree->BuildPath(node_id) : node->name;
                 if (i == 0 && truncated)
@@ -1884,6 +1918,11 @@ namespace space_scanner::gui
                     : 0;
             m_layout_options.width = width;
             m_layout_options.height = height;
+            m_layout_options.tile_padding = 2.0 * dpi_scale;
+            m_layout_options.directory_header_height = 18.0 * dpi_scale;
+            m_layout_options.minimum_child_side = 12.0 * dpi_scale;
+            m_layout_options.minimum_label_width = 72.0 * dpi_scale;
+            m_layout_options.minimum_label_height = 28.0 * dpi_scale;
             m_layout_options.max_depth = local_depth_limit;
             m_layout_options.max_rectangles = 20000;
             m_layout_options.max_children_per_directory = 0;

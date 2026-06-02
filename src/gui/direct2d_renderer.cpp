@@ -5,6 +5,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cwchar>
 #include <memory>
 #include <sstream>
@@ -111,6 +112,7 @@ namespace space_scanner::gui
         void ApplyTrimming(IDWriteTextLayout* layout, DWRITE_WORD_WRAPPING word_wrapping) const;
         Microsoft::WRL::ComPtr<IDWriteTextLayout> CreateTextLayout(const std::wstring& text, RenderTextFormat format, const RenderRect& bounds, DWRITE_WORD_WRAPPING word_wrapping) const;
         IDWriteTextFormat* GetFormat(RenderTextFormat format) const;
+        float Scale(float value) const;
 
         Microsoft::WRL::ComPtr<ID2D1Factory> m_d2d_factory;
         Microsoft::WRL::ComPtr<IDWriteFactory> m_dwrite_factory;
@@ -141,6 +143,7 @@ namespace space_scanner::gui
         Microsoft::WRL::ComPtr<IDWriteTextFormat> m_body_format;
         Microsoft::WRL::ComPtr<IDWriteTextFormat> m_small_format;
         Microsoft::WRL::ComPtr<IDWriteInlineObject> m_ellipsis_trimming_sign;
+        float m_ui_scale = 1.0f;
     };
 
     using Microsoft::WRL::ComPtr;
@@ -156,6 +159,33 @@ namespace space_scanner::gui
     D2D1_RECT_F ToD2DRect(const RenderRect& rect)
     {
         return D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom);
+    }
+
+    D2D1_RENDER_TARGET_PROPERTIES CreatePixelRenderTargetProperties()
+    {
+        return D2D1::RenderTargetProperties(
+            D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_UNKNOWN),
+            96.0f,
+            96.0f);
+    }
+
+    float GetWindowDpiScale(HWND hwnd)
+    {
+        if (!hwnd)
+        {
+            return 1.0f;
+        }
+
+        HDC hdc = GetDC(hwnd);
+        if (!hdc)
+        {
+            return 1.0f;
+        }
+
+        const int dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+        ReleaseDC(hwnd, hdc);
+        return std::clamp(static_cast<float>(dpi) / 96.0f, 1.0f, 4.0f);
     }
 
     bool IsRenderRectEmpty(const RenderRect& rect)
@@ -219,6 +249,16 @@ namespace space_scanner::gui
             }
         }
 
+        const float window_scale = GetWindowDpiScale(hwnd);
+        if (std::fabs(window_scale - m_ui_scale) > 0.001f)
+        {
+            m_ui_scale = window_scale;
+            m_title_format.Reset();
+            m_body_format.Reset();
+            m_small_format.Reset();
+            m_ellipsis_trimming_sign.Reset();
+        }
+
         if (!m_render_target)
         {
             RECT client = {};
@@ -228,7 +268,7 @@ namespace space_scanner::gui
                 static_cast<UINT>(std::max<LONG>(client.bottom - client.top, 1)));
 
             HRESULT hr = m_d2d_factory->CreateHwndRenderTarget(
-                D2D1::RenderTargetProperties(),
+                CreatePixelRenderTargetProperties(),
                 D2D1::HwndRenderTargetProperties(hwnd, size),
                 m_render_target.GetAddressOf());
             if (FAILED(hr))
@@ -378,8 +418,11 @@ namespace space_scanner::gui
             {
                 return hr;
             }
+        }
 
-            hr = CreateTextFormats();
+        if (!m_title_format || !m_body_format || !m_small_format || !m_ellipsis_trimming_sign)
+        {
+            HRESULT hr = CreateTextFormats();
             if (FAILED(hr))
             {
                 return hr;
@@ -764,7 +807,7 @@ namespace space_scanner::gui
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
-            12.0f,
+            Scale(12.0f),
             L"",
             m_small_format.GetAddressOf());
         if (FAILED(hr))
@@ -837,6 +880,11 @@ namespace space_scanner::gui
         default:
             return m_small_format.Get();
         }
+    }
+
+    float Direct2DRenderer::Scale(float value) const
+    {
+        return value * m_ui_scale;
     }
 
 } // namespace space_scanner::gui
@@ -1012,7 +1060,7 @@ namespace space_scanner::gui
             std::min(layout.shadow_rect.top, layout.tooltip_rect.top),
             std::max(layout.shadow_rect.right, layout.tooltip_rect.right),
             std::max(layout.shadow_rect.bottom, layout.tooltip_rect.bottom));
-        return InflateRenderRect(bounds, 3.0f);
+        return InflateRenderRect(bounds, Scale(3.0f));
     }
 
     std::wstring Direct2DRenderer::BuildDirectoryHeaderText(
@@ -1081,6 +1129,11 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
         return;
     }
 
+    const float treemap_bottom_slice_height = Scale(kTreemapBottomSliceHeight);
+    const float content_invalidation_padding = Scale(3.0f);
+    const float hover_stroke_width = Scale(2.0f);
+    const float regular_stroke_width = Scale(0.75f);
+
     DrawPanelRect(state.canvas_rect, m_canvas_brush.Get(), m_border_brush.Get(), 1.2f);
 
     if (state.scan_in_progress)
@@ -1144,27 +1197,31 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
     if ((*state.breadcrumbs).empty())
     {
         const RenderRect shadow_rect = MakeRenderRect(
-            state.focus_up_rect.left + 8.0f,
-            state.focus_up_rect.top + 8.0f,
-            state.focus_up_rect.right + 8.0f,
-            state.focus_up_rect.bottom + 8.0f);
+            state.focus_up_rect.left + Scale(8.0f),
+            state.focus_up_rect.top + Scale(8.0f),
+            state.focus_up_rect.right + Scale(8.0f),
+            state.focus_up_rect.bottom + Scale(8.0f));
         FillRectangle(shadow_rect, m_active_level_shadow_brush.Get());
         const RenderRect glow_rect = MakeRenderRect(
-            state.focus_up_rect.left - 2.0f,
-            state.focus_up_rect.top - 2.0f,
-            state.focus_up_rect.right + 2.0f,
-            state.focus_up_rect.bottom + 2.0f);
-        DrawRectangle(glow_rect, m_active_level_glow_brush.Get(), 5.5f);
+            state.focus_up_rect.left - Scale(2.0f),
+            state.focus_up_rect.top - Scale(2.0f),
+            state.focus_up_rect.right + Scale(2.0f),
+            state.focus_up_rect.bottom + Scale(2.0f));
+        DrawRectangle(glow_rect, m_active_level_glow_brush.Get(), Scale(5.5f));
         m_header_action_brush->SetColor(ParseHexColor(frame_style.fill_color));
         FillRectangle(state.focus_up_rect, m_header_action_brush.Get());
-        DrawRectangle(state.focus_up_rect, m_hover_brush.Get(), 2.8f);
+        DrawRectangle(state.focus_up_rect, m_hover_brush.Get(), Scale(2.8f));
         m_tile_text_brush->SetColor(ParseHexColor(frame_style.label_text_color));
         m_tile_text_outline_brush->SetColor(ParseHexColor(frame_style.text_outline_color, 0.78f));
         std::wstring frame_text = focused_name + L" - " + focused_size;
         DrawTileTextLine(
             frame_text,
             RenderTextFormat::Small,
-            MakeRenderRect(state.focus_up_rect.left + 8.0f, state.focus_up_rect.top + 3.0f, state.focus_up_rect.right - 8.0f, state.focus_up_rect.bottom - 3.0f),
+            MakeRenderRect(
+                state.focus_up_rect.left + Scale(8.0f),
+                state.focus_up_rect.top + Scale(3.0f),
+                state.focus_up_rect.right - Scale(8.0f),
+                state.focus_up_rect.bottom - Scale(3.0f)),
             m_tile_text_brush.Get(),
             m_tile_text_outline_brush.Get());
     }
@@ -1174,7 +1231,7 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
         {
             const BreadcrumbStrip& strip = (*state.breadcrumbs)[index];
             if (!IsRenderRectEmpty(state.paint_rect) &&
-                !RenderRectsIntersect(InflateRenderRect(strip.frame_rect, 12.0f), state.paint_rect))
+                !RenderRectsIntersect(InflateRenderRect(strip.frame_rect, Scale(12.0f)), state.paint_rect))
             {
                 continue;
             }
@@ -1186,32 +1243,32 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
                 strip.frame_rect.left,
                 strip.rect.bottom,
                 strip.content_rect.left,
-                strip.frame_rect.bottom - kTreemapBottomSliceHeight);
+                strip.frame_rect.bottom - treemap_bottom_slice_height);
             const RenderRect right_slice_rect = MakeRenderRect(
                 strip.content_rect.right,
                 strip.rect.bottom,
                 strip.frame_rect.right,
-                strip.frame_rect.bottom - kTreemapBottomSliceHeight);
+                strip.frame_rect.bottom - treemap_bottom_slice_height);
             const RenderRect bottom_slice_rect = MakeRenderRect(
                 strip.frame_rect.left,
-                strip.frame_rect.bottom - kTreemapBottomSliceHeight,
+                strip.frame_rect.bottom - treemap_bottom_slice_height,
                 strip.frame_rect.right,
                 strip.frame_rect.bottom);
 
             if (is_active_level)
             {
                 const RenderRect shadow_rect = MakeRenderRect(
-                    strip.frame_rect.left + 8.0f,
-                    strip.frame_rect.top + 8.0f,
-                    strip.frame_rect.right + 8.0f,
-                    strip.frame_rect.bottom + 8.0f);
+                    strip.frame_rect.left + Scale(8.0f),
+                    strip.frame_rect.top + Scale(8.0f),
+                    strip.frame_rect.right + Scale(8.0f),
+                    strip.frame_rect.bottom + Scale(8.0f));
                 FillRectangle(shadow_rect, m_active_level_shadow_brush.Get());
                 const RenderRect glow_rect = MakeRenderRect(
-                    strip.frame_rect.left - 2.0f,
-                    strip.frame_rect.top - 2.0f,
-                    strip.frame_rect.right + 2.0f,
-                    strip.frame_rect.bottom + 2.0f);
-                DrawRectangle(glow_rect, m_active_level_glow_brush.Get(), 5.5f);
+                    strip.frame_rect.left - Scale(2.0f),
+                    strip.frame_rect.top - Scale(2.0f),
+                    strip.frame_rect.right + Scale(2.0f),
+                    strip.frame_rect.bottom + Scale(2.0f));
+                DrawRectangle(glow_rect, m_active_level_glow_brush.Get(), Scale(5.5f));
             }
 
             m_header_action_brush->SetColor(ParseHexColor(strip.style.fill_color, 0.88f));
@@ -1223,18 +1280,18 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
             FillRectangle(strip.rect, m_header_action_brush.Get());
             m_tile_text_plate_brush->SetColor(ParseHexColor(strip.style.text_plate_color, 0.42f));
             const RenderRect strip_plate_rect = MakeRenderRect(
-                strip.rect.left + 1.0f,
-                strip.rect.top + 1.0f,
-                std::max(strip.rect.left + 2.0f, strip.rect.right - 1.0f),
-                std::max(strip.rect.top + 2.0f, strip.rect.bottom - 1.0f));
-            FillRoundedRectangle(strip_plate_rect, 2.0f, 2.0f, m_tile_text_plate_brush.Get());
+                strip.rect.left + Scale(1.0f),
+                strip.rect.top + Scale(1.0f),
+                std::max(strip.rect.left + Scale(2.0f), strip.rect.right - Scale(1.0f)),
+                std::max(strip.rect.top + Scale(2.0f), strip.rect.bottom - Scale(1.0f)));
+            FillRoundedRectangle(strip_plate_rect, Scale(2.0f), Scale(2.0f), m_tile_text_plate_brush.Get());
             DrawRectangle(
                 strip.rect,
                 is_hovered ? m_hover_brush.Get() : m_border_brush.Get(),
-                is_hovered ? 1.6f : 0.9f);
+                is_hovered ? Scale(1.6f) : Scale(0.9f));
             if (is_active_level)
             {
-                DrawRectangle(strip.frame_rect, m_hover_brush.Get(), 2.8f);
+                DrawRectangle(strip.frame_rect, m_hover_brush.Get(), Scale(2.8f));
             }
 
             m_tile_text_brush->SetColor(ParseHexColor(strip.style.label_text_color));
@@ -1242,7 +1299,11 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
             DrawTileTextLine(
                 strip.text,
                 RenderTextFormat::Small,
-                MakeRenderRect(strip.rect.left + 8.0f, strip.rect.top + 3.0f, strip.rect.right - 8.0f, strip.rect.bottom - 3.0f),
+                MakeRenderRect(
+                    strip.rect.left + Scale(8.0f),
+                    strip.rect.top + Scale(3.0f),
+                    strip.rect.right - Scale(8.0f),
+                    strip.rect.bottom - Scale(3.0f)),
                 m_tile_text_brush.Get(),
                 m_tile_text_outline_brush.Get());
         }
@@ -1265,7 +1326,7 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
             state.treemap_content_rect.left + static_cast<float>(rect.x + rect.width),
             state.treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
         if (!IsRenderRectEmpty(state.paint_rect) &&
-            !RenderRectsIntersect(InflateRenderRect(draw_rect, 3.0f), state.paint_rect))
+            !RenderRectsIntersect(InflateRenderRect(draw_rect, content_invalidation_padding), state.paint_rect))
         {
             continue;
         }
@@ -1275,32 +1336,32 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
 
         const bool is_hovered = static_cast<int>(index) == state.hovered_index;
         ID2D1SolidColorBrush* border_brush = is_hovered ? m_hover_brush.Get() : m_border_brush.Get();
-        const float stroke_width = is_hovered ? 2.0f : 0.75f;
+        const float stroke_width = is_hovered ? hover_stroke_width : regular_stroke_width;
         const float tile_width = draw_rect.right - draw_rect.left;
         const float tile_height = draw_rect.bottom - draw_rect.top;
         const bool is_view_root = rect.node_id == state.view_root_id;
         const bool is_directory_header = rect.is_dir && !is_view_root;
 
-        if (is_directory_header && tile_width >= 4.0f && tile_height >= 4.0f)
+        if (is_directory_header && tile_width >= Scale(4.0f) && tile_height >= Scale(4.0f))
         {
             const float header_height = std::min(
-                std::max(3.0f, static_cast<float>(state.layout_options.directory_header_height) - 2.0f),
-                std::max(0.0f, tile_height - 2.0f));
+                std::max(Scale(3.0f), static_cast<float>(state.layout_options.directory_header_height) - Scale(2.0f)),
+                std::max(0.0f, tile_height - Scale(2.0f)));
             if (header_height > 0.0f)
             {
                 m_tile_text_plate_brush->SetColor(ParseHexColor(rect.text_plate_color, 0.42f));
                 const RenderRect header_plate_rect = MakeRenderRect(
-                    draw_rect.left + 1.0f,
-                    draw_rect.top + 1.0f,
-                    std::max(draw_rect.left + 2.0f, draw_rect.right - 1.0f),
-                    std::min(draw_rect.bottom - 1.0f, draw_rect.top + 1.0f + header_height));
-                FillRoundedRectangle(header_plate_rect, 2.0f, 2.0f, m_tile_text_plate_brush.Get());
+                    draw_rect.left + Scale(1.0f),
+                    draw_rect.top + Scale(1.0f),
+                    std::max(draw_rect.left + Scale(2.0f), draw_rect.right - Scale(1.0f)),
+                    std::min(draw_rect.bottom - Scale(1.0f), draw_rect.top + Scale(1.0f) + header_height));
+                FillRoundedRectangle(header_plate_rect, Scale(2.0f), Scale(2.0f), m_tile_text_plate_brush.Get());
             }
         }
 
         DrawRectangle(draw_rect, border_brush, stroke_width);
 
-        if (tile_width >= 56.0f && tile_height >= 18.0f)
+        if (tile_width >= Scale(56.0f) && tile_height >= Scale(18.0f))
         {
             m_tile_text_brush->SetColor(ParseHexColor(rect.label_text_color));
             m_tile_secondary_text_brush->SetColor(ParseHexColor(rect.secondary_text_color));
@@ -1308,25 +1369,25 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
             m_tile_text_plate_brush->SetColor(ParseHexColor(rect.text_plate_color, 0.34f));
 
             const bool is_leaf_file = !rect.is_dir;
-            const bool show_label = tile_width >= 92.0f && tile_height >= 34.0f && !is_directory_header;
+            const bool show_label = tile_width >= Scale(92.0f) && tile_height >= Scale(34.0f) && !is_directory_header;
             if (!is_leaf_file && !is_view_root && !is_directory_header)
             {
-                const float plate_height = show_label ? 30.0f : 16.0f;
+                const float plate_height = show_label ? Scale(30.0f) : Scale(16.0f);
                 const RenderRect plate_rect = MakeRenderRect(
-                    draw_rect.left + 2.0f,
-                    draw_rect.top + 2.0f,
-                    std::max(draw_rect.left + 4.0f, draw_rect.right - 2.0f),
-                    std::min(draw_rect.bottom - 2.0f, draw_rect.top + 2.0f + plate_height));
-                FillRoundedRectangle(plate_rect, 2.0f, 2.0f, m_tile_text_plate_brush.Get());
+                    draw_rect.left + Scale(2.0f),
+                    draw_rect.top + Scale(2.0f),
+                    std::max(draw_rect.left + Scale(4.0f), draw_rect.right - Scale(2.0f)),
+                    std::min(draw_rect.bottom - Scale(2.0f), draw_rect.top + Scale(2.0f) + plate_height));
+                FillRoundedRectangle(plate_rect, Scale(2.0f), Scale(2.0f), m_tile_text_plate_brush.Get());
             }
 
             if (is_directory_header)
             {
                 const RenderRect header_rect = MakeRenderRect(
-                    draw_rect.left + 6.0f,
-                    draw_rect.top + 2.0f,
-                    draw_rect.right - 6.0f,
-                    draw_rect.top + 16.0f);
+                    draw_rect.left + Scale(6.0f),
+                    draw_rect.top + Scale(2.0f),
+                    draw_rect.right - Scale(6.0f),
+                    draw_rect.top + Scale(16.0f));
                 const float header_width = std::max(0.0f, header_rect.right - header_rect.left);
                 const std::wstring header_text = BuildDirectoryHeaderText(
                     rect.label,
@@ -1341,24 +1402,24 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
                     m_tile_text_outline_brush.Get(),
                     DWRITE_TEXT_ALIGNMENT_LEADING);
             }
-            else if (!is_view_root && tile_width >= 64.0f && tile_height >= 40.0f)
+            else if (!is_view_root && tile_width >= Scale(64.0f) && tile_height >= Scale(40.0f))
             {
                 const std::wstring size_text = HumanizeBytes(rect.size);
-                const float margin = 6.0f;
-                const float size_height = 14.0f;
-                const float gap = 4.0f;
-                const float block_height = std::min(tile_height - 12.0f, 42.0f);
-                const float block_top = draw_rect.top + std::max(4.0f, (tile_height - block_height) * 0.42f);
+                const float margin = Scale(6.0f);
+                const float size_height = Scale(14.0f);
+                const float gap = Scale(4.0f);
+                const float block_height = std::min(tile_height - Scale(12.0f), Scale(42.0f));
+                const float block_top = draw_rect.top + std::max(Scale(4.0f), (tile_height - block_height) * 0.42f);
                 const bool can_stack_label_and_size =
-                    tile_height >= 48.0f &&
+                    tile_height >= Scale(48.0f) &&
                     MeasureTextWidth(size_text, RenderTextFormat::Small) <= (tile_width - (margin * 2.0f));
                 if (!can_stack_label_and_size)
                 {
                     const RenderRect size_rect = MakeRenderRect(
                         draw_rect.left + margin,
-                        draw_rect.top + 3.0f,
+                        draw_rect.top + Scale(3.0f),
                         draw_rect.right - margin,
-                        draw_rect.bottom - 3.0f);
+                        draw_rect.bottom - Scale(3.0f));
                     DrawTileTextLayout(
                         size_text,
                         RenderTextFormat::Small,
@@ -1404,22 +1465,22 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
             else
             {
                 const std::wstring size_text = HumanizeBytes(rect.size);
-                const bool can_show_label = tile_width >= 44.0f && tile_height >= 24.0f;
-                const bool can_show_size = tile_width >= 32.0f && tile_height >= 14.0f;
-                const bool can_stack_label_and_size = can_show_label && can_show_size && tile_height >= 28.0f;
+                const bool can_show_label = tile_width >= Scale(44.0f) && tile_height >= Scale(24.0f);
+                const bool can_show_size = tile_width >= Scale(32.0f) && tile_height >= Scale(14.0f);
+                const bool can_stack_label_and_size = can_show_label && can_show_size && tile_height >= Scale(28.0f);
                 if (can_stack_label_and_size)
                 {
-                    const float block_height = std::min(tile_height - 5.0f, 24.0f);
-                    const float block_top = draw_rect.top + std::max(1.0f, (tile_height - block_height) * 0.5f);
+                    const float block_height = std::min(tile_height - Scale(5.0f), Scale(24.0f));
+                    const float block_top = draw_rect.top + std::max(Scale(1.0f), (tile_height - block_height) * 0.5f);
                     const RenderRect label_rect = MakeRenderRect(
-                        draw_rect.left + 4.0f,
+                        draw_rect.left + Scale(4.0f),
                         block_top,
-                        draw_rect.right - 4.0f,
-                        block_top + 9.0f);
+                        draw_rect.right - Scale(4.0f),
+                        block_top + Scale(9.0f));
                     const RenderRect size_rect = MakeRenderRect(
-                        draw_rect.left + 4.0f,
-                        block_top + 11.0f,
-                        draw_rect.right - 4.0f,
+                        draw_rect.left + Scale(4.0f),
+                        block_top + Scale(11.0f),
+                        draw_rect.right - Scale(4.0f),
                         block_top + block_height);
                     DrawTileTextLayout(
                         rect.label,
@@ -1443,10 +1504,10 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
                 else if (can_show_size)
                 {
                     const RenderRect size_rect = MakeRenderRect(
-                        draw_rect.left + 3.0f,
-                        draw_rect.top + 1.0f,
-                        draw_rect.right - 3.0f,
-                        draw_rect.bottom - 1.0f);
+                        draw_rect.left + Scale(3.0f),
+                        draw_rect.top + Scale(1.0f),
+                        draw_rect.right - Scale(3.0f),
+                        draw_rect.bottom - Scale(1.0f));
                     DrawTileTextLayout(
                         size_text,
                         RenderTextFormat::Small,
@@ -1637,38 +1698,39 @@ RenderPoint Direct2DRenderer::ResolveTooltipPosition(const MainWindowDrawingStat
     float tooltip_height,
     bool follow_tooltip) const
 {
-    float tooltip_left = anchor.x + kTooltipOffsetX;
-    float tooltip_top = anchor.y + kTooltipOffsetY;
+    const float tooltip_inner_margin = Scale(kTooltipInnerMargin);
+    float tooltip_left = anchor.x + Scale(kTooltipOffsetX);
+    float tooltip_top = anchor.y + Scale(kTooltipOffsetY);
 
-    if (tooltip_left + tooltip_width > state.canvas_rect.right - kTooltipInnerMargin)
+    if (tooltip_left + tooltip_width > state.canvas_rect.right - tooltip_inner_margin)
     {
-        tooltip_left = anchor.x - tooltip_width - 10.0f;
+        tooltip_left = anchor.x - tooltip_width - Scale(10.0f);
     }
-    if (tooltip_top + tooltip_height > state.canvas_rect.bottom - kTooltipInnerMargin)
+    if (tooltip_top + tooltip_height > state.canvas_rect.bottom - tooltip_inner_margin)
     {
-        tooltip_top = anchor.y - tooltip_height - 10.0f;
+        tooltip_top = anchor.y - tooltip_height - Scale(10.0f);
     }
 
     if (!follow_tooltip)
     {
         const float hovered_width = hovered_rect.right - hovered_rect.left;
         const float hovered_height = hovered_rect.bottom - hovered_rect.top;
-        if (hovered_width >= tooltip_width + (kTooltipInnerMargin * 2.0f) &&
-            hovered_height >= tooltip_height + (kTooltipInnerMargin * 2.0f))
+        if (hovered_width >= tooltip_width + (tooltip_inner_margin * 2.0f) &&
+            hovered_height >= tooltip_height + (tooltip_inner_margin * 2.0f))
         {
-            const float min_hovered_left = hovered_rect.left + kTooltipInnerMargin;
-            const float max_hovered_left = hovered_rect.right - tooltip_width - kTooltipInnerMargin;
-            const float min_hovered_top = hovered_rect.top + kTooltipInnerMargin;
-            const float max_hovered_top = hovered_rect.bottom - tooltip_height - kTooltipInnerMargin;
+            const float min_hovered_left = hovered_rect.left + tooltip_inner_margin;
+            const float max_hovered_left = hovered_rect.right - tooltip_width - tooltip_inner_margin;
+            const float min_hovered_top = hovered_rect.top + tooltip_inner_margin;
+            const float max_hovered_top = hovered_rect.bottom - tooltip_height - tooltip_inner_margin;
             tooltip_left = std::clamp(tooltip_left, min_hovered_left, max_hovered_left);
             tooltip_top = std::clamp(tooltip_top, min_hovered_top, max_hovered_top);
         }
     }
 
-    const float min_tooltip_left = state.canvas_rect.left + kTooltipInnerMargin;
-    const float max_tooltip_left = std::max(min_tooltip_left, state.canvas_rect.right - tooltip_width - kTooltipInnerMargin);
-    const float min_tooltip_top = state.canvas_rect.top + kTooltipInnerMargin;
-    const float max_tooltip_top = std::max(min_tooltip_top, state.canvas_rect.bottom - tooltip_height - kTooltipInnerMargin);
+    const float min_tooltip_left = state.canvas_rect.left + tooltip_inner_margin;
+    const float max_tooltip_left = std::max(min_tooltip_left, state.canvas_rect.right - tooltip_width - tooltip_inner_margin);
+    const float min_tooltip_top = state.canvas_rect.top + tooltip_inner_margin;
+    const float max_tooltip_top = std::max(min_tooltip_top, state.canvas_rect.bottom - tooltip_height - tooltip_inner_margin);
     tooltip_left = std::clamp(tooltip_left, min_tooltip_left, max_tooltip_left);
     tooltip_top = std::clamp(tooltip_top, min_tooltip_top, max_tooltip_top);
 
@@ -1697,9 +1759,15 @@ bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& sta
         return false;
     }
 
-    const float available_tooltip_width = std::max(48.0f, (state.canvas_rect.right - state.canvas_rect.left) - 12.0f);
-    const float max_tooltip_width = std::min(420.0f, std::max(28.0f, available_tooltip_width - (kTooltipPaddingX * 2.0f)));
-    const float max_tooltip_height = std::max(48.0f, (state.canvas_rect.bottom - state.canvas_rect.top) - 24.0f);
+    const float tooltip_padding_x = Scale(kTooltipPaddingX);
+    const float tooltip_padding_y = Scale(kTooltipPaddingY);
+    const float tooltip_line_gap = Scale(kTooltipLineGap);
+    const float available_tooltip_width =
+        std::max(Scale(48.0f), (state.canvas_rect.right - state.canvas_rect.left) - Scale(12.0f));
+    const float max_tooltip_width =
+        std::min(Scale(420.0f), std::max(Scale(28.0f), available_tooltip_width - (tooltip_padding_x * 2.0f)));
+    const float max_tooltip_height =
+        std::max(Scale(48.0f), (state.canvas_rect.bottom - state.canvas_rect.top) - Scale(24.0f));
 
     ComPtr<IDWriteTextLayout> name_layout = CreateTextLayout(
         name_text,
@@ -1709,7 +1777,7 @@ bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& sta
     ComPtr<IDWriteTextLayout> size_layout = CreateTextLayout(
         size_text,
         RenderTextFormat::Small,
-        MakeRenderRect(0.0f, 0.0f, max_tooltip_width, 22.0f),
+        MakeRenderRect(0.0f, 0.0f, max_tooltip_width, Scale(22.0f)),
         DWRITE_WORD_WRAPPING_NO_WRAP);
     if (!name_layout || !size_layout)
     {
@@ -1736,11 +1804,11 @@ bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& sta
         std::max(
             name_metrics.width_including_trailing_whitespace,
             size_metrics.width_including_trailing_whitespace),
-        96.0f);
-    const float name_height = std::max(name_metrics.height, 16.0f);
-    const float size_height = std::max(size_metrics.height, 14.0f);
-    const float tooltip_width = std::min(available_tooltip_width, text_width + (kTooltipPaddingX * 2.0f));
-    const float tooltip_height = (kTooltipPaddingY * 2.0f) + name_height + kTooltipLineGap + size_height;
+        Scale(96.0f));
+    const float name_height = std::max(name_metrics.height, Scale(16.0f));
+    const float size_height = std::max(size_metrics.height, Scale(14.0f));
+    const float tooltip_width = std::min(available_tooltip_width, text_width + (tooltip_padding_x * 2.0f));
+    const float tooltip_height = (tooltip_padding_y * 2.0f) + name_height + tooltip_line_gap + size_height;
     const RenderPoint tooltip_origin = ResolveTooltipPosition(state, 
         state.tooltip_position,
         hovered_bounds,
@@ -1751,21 +1819,21 @@ bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& sta
     const float tooltip_top = tooltip_origin.y;
 
     const RenderRect shadow_rect = MakeRenderRect(
-        tooltip_left + 2.0f,
-        tooltip_top + 3.0f,
-        tooltip_left + tooltip_width + 2.0f,
-        tooltip_top + tooltip_height + 3.0f);
+        tooltip_left + Scale(2.0f),
+        tooltip_top + Scale(3.0f),
+        tooltip_left + tooltip_width + Scale(2.0f),
+        tooltip_top + tooltip_height + Scale(3.0f));
     const RenderRect tooltip_rect = MakeRenderRect(
         tooltip_left,
         tooltip_top,
         tooltip_left + tooltip_width,
         tooltip_top + tooltip_height);
     const RenderPoint name_origin = MakeRenderPoint(
-        tooltip_left + kTooltipPaddingX,
-        tooltip_top + kTooltipPaddingY);
+        tooltip_left + tooltip_padding_x,
+        tooltip_top + tooltip_padding_y);
     const RenderPoint size_origin = MakeRenderPoint(
-        tooltip_left + kTooltipPaddingX,
-        tooltip_top + kTooltipPaddingY + name_height + kTooltipLineGap);
+        tooltip_left + tooltip_padding_x,
+        tooltip_top + tooltip_padding_y + name_height + tooltip_line_gap);
 
     layout->name_layout = std::move(name_layout);
     layout->size_layout = std::move(size_layout);
@@ -1797,20 +1865,20 @@ void Direct2DRenderer::DrawHoverTooltip(const MainWindowDrawingState& state)
 
     FillRoundedRectangle(
         layout.shadow_rect,
-        kTooltipCornerRadius,
-        kTooltipCornerRadius,
+        Scale(kTooltipCornerRadius),
+        Scale(kTooltipCornerRadius),
         m_tooltip_shadow_brush.Get());
     FillRoundedRectangle(
         layout.tooltip_rect,
-        kTooltipCornerRadius,
-        kTooltipCornerRadius,
+        Scale(kTooltipCornerRadius),
+        Scale(kTooltipCornerRadius),
         m_tooltip_background_brush.Get());
     DrawRoundedRectangle(
         layout.tooltip_rect,
-        kTooltipCornerRadius,
-        kTooltipCornerRadius,
+        Scale(kTooltipCornerRadius),
+        Scale(kTooltipCornerRadius),
         m_tooltip_border_brush.Get(),
-        1.0f);
+        Scale(1.0f));
 
     if (m_render_target && layout.name_layout && layout.size_layout)
     {
@@ -1852,10 +1920,10 @@ void Direct2DRenderer::DrawStatusBar(const MainWindowDrawingState& state)
 
     const std::wstring status_text = name_text + L" - " + size_text.substr(6);
     const RenderRect text_rect = MakeRenderRect(
-        state.status_bar_rect.left + 12.0f,
-        state.status_bar_rect.top + kStatusBarTextVerticalPadding,
-        state.status_bar_rect.right - 12.0f,
-        state.status_bar_rect.bottom - kStatusBarTextVerticalPadding);
+        state.status_bar_rect.left + Scale(12.0f),
+        state.status_bar_rect.top + Scale(kStatusBarTextVerticalPadding),
+        state.status_bar_rect.right - Scale(12.0f),
+        state.status_bar_rect.bottom - Scale(kStatusBarTextVerticalPadding));
     DrawTextLine(status_text, RenderTextFormat::Small, text_rect, m_text_brush.Get());
 }
 
