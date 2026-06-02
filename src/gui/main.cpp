@@ -1111,6 +1111,55 @@ namespace space_scanner::gui
                 MAKELPARAM(left_padding, right_padding));
         }
 
+        int MeasureControlTextWidth(HWND control) const
+        {
+            if (!control)
+            {
+                return 0;
+            }
+
+            wchar_t text[128] = {};
+            GetWindowTextW(control, text, static_cast<int>(std::size(text)));
+            const int text_length = static_cast<int>(wcslen(text));
+            if (text_length <= 0)
+            {
+                return 0;
+            }
+
+            HDC hdc = GetDC(control);
+            if (!hdc)
+            {
+                return 0;
+            }
+
+            const HFONT font = reinterpret_cast<HFONT>(SendMessageW(control, WM_GETFONT, 0, 0));
+            const HGDIOBJ old_font = font ? SelectObject(hdc, font) : nullptr;
+            SIZE size = {};
+            GetTextExtentPoint32W(hdc, text, text_length, &size);
+            if (old_font)
+            {
+                SelectObject(hdc, old_font);
+            }
+            ReleaseDC(control, hdc);
+
+            return std::max(size.cx, 0L);
+        }
+
+        int GetCheckboxControlWidth(HWND checkbox, int minimum_width) const
+        {
+            constexpr int kCheckboxLeftPadding = 2;
+            constexpr int kCheckboxBoxSize = 14;
+            constexpr int kCheckboxTextGap = 8;
+            constexpr int kCheckboxTrailingPadding = 8;
+            const int measured_width =
+                kCheckboxLeftPadding +
+                kCheckboxBoxSize +
+                kCheckboxTextGap +
+                MeasureControlTextWidth(checkbox) +
+                kCheckboxTrailingPadding;
+            return std::max(minimum_width, measured_width);
+        }
+
         void CreateHeaderControls()
         {
             HFONT gui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -1359,8 +1408,8 @@ namespace space_scanner::gui
             const int display_checkbox_gap = 4;
             const int lower_separator_leading_gap = 10;
             const int lower_separator_trailing_gap = 10;
-            const int show_tooltip_width = 84;
-            const int show_status_bar_width = 108;
+            const int show_tooltip_width = GetCheckboxControlWidth(m_show_tooltip_check, 84);
+            const int show_status_bar_width = GetCheckboxControlWidth(m_show_status_bar_check, 108);
             const int checkbox_group_width =
                 show_tooltip_width + display_checkbox_gap + show_status_bar_width;
             const int display_group_left = lower_row_left;
