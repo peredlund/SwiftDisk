@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cwchar>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -42,6 +43,8 @@ namespace space_scanner::gui
     constexpr int IDC_DEPTH_UP_BUTTON = 1008;
     constexpr int IDC_DEPTH_DOWN_BUTTON = 1009;
     constexpr int IDC_RESET_BUTTON = 1010;
+    constexpr int IDM_TREEMAP_OPEN_IN_EXPLORER = 2001;
+    constexpr int IDM_TREEMAP_COPY_FULL_PATH = 2002;
 
     struct GuiOptions
     {
@@ -417,7 +420,7 @@ namespace space_scanner::gui
                 OnLeftButtonDown(GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
                 return 0;
             case WM_RBUTTONUP:
-                NavigateUp();
+                OnRightButtonUp(GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
                 return 0;
             case WM_KEYDOWN:
                 OnKeyDown(static_cast<UINT>(w_param));
@@ -2425,6 +2428,156 @@ namespace space_scanner::gui
             }
             m_view_root_id = rect.node_id;
             RebuildAndRedraw();
+        }
+
+        void OnRightButtonUp(int x, int y)
+        {
+            SetFocus(m_hwnd);
+
+            const int breadcrumb_index = HitTestBreadcrumb(static_cast<float>(x), static_cast<float>(y));
+            if (breadcrumb_index >= 0)
+            {
+                ShowNodeContextMenu(
+                    m_breadcrumbs[static_cast<size_t>(breadcrumb_index)].node_id,
+                    x,
+                    y);
+                return;
+            }
+
+            const int hit_index = HitTestTreemap(static_cast<float>(x), static_cast<float>(y));
+            if (hit_index < 0 || !m_tree)
+            {
+                return;
+            }
+
+            const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(hit_index)];
+            ShowNodeContextMenu(rect.node_id, x, y);
+        }
+
+        void ShowNodeContextMenu(uint64_t node_id, int x, int y)
+        {
+            if (!m_tree || node_id == 0)
+            {
+                return;
+            }
+
+            const Node* node = m_tree->GetNode(node_id);
+            if (!node)
+            {
+                return;
+            }
+
+            std::wstring path = m_tree->BuildPath(node_id);
+            if (path.empty())
+            {
+                return;
+            }
+
+            POINT menu_position = { x, y };
+            ClientToScreen(m_hwnd, &menu_position);
+            ShowTreemapContextMenu(menu_position, path, node->is_dir);
+        }
+
+        void ShowTreemapContextMenu(const POINT& menu_position, const std::wstring& path, bool is_dir)
+        {
+            HMENU menu = CreatePopupMenu();
+            if (!menu)
+            {
+                return;
+            }
+
+            AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN_IN_EXPLORER, L"Open in File Explorer");
+            AppendMenuW(menu, MF_STRING, IDM_TREEMAP_COPY_FULL_PATH, L"Copy full path");
+
+            SetForegroundWindow(m_hwnd);
+            const UINT command = TrackPopupMenu(
+                menu,
+                TPM_RIGHTBUTTON | TPM_RETURNCMD,
+                menu_position.x,
+                menu_position.y,
+                0,
+                m_hwnd,
+                nullptr);
+            DestroyMenu(menu);
+
+            if (command == IDM_TREEMAP_OPEN_IN_EXPLORER)
+            {
+                OpenPathInFileExplorer(path, is_dir);
+            }
+            else if (command == IDM_TREEMAP_COPY_FULL_PATH)
+            {
+                if (!CopyTextToClipboard(path))
+                {
+                    MessageBoxW(
+                        m_hwnd,
+                        L"The selected path could not be copied to the clipboard.",
+                        L"SpaceScanner",
+                        MB_OK | MB_ICONERROR);
+                }
+            }
+
+            PostMessageW(m_hwnd, WM_NULL, 0, 0);
+        }
+
+        void OpenPathInFileExplorer(const std::wstring& path, bool is_dir) const
+        {
+            HINSTANCE result = nullptr;
+            if (is_dir)
+            {
+                result = ShellExecuteW(m_hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            }
+            else
+            {
+                const std::wstring parameters = L"/select,\"" + path + L"\"";
+                result = ShellExecuteW(m_hwnd, L"open", L"explorer.exe", parameters.c_str(), nullptr, SW_SHOWNORMAL);
+            }
+
+            if (reinterpret_cast<INT_PTR>(result) <= 32)
+            {
+                MessageBoxW(
+                    m_hwnd,
+                    L"File Explorer could not open the selected path.",
+                    L"SpaceScanner",
+                    MB_OK | MB_ICONERROR);
+            }
+        }
+
+        bool CopyTextToClipboard(const std::wstring& text) const
+        {
+            if (!OpenClipboard(m_hwnd))
+            {
+                return false;
+            }
+
+            EmptyClipboard();
+            const size_t byte_count = (text.size() + 1) * sizeof(wchar_t);
+            HGLOBAL clipboard_memory = GlobalAlloc(GMEM_MOVEABLE, byte_count);
+            if (!clipboard_memory)
+            {
+                CloseClipboard();
+                return false;
+            }
+
+            void* clipboard_text = GlobalLock(clipboard_memory);
+            if (!clipboard_text)
+            {
+                GlobalFree(clipboard_memory);
+                CloseClipboard();
+                return false;
+            }
+
+            memcpy(clipboard_text, text.c_str(), byte_count);
+            GlobalUnlock(clipboard_memory);
+
+            if (!SetClipboardData(CF_UNICODETEXT, clipboard_memory))
+            {
+                GlobalFree(clipboard_memory);
+                CloseClipboard();
+                return false;
+            }
+
+            CloseClipboard();
+            return true;
         }
 
         void NavigateToNode(uint64_t node_id)
