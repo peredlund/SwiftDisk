@@ -68,11 +68,11 @@ namespace space_scanner::gui
         std::unique_ptr<ScanPayload> pending_payload;
     };
 
-    bool VolumeExists(wchar_t drive_letter)
+    struct DriveListEntry
     {
-        wchar_t root_path[] = { drive_letter, L':', L'\\', L'\0' };
-        return GetDriveTypeW(root_path) != DRIVE_NO_ROOT_DIR;
-    }
+        std::wstring root_path;
+        std::wstring display_text;
+    };
 
     std::wstring NormalizeScanPath(const std::wstring& path)
     {
@@ -86,14 +86,107 @@ namespace space_scanner::gui
         return path;
     }
 
-    std::wstring GetDefaultPathFieldValue()
+    wchar_t ToUpperDriveLetter(wchar_t drive_letter)
     {
-        if (VolumeExists(L'C'))
+        if (drive_letter >= L'a' && drive_letter <= L'z')
         {
-            return L"C:";
+            return static_cast<wchar_t>(drive_letter - L'a' + L'A');
         }
 
-        return {};
+        return drive_letter;
+    }
+
+    std::wstring GetDriveTypeDisplayName(UINT drive_type)
+    {
+        switch (drive_type)
+        {
+        case DRIVE_REMOVABLE:
+            return L"Removable Drive";
+        case DRIVE_FIXED:
+            return L"Local Disk";
+        case DRIVE_REMOTE:
+            return L"Network Drive";
+        case DRIVE_CDROM:
+            return L"Optical Drive";
+        case DRIVE_RAMDISK:
+            return L"RAM Disk";
+        default:
+            return L"Drive";
+        }
+    }
+
+    std::vector<DriveListEntry> EnumerateNtfsDriveEntries()
+    {
+        const DWORD required_length = GetLogicalDriveStringsW(0, nullptr);
+        if (required_length == 0)
+        {
+            return {};
+        }
+
+        std::wstring buffer(required_length, L'\0');
+        const DWORD written_length = GetLogicalDriveStringsW(
+            required_length,
+            buffer.data());
+        if (written_length == 0 || written_length >= required_length)
+        {
+            return {};
+        }
+
+        std::vector<DriveListEntry> entries;
+        const wchar_t* root_path = buffer.c_str();
+        while (*root_path != L'\0')
+        {
+            const std::wstring root(root_path);
+            const UINT drive_type = GetDriveTypeW(root.c_str());
+
+            wchar_t volume_name[MAX_PATH] = {};
+            wchar_t file_system_name[MAX_PATH] = {};
+            if (GetVolumeInformationW(
+                root.c_str(),
+                volume_name,
+                static_cast<DWORD>(std::size(volume_name)),
+                nullptr,
+                nullptr,
+                nullptr,
+                file_system_name,
+                static_cast<DWORD>(std::size(file_system_name))) &&
+                _wcsicmp(file_system_name, L"NTFS") == 0)
+            {
+                std::wstring normalized_root = root;
+                if (!normalized_root.empty())
+                {
+                    normalized_root[0] = ToUpperDriveLetter(normalized_root[0]);
+                }
+
+                std::wstring display_name = volume_name[0] != L'\0'
+                    ? volume_name
+                    : GetDriveTypeDisplayName(drive_type);
+                std::wstring display_text = L"[";
+                display_text.push_back(normalized_root.empty() ? L'?' : normalized_root[0]);
+                display_text += L":] ";
+                display_text += display_name;
+
+                entries.push_back({ std::move(normalized_root), std::move(display_text) });
+            }
+
+            root_path += wcslen(root_path) + 1;
+        }
+
+        return entries;
+    }
+
+    std::wstring GetDefaultPathFieldValue()
+    {
+        const std::vector<DriveListEntry> entries = EnumerateNtfsDriveEntries();
+        for (const DriveListEntry& entry : entries)
+        {
+            if (entry.root_path.size() >= 2 && entry.root_path[0] == L'C')
+            {
+                return entry.display_text;
+            }
+        }
+
+        return entries.empty() ? std::wstring() : entries.front().display_text;
     }
 
     bool TryGetVolumeRoot(const std::wstring& path, std::wstring* volume_root)
@@ -434,6 +527,7 @@ namespace space_scanner::gui
             case WM_CTLCOLORSTATIC:
             case WM_CTLCOLOREDIT:
             case WM_CTLCOLORBTN:
+            case WM_CTLCOLORLISTBOX:
                 return HandleControlColor(
                     reinterpret_cast<HDC>(w_param),
                     reinterpret_cast<HWND>(l_param),
@@ -558,8 +652,17 @@ namespace space_scanner::gui
 
             SetTextColor(hdc, ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
 
+            if (message == WM_CTLCOLORLISTBOX)
+            {
+                SetBkColor(
+                    hdc,
+                    ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue));
+                SetBkMode(hdc, OPAQUE);
+                return reinterpret_cast<LRESULT>(m_control_surface_brush);
+            }
+
             if ((message == WM_CTLCOLOREDIT || message == WM_CTLCOLORSTATIC) &&
-                (control == m_path_edit || control == m_depth_edit))
+                (IsPathFieldControl(control) || control == m_depth_edit))
             {
                 const bool hovered = IsControlHovered(control) && IsWindowEnabled(control);
                 SetBkColor(
@@ -855,6 +958,7 @@ namespace space_scanner::gui
         bool IsTrackedControl(HWND control) const
         {
             return control == m_path_edit ||
+                control == m_path_combo_edit ||
                 control == m_scan_button ||
                 control == m_browse_button ||
                 control == m_reset_button ||
@@ -867,7 +971,12 @@ namespace space_scanner::gui
 
         bool IsEditControl(HWND control) const
         {
-            return control == m_path_edit || control == m_depth_edit;
+            return control == m_path_combo_edit || control == m_depth_edit;
+        }
+
+        bool IsPathFieldControl(HWND control) const
+        {
+            return control == m_path_edit || control == m_path_combo_edit;
         }
 
         void InvalidateTrackedControl(HWND control) const
@@ -1010,6 +1119,14 @@ namespace space_scanner::gui
             case WM_MOUSEMOVE:
                 OnControlMouseMove(control);
                 break;
+            case WM_LBUTTONDOWN:
+                if (control == m_path_combo_edit)
+                {
+                    const LRESULT result = CallWindowProcW(original_proc, control, message, w_param, l_param);
+                    ShowPathDropdown();
+                    return result;
+                }
+                break;
             case WM_MOUSELEAVE:
                 OnControlMouseLeave(control);
                 break;
@@ -1054,6 +1171,7 @@ namespace space_scanner::gui
         void CreateControlHoverTracking()
         {
             AddControlHoverTracking(m_path_edit);
+            AddControlHoverTracking(m_path_combo_edit);
             AddControlHoverTracking(m_scan_button);
             AddControlHoverTracking(m_browse_button);
             AddControlHoverTracking(m_reset_button);
@@ -1171,9 +1289,9 @@ namespace space_scanner::gui
 
             m_path_edit = CreateWindowExW(
                 0,
-                L"EDIT",
+                L"COMBOBOX",
                 initial_path.c_str(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_MULTILINE | ES_AUTOHSCROLL,
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL,
                 0,
                 0,
                 0,
@@ -1182,6 +1300,12 @@ namespace space_scanner::gui
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_PATH_EDIT)),
                 nullptr,
                 nullptr);
+            if (m_path_edit)
+            {
+                m_path_combo_edit = FindWindowExW(m_path_edit, nullptr, L"Edit", nullptr);
+                RefreshNtfsDriveDropdown();
+                SetWindowTextW(m_path_edit, initial_path.c_str());
+            }
 
             m_scan_button = CreateWindowExW(
                 0,
@@ -1313,6 +1437,10 @@ namespace space_scanner::gui
             if (m_path_edit)
             {
                 SendMessageW(m_path_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+            }
+            if (m_path_combo_edit)
+            {
+                SendMessageW(m_path_combo_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
             }
             if (m_scan_button)
             {
@@ -1468,8 +1596,10 @@ namespace space_scanner::gui
 
             if (m_path_edit)
             {
-                MoveWindow(m_path_edit, scan_group_left, scan_group_top_inner, edit_width, 28, TRUE);
-                ApplyEditTextInsets(m_path_edit, 8, 6, 8, 4);
+                constexpr int kPathDropdownHeight = 190;
+                MoveWindow(m_path_edit, scan_group_left, scan_group_top_inner, edit_width, kPathDropdownHeight, TRUE);
+                SendMessageW(m_path_edit, CB_SETDROPPEDWIDTH, static_cast<WPARAM>(edit_width), 0);
+                ApplyEditTextInsets(m_path_combo_edit, 8, 6, 8, 4);
             }
             if (m_scan_button)
             {
@@ -1522,7 +1652,7 @@ namespace space_scanner::gui
             }
         }
 
-        std::wstring GetPathFromEdit() const
+        std::wstring GetRawPathFieldText() const
         {
             if (!m_path_edit)
             {
@@ -1536,6 +1666,77 @@ namespace space_scanner::gui
                 GetWindowTextW(m_path_edit, value.data(), length + 1);
             }
             return value;
+        }
+
+        std::wstring GetPathFromEdit() const
+        {
+            const std::wstring value = GetRawPathFieldText();
+            for (const DriveListEntry& entry : m_ntfs_drive_entries)
+            {
+                if (value == entry.display_text)
+                {
+                    return entry.root_path;
+                }
+            }
+
+            return value;
+        }
+
+        void RefreshNtfsDriveDropdown()
+        {
+            if (!m_path_edit)
+            {
+                return;
+            }
+
+            const std::wstring current_text = GetRawPathFieldText();
+            m_ntfs_drive_entries = EnumerateNtfsDriveEntries();
+
+            SendMessageW(m_path_edit, WM_SETREDRAW, FALSE, 0);
+            SendMessageW(m_path_edit, CB_RESETCONTENT, 0, 0);
+            int selected_index = -1;
+            for (const DriveListEntry& entry : m_ntfs_drive_entries)
+            {
+                const int item_index = static_cast<int>(SendMessageW(
+                    m_path_edit,
+                    CB_ADDSTRING,
+                    0,
+                    reinterpret_cast<LPARAM>(entry.display_text.c_str())));
+                if (current_text == entry.display_text || current_text == entry.root_path)
+                {
+                    selected_index = item_index;
+                }
+            }
+            if (selected_index >= 0)
+            {
+                SendMessageW(
+                    m_path_edit,
+                    CB_SETCURSEL,
+                    static_cast<WPARAM>(selected_index),
+                    0);
+            }
+            SetWindowTextW(m_path_edit, current_text.c_str());
+            SendMessageW(m_path_edit, WM_SETREDRAW, TRUE, 0);
+            InvalidateRect(m_path_edit, nullptr, TRUE);
+        }
+
+        void ShowPathDropdown()
+        {
+            if (!m_path_edit || !IsWindowEnabled(m_path_edit))
+            {
+                return;
+            }
+
+            RefreshNtfsDriveDropdown();
+            SendMessageW(m_path_edit, CB_SHOWDROPDOWN, TRUE, 0);
+        }
+
+        void HidePathDropdown()
+        {
+            if (m_path_edit)
+            {
+                SendMessageW(m_path_edit, CB_SHOWDROPDOWN, FALSE, 0);
+            }
         }
 
         void SetScanControlsEnabled(bool enabled)
@@ -1813,6 +2014,24 @@ namespace space_scanner::gui
 
         void OnCommand(int control_id, int notification_code, HWND control)
         {
+            if (control_id == IDC_PATH_EDIT && control == m_path_edit)
+            {
+                if (notification_code == CBN_DROPDOWN)
+                {
+                    return;
+                }
+
+                if (notification_code == CBN_SETFOCUS)
+                {
+                    return;
+                }
+
+                if (notification_code == CBN_SELCHANGE)
+                {
+                    return;
+                }
+            }
+
             if (control_id == IDC_DEPTH_EDIT && control == m_depth_edit && notification_code == EN_CHANGE)
             {
                 if (m_updating_depth_edit)
@@ -1871,18 +2090,21 @@ namespace space_scanner::gui
 
             if (control_id == IDC_SCAN_BUTTON && control == m_scan_button)
             {
+                HidePathDropdown();
                 BeginScanFromUiPath();
                 return;
             }
 
             if (control_id == IDC_RESET_BUTTON && notification_code == BN_CLICKED)
             {
+                HidePathDropdown();
                 ResetTreemapView();
                 return;
             }
 
             if (control_id == IDC_BROWSE_BUTTON && control == m_browse_button)
             {
+                HidePathDropdown();
                 if (m_scan_in_progress)
                 {
                     return;
@@ -2395,6 +2617,7 @@ namespace space_scanner::gui
 
         void OnLeftButtonDown(int x, int y)
         {
+            HidePathDropdown();
             SetFocus(m_hwnd);
             const int breadcrumb_index = HitTestBreadcrumb(static_cast<float>(x), static_cast<float>(y));
             if (breadcrumb_index >= 0)
@@ -2446,6 +2669,7 @@ namespace space_scanner::gui
 
         void OnRightButtonUp(int x, int y)
         {
+            HidePathDropdown();
             SetFocus(m_hwnd);
 
             const int breadcrumb_index = HitTestBreadcrumb(static_cast<float>(x), static_cast<float>(y));
@@ -2864,6 +3088,7 @@ namespace space_scanner::gui
         GuiOptions m_options;
         HWND m_hwnd = nullptr;
         HWND m_path_edit = nullptr;
+        HWND m_path_combo_edit = nullptr;
         HWND m_scan_button = nullptr;
         HWND m_browse_button = nullptr;
         HWND m_reset_button = nullptr;
@@ -2897,6 +3122,7 @@ namespace space_scanner::gui
         std::unique_ptr<FileTree> m_tree;
         visualization::TreemapLayoutOptions m_layout_options;
         std::vector<visualization::TreemapRect> m_rects;
+        std::vector<DriveListEntry> m_ntfs_drive_entries;
         std::unordered_set<uint64_t> m_expanded_reveal_nodes;
         std::vector<BreadcrumbStrip> m_breadcrumbs;
         bool m_show_tooltip = true;
