@@ -2410,24 +2410,37 @@ namespace space_scanner::gui
             }
 
             const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(hit_index)];
-            if (!rect.is_dir || rect.node_id == 0 || rect.node_id == m_view_root_id)
+            if (rect.node_id == 0 || rect.node_id == m_view_root_id)
             {
                 return;
             }
 
             const Node* node = m_tree->GetNode(rect.node_id);
-            if (!node || !node->is_dir)
+            if (!node)
             {
                 return;
             }
 
-            const size_t clicked_depth = GetAbsoluteNodeDepth(rect.node_id);
-            const size_t expanded_ancestor_count = CountExpandedRevealAncestorsExclusive(rect.node_id);
-            if (clicked_depth >= static_cast<size_t>(m_max_depth) + expanded_ancestor_count)
+            if (node->is_dir)
             {
-                m_expanded_reveal_nodes.insert(rect.node_id);
+                const size_t clicked_depth = GetAbsoluteNodeDepth(rect.node_id);
+                const size_t expanded_ancestor_count = CountExpandedRevealAncestorsExclusive(rect.node_id);
+                if (clicked_depth >= static_cast<size_t>(m_max_depth) + expanded_ancestor_count)
+                {
+                    m_expanded_reveal_nodes.insert(rect.node_id);
+                }
+                m_view_root_id = rect.node_id;
+                RebuildAndRedraw();
+                return;
             }
-            m_view_root_id = rect.node_id;
+
+            const Node* parent_node = m_tree->GetNode(node->parent_id);
+            if (!parent_node || !parent_node->is_dir || parent_node->id == m_view_root_id)
+            {
+                return;
+            }
+
+            m_view_root_id = parent_node->id;
             RebuildAndRedraw();
         }
 
