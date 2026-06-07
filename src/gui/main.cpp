@@ -513,6 +513,9 @@ namespace space_scanner::gui
             case WM_LBUTTONDOWN:
                 OnLeftButtonDown(GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
                 return 0;
+            case WM_RBUTTONDOWN:
+                OnRightButtonDown();
+                return 0;
             case WM_RBUTTONUP:
                 OnRightButtonUp(GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param));
                 return 0;
@@ -1794,6 +1797,25 @@ namespace space_scanner::gui
             StopTooltipAnimation();
         }
 
+        void ClearHoverStateAndInvalidate()
+        {
+            if (m_hovered_index == -1 &&
+                m_hovered_breadcrumb_index == -1 &&
+                IsRenderRectEmpty(m_tooltip_redraw_bounds))
+            {
+                return;
+            }
+
+            const int old_hovered_index = m_hovered_index;
+            const int old_hovered_breadcrumb_index = m_hovered_breadcrumb_index;
+            const RenderRect old_tooltip_bounds = m_tooltip_redraw_bounds;
+            ClearHoverState();
+            InvalidateHoverTransition(
+                old_hovered_index,
+                old_hovered_breadcrumb_index,
+                old_tooltip_bounds);
+        }
+
         void RebuildAndRedraw()
         {
             RebuildLayout();
@@ -2554,6 +2576,13 @@ namespace space_scanner::gui
 
             const RenderPoint new_mouse_position = MakeRenderPoint(static_cast<float>(x), static_cast<float>(y));
             m_mouse_position = new_mouse_position;
+            if ((GetKeyState(VK_RBUTTON) & 0x8000) != 0)
+            {
+                ClearHoverStateAndInvalidate();
+                SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+                return;
+            }
+
             const int hovered_breadcrumb = HitTestBreadcrumb(static_cast<float>(x), static_cast<float>(y));
             const int hovered = HitTestTreemap(static_cast<float>(x), static_cast<float>(y));
             const bool hovered_changed = hovered != m_hovered_index || hovered_breadcrumb != m_hovered_breadcrumb_index;
@@ -2619,6 +2648,12 @@ namespace space_scanner::gui
         {
             HidePathDropdown();
             SetFocus(m_hwnd);
+            if (m_suppress_next_left_button_down)
+            {
+                m_suppress_next_left_button_down = false;
+                return;
+            }
+
             const int breadcrumb_index = HitTestBreadcrumb(static_cast<float>(x), static_cast<float>(y));
             if (breadcrumb_index >= 0)
             {
@@ -2665,6 +2700,14 @@ namespace space_scanner::gui
 
             m_view_root_id = parent_node->id;
             RebuildAndRedraw();
+        }
+
+        void OnRightButtonDown()
+        {
+            HidePathDropdown();
+            SetFocus(m_hwnd);
+            ClearHoverStateAndInvalidate();
+            SetCursor(LoadCursorW(nullptr, IDC_ARROW));
         }
 
         void OnRightButtonUp(int x, int y)
@@ -2740,7 +2783,15 @@ namespace space_scanner::gui
                 nullptr);
             DestroyMenu(menu);
 
-            if (command == IDM_TREEMAP_OPEN_IN_EXPLORER)
+            if (command == 0)
+            {
+                const bool cancelled_with_escape = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
+                if (!cancelled_with_escape)
+                {
+                    m_suppress_next_left_button_down = true;
+                }
+            }
+            else if (command == IDM_TREEMAP_OPEN_IN_EXPLORER)
             {
                 OpenPathInFileExplorer(path, is_dir);
             }
@@ -3129,6 +3180,7 @@ namespace space_scanner::gui
         bool m_show_status_bar = false;
         bool m_updating_depth_edit = false;
         bool m_tooltip_animation_active = false;
+        bool m_suppress_next_left_button_down = false;
         RenderPoint m_mouse_position = MakeRenderPoint(-1.0f, -1.0f);
         RenderPoint m_tooltip_position = MakeRenderPoint(-1.0f, -1.0f);
         RenderPoint m_tooltip_target_position = MakeRenderPoint(-1.0f, -1.0f);
