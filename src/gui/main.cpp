@@ -45,6 +45,7 @@ namespace space_scanner::gui
     constexpr int IDC_RESET_BUTTON = 1010;
     constexpr int IDM_TREEMAP_OPEN_IN_EXPLORER = 2001;
     constexpr int IDM_TREEMAP_COPY_FULL_PATH = 2002;
+    constexpr int IDM_TREEMAP_PROPERTIES = 2003;
 
     struct GuiOptions
     {
@@ -2488,6 +2489,8 @@ namespace space_scanner::gui
 
             AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN_IN_EXPLORER, L"Open in File Explorer");
             AppendMenuW(menu, MF_STRING, IDM_TREEMAP_COPY_FULL_PATH, L"Copy full path");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, IDM_TREEMAP_PROPERTIES, L"Properties");
 
             SetForegroundWindow(m_hwnd);
             const UINT command = TrackPopupMenu(
@@ -2515,6 +2518,10 @@ namespace space_scanner::gui
                         MB_OK | MB_ICONERROR);
                 }
             }
+            else if (command == IDM_TREEMAP_PROPERTIES)
+            {
+                OpenPathProperties(path);
+            }
 
             PostMessageW(m_hwnd, WM_NULL, 0, 0);
         }
@@ -2537,6 +2544,26 @@ namespace space_scanner::gui
                 MessageBoxW(
                     m_hwnd,
                     L"File Explorer could not open the selected path.",
+                    L"SpaceScanner",
+                    MB_OK | MB_ICONERROR);
+            }
+        }
+
+        void OpenPathProperties(const std::wstring& path) const
+        {
+            SHELLEXECUTEINFOW execute_info = {};
+            execute_info.cbSize = sizeof(execute_info);
+            execute_info.fMask = SEE_MASK_INVOKEIDLIST;
+            execute_info.hwnd = m_hwnd;
+            execute_info.lpVerb = L"properties";
+            execute_info.lpFile = path.c_str();
+            execute_info.nShow = SW_SHOWNORMAL;
+
+            if (!ShellExecuteExW(&execute_info))
+            {
+                MessageBoxW(
+                    m_hwnd,
+                    L"Windows could not open the selected path properties.",
                     L"SpaceScanner",
                     MB_OK | MB_ICONERROR);
             }
