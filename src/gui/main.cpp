@@ -2113,8 +2113,8 @@ namespace space_scanner::gui
                 std::wstring selected_path;
                 if (BrowseForFolder(&selected_path) && m_path_edit)
                 {
+                    SendMessageW(m_path_edit, CB_SETCURSEL, static_cast<WPARAM>(-1), 0);
                     SetWindowTextW(m_path_edit, selected_path.c_str());
-                    BeginScanFromUiPath();
                 }
             }
         }
