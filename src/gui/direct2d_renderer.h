@@ -16,7 +16,7 @@ namespace space_scanner::gui
 {
 
     inline constexpr float kOuterPadding = 18.0f;
-    inline constexpr float kHeaderHeight = 108.0f;
+    inline constexpr float kHeaderHeight = 116.0f;
     inline constexpr float kTreemapTopSliceHeight = 22.0f;
     inline constexpr float kTreemapSideSliceWidth = 3.0f;
     inline constexpr float kTreemapBottomSliceHeight = 3.0f;
@@ -69,10 +69,9 @@ namespace space_scanner::gui
         RenderRect focus_up_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect header_info_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect scan_group_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect treemap_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect display_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect paint_rect = MakeRenderRect(0, 0, 0, 0);
-        float checkbox_depth_separator_x = 0.0f;
-        float depth_reset_separator_x = 0.0f;
     };
 
     class Direct2DRenderer;

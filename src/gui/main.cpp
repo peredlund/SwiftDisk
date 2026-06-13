@@ -1344,7 +1344,7 @@ namespace space_scanner::gui
             m_reset_button = CreateWindowExW(
                 0,
                 L"BUTTON",
-                L"Reset treemap",
+                L"Reset view",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                 0,
                 0,
@@ -1415,7 +1415,7 @@ namespace space_scanner::gui
             m_show_tooltip_check = CreateWindowExW(
                 0,
                 L"BUTTON",
-                L"Show tooltip",
+                L"Tooltip",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
                 0,
                 0,
@@ -1429,7 +1429,7 @@ namespace space_scanner::gui
             m_show_status_bar_check = CreateWindowExW(
                 0,
                 L"BUTTON",
-                L"Show status bar",
+                L"Status bar",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
                 0,
                 0,
@@ -1524,50 +1524,53 @@ namespace space_scanner::gui
                 std::min(680, max_control_area_width));
             const int control_left = width - outer_padding - inner_padding - control_area_width;
             const int scan_group_height = 40;
-            const int lower_row_vertical_offset = 3;
+            const int lower_row_vertical_offset = 10;
             const int lower_group_top = group_top + scan_group_height + group_gap + lower_row_vertical_offset;
             const int lower_group_height = 30;
             const int header_info_left = outer_padding + inner_padding;
             const int header_info_right = std::max(header_info_left + 120, control_left - 18);
             const int header_text_vertical_offset = -5;
             const int header_text_top = group_top + header_text_vertical_offset;
+            const int group_box_horizontal_padding = 14;
+            const int group_box_top_padding = 10;
+            const int group_box_bottom_padding = 9;
 
             const int scan_group_left = control_left + 2;
             const int scan_group_top_inner = group_top + 10;
             const int browse_width = 94;
             const int scan_width = 74;
-            const int reset_width = 112;
-            const int button_gap = 8;
+            const int reset_width = 72;
+            const int button_gap = group_box_horizontal_padding;
             const int browse_left = control_left + control_area_width - 12 - browse_width;
             const int scan_left = browse_left - button_gap - scan_width;
             const int edit_width = std::max(180, scan_left - button_gap - scan_group_left);
 
             const int lower_row_left = control_left + 2;
             const int display_checkbox_gap = 4;
-            const int lower_separator_leading_gap = 10;
-            const int lower_separator_trailing_gap = 10;
-            const int show_tooltip_width = GetCheckboxControlWidth(m_show_tooltip_check, 84);
-            const int show_status_bar_width = GetCheckboxControlWidth(m_show_status_bar_check, 108);
+            const int lower_group_gap = group_box_horizontal_padding;
+            const int checkbox_trailing_padding = 8;
+            const int show_group_right_padding = group_box_horizontal_padding - checkbox_trailing_padding;
+            const int show_tooltip_width = GetCheckboxControlWidth(m_show_tooltip_check, 0);
+            const int show_status_bar_width = GetCheckboxControlWidth(m_show_status_bar_check, 0);
             const int checkbox_group_width =
                 show_tooltip_width + display_checkbox_gap + show_status_bar_width;
             const int display_group_left = lower_row_left;
-            const int display_group_width = checkbox_group_width;
+            const int display_group_width =
+                group_box_horizontal_padding + checkbox_group_width + show_group_right_padding;
 
-            const int depth_label_width = 38;
+            const int depth_label_width = std::max(MeasureControlTextWidth(m_depth_label), 32);
             const int depth_edit_width = 42;
             const int depth_button_width = 18;
             const int depth_button_gap = 4;
-            const int depth_label_gap = 4;
+            const int depth_label_gap = 2;
             const int depth_group_width =
                 depth_label_width + depth_label_gap + depth_edit_width + depth_button_gap + depth_button_width;
-            m_checkbox_depth_separator_x = static_cast<float>(
-                display_group_left + display_group_width + lower_separator_leading_gap);
-            const int depth_controls_left =
-                static_cast<int>(m_checkbox_depth_separator_x) + lower_separator_trailing_gap;
-            m_depth_reset_separator_x = static_cast<float>(
-                depth_controls_left + depth_group_width + lower_separator_leading_gap);
-            const int reset_left =
-                static_cast<int>(m_depth_reset_separator_x) + lower_separator_trailing_gap;
+            const int treemap_control_gap = group_box_horizontal_padding;
+            const int treemap_group_width = (group_box_horizontal_padding * 2) +
+                depth_group_width + treemap_control_gap + reset_width;
+            const int treemap_group_left = display_group_left + display_group_width + lower_group_gap;
+            const int depth_controls_left = treemap_group_left + group_box_horizontal_padding;
+            const int reset_left = depth_controls_left + depth_group_width + treemap_control_gap;
 
             m_header_info_rect = MakeRenderRect(
                 static_cast<float>(header_info_left),
@@ -1579,16 +1582,16 @@ namespace space_scanner::gui
                 static_cast<float>(group_top),
                 static_cast<float>(control_left + control_area_width),
                 static_cast<float>(group_top + scan_group_height));
-            m_depth_group_rect = MakeRenderRect(
-                static_cast<float>(depth_controls_left),
-                static_cast<float>(lower_group_top),
-                static_cast<float>(depth_controls_left + depth_group_width),
-                static_cast<float>(lower_group_top + lower_group_height));
+            m_treemap_group_rect = MakeRenderRect(
+                static_cast<float>(treemap_group_left),
+                static_cast<float>(lower_group_top - group_box_top_padding),
+                static_cast<float>(treemap_group_left + treemap_group_width),
+                static_cast<float>(lower_group_top + lower_group_height + group_box_bottom_padding));
             m_display_group_rect = MakeRenderRect(
                 static_cast<float>(display_group_left),
-                static_cast<float>(lower_group_top),
+                static_cast<float>(lower_group_top - group_box_top_padding),
                 static_cast<float>(display_group_left + display_group_width),
-                static_cast<float>(lower_group_top + lower_group_height));
+                static_cast<float>(lower_group_top + lower_group_height + group_box_bottom_padding));
 
             const int depth_controls_top = lower_group_top + 1;
             const int depth_label_left = depth_controls_left;
@@ -1597,7 +1600,7 @@ namespace space_scanner::gui
 
             const int show_tooltip_top = lower_group_top + 5;
             const int show_status_bar_top = show_tooltip_top;
-            const int show_tooltip_left = display_group_left + 4;
+            const int show_tooltip_left = display_group_left + group_box_horizontal_padding;
             const int show_status_bar_left = show_tooltip_left + show_tooltip_width + display_checkbox_gap;
 
             if (m_path_edit)
@@ -3139,9 +3142,8 @@ namespace space_scanner::gui
             state.focus_up_rect = m_focus_up_rect;
             state.header_info_rect = m_header_info_rect;
             state.scan_group_rect = m_scan_group_rect;
+            state.treemap_group_rect = m_treemap_group_rect;
             state.display_group_rect = m_display_group_rect;
-            state.checkbox_depth_separator_x = m_checkbox_depth_separator_x;
-            state.depth_reset_separator_x = m_depth_reset_separator_x;
             return state;
         }
 
@@ -3243,10 +3245,8 @@ namespace space_scanner::gui
         RenderRect m_focus_up_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect m_header_info_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect m_scan_group_rect = MakeRenderRect(0, 0, 0, 0);
-        RenderRect m_depth_group_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_treemap_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect m_display_group_rect = MakeRenderRect(0, 0, 0, 0);
-        float m_checkbox_depth_separator_x = 0.0f;
-        float m_depth_reset_separator_x = 0.0f;
         std::vector<std::pair<HWND, WNDPROC>> m_subclassed_controls;
     };
 

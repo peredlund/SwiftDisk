@@ -87,6 +87,7 @@ namespace space_scanner::gui
     private:
         std::wstring BuildDirectoryHeaderText(const std::wstring& label, std::uint64_t size, float available_width) const;
         void DrawPanelRect(const RenderRect& rect, ID2D1SolidColorBrush* fill_brush, ID2D1SolidColorBrush* border_brush, float stroke_width = 1.0f);
+        void DrawHeaderGroupBox(const RenderRect& rect, const std::wstring& label);
         void DrawTreemap(const MainWindowDrawingState& state);
         void DrawHeader(const MainWindowDrawingState& state);
         RenderRect GetHoveredRectBounds(const MainWindowDrawingState& state, const visualization::TreemapRect& rect) const;
@@ -1122,6 +1123,62 @@ void Direct2DRenderer::DrawPanelRect(
     DrawRectangle(rect, border_brush, stroke_width);
 }
 
+void Direct2DRenderer::DrawHeaderGroupBox(const RenderRect& rect, const std::wstring& label)
+{
+    if (IsRenderRectEmpty(rect) || label.empty())
+    {
+        return;
+    }
+
+    const float label_padding_x = 5.0f;
+    const float label_left = rect.left + 10.0f;
+    const float measured_label_width = std::ceil(MeasureTextWidth(label, RenderTextFormat::Small));
+    const float label_right = std::min(
+        rect.right - 8.0f,
+        label_left + measured_label_width + (label_padding_x * 2.0f));
+    const float label_baseline_gap = 4.0f;
+    const float top_y = std::floor(rect.top) + 0.5f;
+    const float bottom_y = std::floor(rect.bottom) + 0.5f;
+    const float left_x = std::floor(rect.left) + 0.5f;
+    const float right_x = std::floor(rect.right) + 0.5f;
+
+    DrawLine(
+        MakeRenderPoint(left_x, top_y),
+        MakeRenderPoint(std::max(left_x, label_left - label_baseline_gap), top_y),
+        m_border_brush.Get(),
+        1.0f);
+    DrawLine(
+        MakeRenderPoint(std::min(right_x, label_right + label_baseline_gap), top_y),
+        MakeRenderPoint(right_x, top_y),
+        m_border_brush.Get(),
+        1.0f);
+    DrawLine(
+        MakeRenderPoint(left_x, top_y),
+        MakeRenderPoint(left_x, bottom_y),
+        m_border_brush.Get(),
+        1.0f);
+    DrawLine(
+        MakeRenderPoint(right_x, top_y),
+        MakeRenderPoint(right_x, bottom_y),
+        m_border_brush.Get(),
+        1.0f);
+    DrawLine(
+        MakeRenderPoint(left_x, bottom_y),
+        MakeRenderPoint(right_x, bottom_y),
+        m_border_brush.Get(),
+        1.0f);
+
+    DrawTextLine(
+        label,
+        RenderTextFormat::Small,
+        MakeRenderRect(
+            label_left + label_padding_x,
+            rect.top - 8.0f,
+            label_right,
+            rect.top + 8.0f),
+        m_muted_brush.Get());
+}
+
 void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
 {
     if (!IsRenderRectEmpty(state.paint_rect) && !RenderRectsIntersect(state.canvas_rect, state.paint_rect))
@@ -1537,37 +1594,24 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
 
     DrawPanelRect(header_rect, m_panel_brush.Get(), m_border_brush.Get(), 1.2f);
 
-    const float separator_x = std::floor((state.header_info_rect.right + state.scan_group_rect.left) * 0.5f);
+    constexpr float kHeaderSeparatorLeftOffset = 8.0f;
+    const float separator_x = std::floor(
+        ((state.header_info_rect.right + state.scan_group_rect.left) * 0.5f) - kHeaderSeparatorLeftOffset);
     if (separator_x > state.header_info_rect.left && separator_x < header_rect.right)
     {
+        const float separator_top = std::min(header_rect.bottom - 8.0f, state.scan_group_rect.top);
+        const float separator_bottom = std::min(
+            header_rect.bottom - 8.0f,
+            std::max(state.display_group_rect.bottom, state.treemap_group_rect.bottom) + 1.0f);
         DrawLine(
-            MakeRenderPoint(separator_x + 1.0f, header_rect.top + 14.0f),
-            MakeRenderPoint(separator_x + 1.0f, header_rect.bottom - 14.0f),
+            MakeRenderPoint(separator_x + 1.0f, separator_top),
+            MakeRenderPoint(separator_x + 1.0f, separator_bottom),
             m_separator_brush.Get(),
             2.0f);
     }
 
-    const float lower_separator_top = state.display_group_rect.top + 2.0f;
-    const float lower_separator_bottom = state.display_group_rect.bottom - 2.0f;
-    const float lower_separator_stroke_width = 2.0f;
-    if (state.checkbox_depth_separator_x > state.display_group_rect.left)
-    {
-        const float line_x = std::floor(state.checkbox_depth_separator_x) + 1.0f;
-        DrawLine(
-            MakeRenderPoint(line_x, lower_separator_top),
-            MakeRenderPoint(line_x, lower_separator_bottom),
-            m_separator_brush.Get(),
-            lower_separator_stroke_width);
-    }
-    if (state.depth_reset_separator_x > state.checkbox_depth_separator_x)
-    {
-        const float line_x = std::floor(state.depth_reset_separator_x) + 1.0f;
-        DrawLine(
-            MakeRenderPoint(line_x, lower_separator_top),
-            MakeRenderPoint(line_x, lower_separator_bottom),
-            m_separator_brush.Get(),
-            lower_separator_stroke_width);
-    }
+    DrawHeaderGroupBox(state.display_group_rect, L"Show");
+    DrawHeaderGroupBox(state.treemap_group_rect, L"Treemap");
 
     DrawTextLine(
         L"SpaceScanner",
