@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
 
@@ -46,6 +47,8 @@ namespace space_scanner::gui
     constexpr int IDM_TREEMAP_OPEN_IN_EXPLORER = 2001;
     constexpr int IDM_TREEMAP_COPY_FULL_PATH = 2002;
     constexpr int IDM_TREEMAP_PROPERTIES = 2003;
+    constexpr int IDM_TREEMAP_OPEN = 2004;
+    constexpr int IDM_TREEMAP_OPEN_WITH = 2005;
 
     struct GuiOptions
     {
@@ -2770,6 +2773,12 @@ namespace space_scanner::gui
             AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN_IN_EXPLORER, L"Open in File Explorer");
             AppendMenuW(menu, MF_STRING, IDM_TREEMAP_COPY_FULL_PATH, L"Copy full path");
             AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            if (!is_dir)
+            {
+                AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN, L"Open");
+                AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN_WITH, L"Open with...");
+                AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            }
             AppendMenuW(menu, MF_STRING, IDM_TREEMAP_PROPERTIES, L"Properties");
 
             SetForegroundWindow(m_hwnd);
@@ -2790,6 +2799,14 @@ namespace space_scanner::gui
                 {
                     m_suppress_next_left_button_down = true;
                 }
+            }
+            else if (command == IDM_TREEMAP_OPEN)
+            {
+                OpenFile(path);
+            }
+            else if (command == IDM_TREEMAP_OPEN_WITH)
+            {
+                OpenFileWithDialog(path);
             }
             else if (command == IDM_TREEMAP_OPEN_IN_EXPLORER)
             {
@@ -2812,6 +2829,41 @@ namespace space_scanner::gui
             }
 
             PostMessageW(m_hwnd, WM_NULL, 0, 0);
+        }
+
+        void OpenFile(const std::wstring& path) const
+        {
+            HINSTANCE result = ShellExecuteW(m_hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            if (reinterpret_cast<INT_PTR>(result) <= 32)
+            {
+                MessageBoxW(
+                    m_hwnd,
+                    L"Windows could not open this file. Try Open with...",
+                    L"SpaceScanner",
+                    MB_OK | MB_ICONERROR);
+            }
+        }
+
+        void OpenFileWithDialog(const std::wstring& path) const
+        {
+            OPENASINFO open_as_info = {};
+            open_as_info.pcszFile = path.c_str();
+            open_as_info.oaifInFlags = OAIF_EXEC;
+
+            const HRESULT result = SHOpenWithDialog(m_hwnd, &open_as_info);
+            if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+            {
+                return;
+            }
+
+            if (FAILED(result))
+            {
+                MessageBoxW(
+                    m_hwnd,
+                    L"Windows could not show Open with for this file.",
+                    L"SpaceScanner",
+                    MB_OK | MB_ICONERROR);
+            }
         }
 
         void OpenPathInFileExplorer(const std::wstring& path, bool is_dir) const
