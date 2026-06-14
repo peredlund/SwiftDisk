@@ -768,7 +768,7 @@ namespace space_scanner::gui
             DWRITE_FONT_WEIGHT_SEMI_BOLD,
             DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
-            28.0f,
+            Scale(28.0f),
             L"",
             m_title_format.GetAddressOf());
         if (FAILED(hr))
@@ -779,7 +779,7 @@ namespace space_scanner::gui
                 DWRITE_FONT_WEIGHT_SEMI_BOLD,
                 DWRITE_FONT_STYLE_NORMAL,
                 DWRITE_FONT_STRETCH_NORMAL,
-                28.0f,
+                Scale(28.0f),
                 L"",
                 m_title_format.GetAddressOf());
             if (FAILED(hr))
@@ -794,7 +794,7 @@ namespace space_scanner::gui
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
-            14.0f,
+            Scale(14.0f),
             L"",
             m_body_format.GetAddressOf());
         if (FAILED(hr))
@@ -1130,13 +1130,13 @@ void Direct2DRenderer::DrawHeaderGroupBox(const RenderRect& rect, const std::wst
         return;
     }
 
-    const float label_padding_x = 5.0f;
-    const float label_left = rect.left + 10.0f;
+    const float label_padding_x = Scale(5.0f);
+    const float label_left = rect.left + Scale(10.0f);
     const float measured_label_width = std::ceil(MeasureTextWidth(label, RenderTextFormat::Small));
     const float label_right = std::min(
-        rect.right - 8.0f,
+        rect.right - Scale(8.0f),
         label_left + measured_label_width + (label_padding_x * 2.0f));
-    const float label_baseline_gap = 4.0f;
+    const float label_baseline_gap = Scale(4.0f);
     const float top_y = std::floor(rect.top) + 0.5f;
     const float bottom_y = std::floor(rect.bottom) + 0.5f;
     const float left_x = std::floor(rect.left) + 0.5f;
@@ -1146,36 +1146,36 @@ void Direct2DRenderer::DrawHeaderGroupBox(const RenderRect& rect, const std::wst
         MakeRenderPoint(left_x, top_y),
         MakeRenderPoint(std::max(left_x, label_left - label_baseline_gap), top_y),
         m_border_brush.Get(),
-        1.0f);
+        Scale(1.0f));
     DrawLine(
         MakeRenderPoint(std::min(right_x, label_right + label_baseline_gap), top_y),
         MakeRenderPoint(right_x, top_y),
         m_border_brush.Get(),
-        1.0f);
+        Scale(1.0f));
     DrawLine(
         MakeRenderPoint(left_x, top_y),
         MakeRenderPoint(left_x, bottom_y),
         m_border_brush.Get(),
-        1.0f);
+        Scale(1.0f));
     DrawLine(
         MakeRenderPoint(right_x, top_y),
         MakeRenderPoint(right_x, bottom_y),
         m_border_brush.Get(),
-        1.0f);
+        Scale(1.0f));
     DrawLine(
         MakeRenderPoint(left_x, bottom_y),
         MakeRenderPoint(right_x, bottom_y),
         m_border_brush.Get(),
-        1.0f);
+        Scale(1.0f));
 
     DrawTextLine(
         label,
         RenderTextFormat::Small,
         MakeRenderRect(
             label_left + label_padding_x,
-            rect.top - 8.0f,
+            rect.top - Scale(8.0f),
             label_right,
-            rect.top + 8.0f),
+            rect.top + Scale(8.0f)),
         m_muted_brush.Get());
 }
 
@@ -1198,12 +1198,20 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
         DrawTextLine(
             L"Scanning...",
             RenderTextFormat::Title,
-            MakeRenderRect(state.canvas_rect.left + 24.0f, state.canvas_rect.top + 28.0f, state.canvas_rect.right - 24.0f, state.canvas_rect.top + 70.0f),
+            MakeRenderRect(
+                state.canvas_rect.left + Scale(24.0f),
+                state.canvas_rect.top + Scale(28.0f),
+                state.canvas_rect.right - Scale(24.0f),
+                state.canvas_rect.top + Scale(70.0f)),
             m_text_brush.Get());
         DrawTextLine(
             state.status_text,
             RenderTextFormat::Body,
-            MakeRenderRect(state.canvas_rect.left + 24.0f, state.canvas_rect.top + 76.0f, state.canvas_rect.right - 24.0f, state.canvas_rect.top + 100.0f),
+            MakeRenderRect(
+                state.canvas_rect.left + Scale(24.0f),
+                state.canvas_rect.top + Scale(76.0f),
+                state.canvas_rect.right - Scale(24.0f),
+                state.canvas_rect.top + Scale(100.0f)),
             m_muted_brush.Get());
         return;
     }
@@ -1213,12 +1221,20 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
         DrawTextLine(
             L"Scan failed",
             RenderTextFormat::Title,
-            MakeRenderRect(state.canvas_rect.left + 24.0f, state.canvas_rect.top + 28.0f, state.canvas_rect.right - 24.0f, state.canvas_rect.top + 70.0f),
+            MakeRenderRect(
+                state.canvas_rect.left + Scale(24.0f),
+                state.canvas_rect.top + Scale(28.0f),
+                state.canvas_rect.right - Scale(24.0f),
+                state.canvas_rect.top + Scale(70.0f)),
             m_error_brush.Get());
         DrawTextLine(
             state.error_text,
             RenderTextFormat::Body,
-            MakeRenderRect(state.canvas_rect.left + 24.0f, state.canvas_rect.top + 76.0f, state.canvas_rect.right - 24.0f, state.canvas_rect.bottom - 24.0f),
+            MakeRenderRect(
+                state.canvas_rect.left + Scale(24.0f),
+                state.canvas_rect.top + Scale(76.0f),
+                state.canvas_rect.right - Scale(24.0f),
+                state.canvas_rect.bottom - Scale(24.0f)),
             m_muted_brush.Get());
         return;
     }
@@ -1228,12 +1244,20 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
         DrawTextLine(
             L"No scan data yet",
             RenderTextFormat::Title,
-            MakeRenderRect(state.canvas_rect.left + 24.0f, state.canvas_rect.top + 28.0f, state.canvas_rect.right - 24.0f, state.canvas_rect.top + 70.0f),
+            MakeRenderRect(
+                state.canvas_rect.left + Scale(24.0f),
+                state.canvas_rect.top + Scale(28.0f),
+                state.canvas_rect.right - Scale(24.0f),
+                state.canvas_rect.top + Scale(70.0f)),
             m_text_brush.Get());
         DrawTextLine(
             L"Choose a folder above, then click Scan or Browse to start.",
             RenderTextFormat::Body,
-            MakeRenderRect(state.canvas_rect.left + 24.0f, state.canvas_rect.top + 78.0f, state.canvas_rect.right - 24.0f, state.canvas_rect.top + 104.0f),
+            MakeRenderRect(
+                state.canvas_rect.left + Scale(24.0f),
+                state.canvas_rect.top + Scale(78.0f),
+                state.canvas_rect.right - Scale(24.0f),
+                state.canvas_rect.top + Scale(104.0f)),
             m_muted_brush.Get());
         return;
     }
@@ -1583,31 +1607,31 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
 void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
 {
     const RenderRect header_rect = MakeRenderRect(
-        kOuterPadding,
-        kOuterPadding - 8.0f,
+        Scale(kOuterPadding),
+        Scale(kOuterPadding - 8.0f),
         state.canvas_rect.right,
-        kOuterPadding + kHeaderHeight - 8.0f);
+        Scale(kOuterPadding + kHeaderHeight - 8.0f));
     if (!IsRenderRectEmpty(state.paint_rect) && !RenderRectsIntersect(header_rect, state.paint_rect))
     {
         return;
     }
 
-    DrawPanelRect(header_rect, m_panel_brush.Get(), m_border_brush.Get(), 1.2f);
+    DrawPanelRect(header_rect, m_panel_brush.Get(), m_border_brush.Get(), Scale(1.2f));
 
-    constexpr float kHeaderSeparatorLeftOffset = 8.0f;
+    const float header_separator_left_offset = Scale(8.0f);
     const float separator_x = std::floor(
-        ((state.header_info_rect.right + state.scan_group_rect.left) * 0.5f) - kHeaderSeparatorLeftOffset);
+        ((state.header_info_rect.right + state.scan_group_rect.left) * 0.5f) - header_separator_left_offset);
     if (separator_x > state.header_info_rect.left && separator_x < header_rect.right)
     {
-        const float separator_top = std::min(header_rect.bottom - 8.0f, state.scan_group_rect.top);
+        const float separator_top = std::min(header_rect.bottom - Scale(8.0f), state.scan_group_rect.top);
         const float separator_bottom = std::min(
-            header_rect.bottom - 8.0f,
-            std::max(state.display_group_rect.bottom, state.treemap_group_rect.bottom) + 1.0f);
+            header_rect.bottom - Scale(8.0f),
+            std::max(state.display_group_rect.bottom, state.treemap_group_rect.bottom) + Scale(1.0f));
         DrawLine(
-            MakeRenderPoint(separator_x + 1.0f, separator_top),
-            MakeRenderPoint(separator_x + 1.0f, separator_bottom),
+            MakeRenderPoint(separator_x + Scale(1.0f), separator_top),
+            MakeRenderPoint(separator_x + Scale(1.0f), separator_bottom),
             m_separator_brush.Get(),
-            2.0f);
+            Scale(2.0f));
     }
 
     DrawHeaderGroupBox(state.display_group_rect, L"Show");
@@ -1620,7 +1644,7 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
             state.header_info_rect.left,
             state.header_info_rect.top,
             state.header_info_rect.right,
-            state.header_info_rect.top + 34.0f),
+            state.header_info_rect.top + Scale(34.0f)),
         m_text_brush.Get());
 
     const Node* focused_node = state.tree && state.view_root_id != 0
@@ -1638,9 +1662,9 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
         RenderTextFormat::Small,
         MakeRenderRect(
             state.header_info_rect.left,
-            state.header_info_rect.top + 42.0f,
+            state.header_info_rect.top + Scale(42.0f),
             state.header_info_rect.right,
-            state.header_info_rect.top + 58.0f),
+            state.header_info_rect.top + Scale(58.0f)),
         m_muted_brush.Get());
 
     std::wstringstream summary;
@@ -1670,9 +1694,9 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
         RenderTextFormat::Body,
         MakeRenderRect(
             state.header_info_rect.left,
-            state.header_info_rect.top + 68.0f,
+            state.header_info_rect.top + Scale(68.0f),
             state.header_info_rect.right,
-            state.header_info_rect.top + 86.0f),
+            state.header_info_rect.top + Scale(86.0f)),
         m_muted_brush.Get());
 }
 

@@ -372,6 +372,11 @@ namespace space_scanner::gui
         return value * dpi_scale;
     }
 
+    int ScaleIntForDpi(float value, float dpi_scale)
+    {
+        return static_cast<int>(std::lround(ScaleForDpi(value, dpi_scale)));
+    }
+
     class MainWindow
     {
     public:
@@ -422,7 +427,7 @@ namespace space_scanner::gui
 
     private:
         static constexpr float kOuterPadding = 18.0f;
-        static constexpr float kHeaderHeight = 108.0f;
+        static constexpr float kHeaderHeight = 116.0f;
         static constexpr float kTreemapTopSliceHeight = 22.0f;
         static constexpr float kTreemapSideSliceWidth = 3.0f;
         static constexpr float kTreemapBottomSliceHeight = 3.0f;
@@ -545,7 +550,22 @@ namespace space_scanner::gui
                 ApplyCompletedScan(true);
                 return 0;
             case WM_DISPLAYCHANGE:
-                InvalidateRect(m_hwnd, nullptr, FALSE);
+                OnSize();
+                return 0;
+            case WM_DPICHANGED:
+                if (l_param)
+                {
+                    const RECT* suggested_rect = reinterpret_cast<const RECT*>(l_param);
+                    SetWindowPos(
+                        m_hwnd,
+                        nullptr,
+                        suggested_rect->left,
+                        suggested_rect->top,
+                        suggested_rect->right - suggested_rect->left,
+                        suggested_rect->bottom - suggested_rect->top,
+                        SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+                OnSize();
                 return 0;
             case WM_TIMER:
                 if (w_param == kTooltipAnimationTimerId)
@@ -826,6 +846,7 @@ namespace space_scanner::gui
             const bool disabled = (draw_item.itemState & ODS_DISABLED) != 0;
             const bool pressed = (draw_item.itemState & ODS_SELECTED) != 0;
             const bool hovered = IsControlHovered(draw_item.hwndItem) && !disabled;
+            const float dpi_scale = GetWindowDpiScale(m_hwnd);
             bool checked = false;
             if (draw_item.hwndItem == m_show_tooltip_check)
             {
@@ -852,10 +873,10 @@ namespace space_scanner::gui
             }
 
             RECT checkbox_rect = draw_item.rcItem;
-            checkbox_rect.left += 2;
-            checkbox_rect.top += 3;
-            checkbox_rect.right = checkbox_rect.left + 14;
-            checkbox_rect.bottom = checkbox_rect.top + 14;
+            checkbox_rect.left += ScaleIntForDpi(2.0f, dpi_scale);
+            checkbox_rect.top += ScaleIntForDpi(3.0f, dpi_scale);
+            checkbox_rect.right = checkbox_rect.left + ScaleIntForDpi(14.0f, dpi_scale);
+            checkbox_rect.bottom = checkbox_rect.top + ScaleIntForDpi(14.0f, dpi_scale);
 
             FillGdiRect(draw_item.hDC, checkbox_rect, GetButtonFillColor(pressed, disabled, hovered, checked));
             DrawGdiFrame(
@@ -867,23 +888,33 @@ namespace space_scanner::gui
             {
                 HPEN pen = CreatePen(
                     PS_SOLID,
-                    2,
+                    std::max(1, ScaleIntForDpi(2.0f, dpi_scale)),
                     disabled
                         ? ColorRefFromRgb(129, 142, 170)
                         : ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
                 if (pen)
                 {
                     const HGDIOBJ old_pen = SelectObject(draw_item.hDC, pen);
-                    MoveToEx(draw_item.hDC, checkbox_rect.left + 3, checkbox_rect.top + 8, nullptr);
-                    LineTo(draw_item.hDC, checkbox_rect.left + 6, checkbox_rect.bottom - 4);
-                    LineTo(draw_item.hDC, checkbox_rect.right - 3, checkbox_rect.top + 4);
+                    MoveToEx(
+                        draw_item.hDC,
+                        checkbox_rect.left + ScaleIntForDpi(3.0f, dpi_scale),
+                        checkbox_rect.top + ScaleIntForDpi(8.0f, dpi_scale),
+                        nullptr);
+                    LineTo(
+                        draw_item.hDC,
+                        checkbox_rect.left + ScaleIntForDpi(6.0f, dpi_scale),
+                        checkbox_rect.bottom - ScaleIntForDpi(4.0f, dpi_scale));
+                    LineTo(
+                        draw_item.hDC,
+                        checkbox_rect.right - ScaleIntForDpi(3.0f, dpi_scale),
+                        checkbox_rect.top + ScaleIntForDpi(4.0f, dpi_scale));
                     SelectObject(draw_item.hDC, old_pen);
                     DeleteObject(pen);
                 }
             }
 
             RECT text_rect = draw_item.rcItem;
-            text_rect.left = checkbox_rect.right + 8;
+            text_rect.left = checkbox_rect.right + ScaleIntForDpi(8.0f, dpi_scale);
 
             wchar_t text[96] = {};
             GetWindowTextW(draw_item.hwndItem, text, static_cast<int>(std::size(text)));
@@ -906,7 +937,8 @@ namespace space_scanner::gui
             if ((draw_item.itemState & ODS_FOCUS) != 0)
             {
                 RECT focus_rect = draw_item.rcItem;
-                InflateRect(&focus_rect, -1, -1);
+                const int focus_inset = ScaleIntForDpi(1.0f, dpi_scale);
+                InflateRect(&focus_rect, -focus_inset, -focus_inset);
                 DrawFocusRect(draw_item.hDC, &focus_rect);
             }
 
@@ -1273,18 +1305,18 @@ namespace space_scanner::gui
             return std::max(size.cx, 0L);
         }
 
-        int GetCheckboxControlWidth(HWND checkbox, int minimum_width) const
+        int GetCheckboxControlWidth(HWND checkbox, int minimum_width, float dpi_scale) const
         {
-            constexpr int kCheckboxLeftPadding = 2;
-            constexpr int kCheckboxBoxSize = 14;
-            constexpr int kCheckboxTextGap = 8;
-            constexpr int kCheckboxTrailingPadding = 8;
+            const int checkbox_left_padding = ScaleIntForDpi(2.0f, dpi_scale);
+            const int checkbox_box_size = ScaleIntForDpi(14.0f, dpi_scale);
+            const int checkbox_text_gap = ScaleIntForDpi(8.0f, dpi_scale);
+            const int checkbox_trailing_padding = ScaleIntForDpi(8.0f, dpi_scale);
             const int measured_width =
-                kCheckboxLeftPadding +
-                kCheckboxBoxSize +
-                kCheckboxTextGap +
+                checkbox_left_padding +
+                checkbox_box_size +
+                checkbox_text_gap +
                 MeasureControlTextWidth(checkbox) +
-                kCheckboxTrailingPadding;
+                checkbox_trailing_padding;
             return std::max(minimum_width, measured_width);
         }
 
@@ -1515,61 +1547,75 @@ namespace space_scanner::gui
             RECT client = {};
             GetClientRect(m_hwnd, &client);
             const int width = std::max<LONG>(client.right - client.left, 1);
+            const float dpi_scale = GetWindowDpiScale(m_hwnd);
 
-            const int outer_padding = static_cast<int>(kOuterPadding);
-            const int inner_padding = 22;
-            const int group_gap = 6;
-            const int group_top = outer_padding + 4;
+            const int outer_padding = ScaleIntForDpi(kOuterPadding, dpi_scale);
+            const int inner_padding = ScaleIntForDpi(22.0f, dpi_scale);
+            const int group_gap = ScaleIntForDpi(6.0f, dpi_scale);
+            const int group_top = outer_padding + ScaleIntForDpi(4.0f, dpi_scale);
             const int max_control_area_width = std::max(
-                340,
-                width - (outer_padding * 2) - (inner_padding * 2) - 140);
-            const int min_control_area_width = std::min(560, max_control_area_width);
+                ScaleIntForDpi(340.0f, dpi_scale),
+                width - (outer_padding * 2) - (inner_padding * 2) - ScaleIntForDpi(140.0f, dpi_scale));
+            const int min_control_area_width = std::min(ScaleIntForDpi(560.0f, dpi_scale), max_control_area_width);
             const int control_area_width = std::clamp(
                 static_cast<int>((width - (outer_padding * 2) - (inner_padding * 2)) * 0.48f),
                 min_control_area_width,
-                std::min(680, max_control_area_width));
+                std::min(ScaleIntForDpi(680.0f, dpi_scale), max_control_area_width));
             const int control_left = width - outer_padding - inner_padding - control_area_width;
-            const int scan_group_height = 40;
-            const int lower_row_vertical_offset = 10;
+            const int scan_group_height = ScaleIntForDpi(40.0f, dpi_scale);
+            const int lower_row_vertical_offset = ScaleIntForDpi(10.0f, dpi_scale);
             const int lower_group_top = group_top + scan_group_height + group_gap + lower_row_vertical_offset;
-            const int lower_group_height = 30;
+            const int lower_group_height = ScaleIntForDpi(30.0f, dpi_scale);
             const int header_info_left = outer_padding + inner_padding;
-            const int header_info_right = std::max(header_info_left + 120, control_left - 18);
-            const int header_text_vertical_offset = -5;
+            const int header_info_right =
+                std::max(header_info_left + ScaleIntForDpi(120.0f, dpi_scale), control_left - ScaleIntForDpi(18.0f, dpi_scale));
+            const int header_text_vertical_offset = ScaleIntForDpi(-5.0f, dpi_scale);
             const int header_text_top = group_top + header_text_vertical_offset;
-            const int group_box_horizontal_padding = 14;
-            const int group_box_top_padding = 10;
-            const int group_box_bottom_padding = 9;
+            const int group_box_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
+            const int group_box_top_padding = ScaleIntForDpi(10.0f, dpi_scale);
+            const int group_box_bottom_padding = ScaleIntForDpi(9.0f, dpi_scale);
 
-            const int scan_group_left = control_left + 2;
-            const int scan_group_top_inner = group_top + 10;
-            const int action_button_horizontal_padding = 20;
-            const int browse_width = GetButtonControlWidth(m_browse_button, 94, action_button_horizontal_padding);
-            const int scan_width = GetButtonControlWidth(m_scan_button, 74, action_button_horizontal_padding);
-            const int reset_width = GetButtonControlWidth(m_reset_button, 72, action_button_horizontal_padding);
+            const int scan_group_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
+            const int scan_group_top_inner = group_top + ScaleIntForDpi(10.0f, dpi_scale);
+            const int action_button_horizontal_padding = ScaleIntForDpi(20.0f, dpi_scale);
+            const int browse_width = GetButtonControlWidth(
+                m_browse_button,
+                ScaleIntForDpi(94.0f, dpi_scale),
+                action_button_horizontal_padding);
+            const int scan_width = GetButtonControlWidth(
+                m_scan_button,
+                ScaleIntForDpi(74.0f, dpi_scale),
+                action_button_horizontal_padding);
+            const int reset_width = GetButtonControlWidth(
+                m_reset_button,
+                ScaleIntForDpi(72.0f, dpi_scale),
+                action_button_horizontal_padding);
             const int button_gap = group_box_horizontal_padding;
-            const int browse_left = control_left + control_area_width - 12 - browse_width;
+            const int browse_left = control_left + control_area_width - ScaleIntForDpi(12.0f, dpi_scale) - browse_width;
             const int scan_left = browse_left - button_gap - scan_width;
-            const int edit_width = std::max(180, scan_left - button_gap - scan_group_left);
+            const int edit_width = std::max(
+                ScaleIntForDpi(180.0f, dpi_scale),
+                scan_left - button_gap - scan_group_left);
 
-            const int lower_row_left = control_left + 2;
-            const int display_checkbox_gap = 4;
+            const int lower_row_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
+            const int display_checkbox_gap = ScaleIntForDpi(4.0f, dpi_scale);
             const int lower_group_gap = group_box_horizontal_padding;
-            const int checkbox_trailing_padding = 8;
+            const int checkbox_trailing_padding = ScaleIntForDpi(8.0f, dpi_scale);
             const int show_group_right_padding = group_box_horizontal_padding - checkbox_trailing_padding;
-            const int show_tooltip_width = GetCheckboxControlWidth(m_show_tooltip_check, 0);
-            const int show_status_bar_width = GetCheckboxControlWidth(m_show_status_bar_check, 0);
+            const int show_tooltip_width = GetCheckboxControlWidth(m_show_tooltip_check, 0, dpi_scale);
+            const int show_status_bar_width = GetCheckboxControlWidth(m_show_status_bar_check, 0, dpi_scale);
             const int checkbox_group_width =
                 show_tooltip_width + display_checkbox_gap + show_status_bar_width;
             const int display_group_left = lower_row_left;
             const int display_group_width =
                 group_box_horizontal_padding + checkbox_group_width + show_group_right_padding;
 
-            const int depth_label_width = std::max(MeasureControlTextWidth(m_depth_label), 32);
-            const int depth_edit_width = 42;
-            const int depth_button_width = 18;
-            const int depth_button_gap = 4;
-            const int depth_label_gap = 2;
+            const int depth_label_width =
+                std::max(MeasureControlTextWidth(m_depth_label), ScaleIntForDpi(32.0f, dpi_scale));
+            const int depth_edit_width = ScaleIntForDpi(42.0f, dpi_scale);
+            const int depth_button_width = ScaleIntForDpi(18.0f, dpi_scale);
+            const int depth_button_gap = ScaleIntForDpi(4.0f, dpi_scale);
+            const int depth_label_gap = ScaleIntForDpi(2.0f, dpi_scale);
             const int depth_group_width =
                 depth_label_width + depth_label_gap + depth_edit_width + depth_button_gap + depth_button_width;
             const int treemap_control_gap = group_box_horizontal_padding;
@@ -1583,7 +1629,7 @@ namespace space_scanner::gui
                 static_cast<float>(header_info_left),
                 static_cast<float>(header_text_top),
                 static_cast<float>(header_info_right),
-                static_cast<float>(outer_padding + static_cast<int>(kHeaderHeight) - 16));
+                static_cast<float>(outer_padding + ScaleIntForDpi(kHeaderHeight, dpi_scale) - ScaleIntForDpi(16.0f, dpi_scale)));
             m_scan_group_rect = MakeRenderRect(
                 static_cast<float>(control_left),
                 static_cast<float>(group_top),
@@ -1600,51 +1646,85 @@ namespace space_scanner::gui
                 static_cast<float>(display_group_left + display_group_width),
                 static_cast<float>(lower_group_top + lower_group_height + group_box_bottom_padding));
 
-            const int depth_controls_top = lower_group_top + 1;
+            const int depth_controls_top = lower_group_top + ScaleIntForDpi(1.0f, dpi_scale);
             const int depth_label_left = depth_controls_left;
             const int depth_edit_left = depth_label_left + depth_label_width + depth_label_gap;
             const int depth_button_left = depth_edit_left + depth_edit_width + depth_button_gap;
 
-            const int show_tooltip_top = lower_group_top + 5;
+            const int show_tooltip_top = lower_group_top + ScaleIntForDpi(5.0f, dpi_scale);
             const int show_status_bar_top = show_tooltip_top;
             const int show_tooltip_left = display_group_left + group_box_horizontal_padding;
             const int show_status_bar_left = show_tooltip_left + show_tooltip_width + display_checkbox_gap;
 
             if (m_path_edit)
             {
-                constexpr int kPathDropdownHeight = 190;
-                MoveWindow(m_path_edit, scan_group_left, scan_group_top_inner, edit_width, kPathDropdownHeight, TRUE);
+                const int path_dropdown_height = ScaleIntForDpi(190.0f, dpi_scale);
+                MoveWindow(m_path_edit, scan_group_left, scan_group_top_inner, edit_width, path_dropdown_height, TRUE);
                 SendMessageW(m_path_edit, CB_SETDROPPEDWIDTH, static_cast<WPARAM>(edit_width), 0);
-                ApplyEditTextInsets(m_path_combo_edit, 8, 6, 8, 4);
+                ApplyEditTextInsets(
+                    m_path_combo_edit,
+                    ScaleIntForDpi(8.0f, dpi_scale),
+                    ScaleIntForDpi(6.0f, dpi_scale),
+                    ScaleIntForDpi(8.0f, dpi_scale),
+                    ScaleIntForDpi(4.0f, dpi_scale));
             }
             if (m_scan_button)
             {
-                MoveWindow(m_scan_button, scan_left, scan_group_top_inner, scan_width, 28, TRUE);
+                MoveWindow(m_scan_button, scan_left, scan_group_top_inner, scan_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
             }
             if (m_reset_button)
             {
-                MoveWindow(m_reset_button, reset_left, depth_controls_top, reset_width, 28, TRUE);
+                MoveWindow(m_reset_button, reset_left, depth_controls_top, reset_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
             }
             if (m_browse_button)
             {
-                MoveWindow(m_browse_button, browse_left, scan_group_top_inner, browse_width, 28, TRUE);
+                MoveWindow(m_browse_button, browse_left, scan_group_top_inner, browse_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
             }
             if (m_depth_label)
             {
-                MoveWindow(m_depth_label, depth_label_left, depth_controls_top + 6, depth_label_width, 18, TRUE);
+                MoveWindow(
+                    m_depth_label,
+                    depth_label_left,
+                    depth_controls_top + ScaleIntForDpi(6.0f, dpi_scale),
+                    depth_label_width,
+                    ScaleIntForDpi(18.0f, dpi_scale),
+                    TRUE);
             }
             if (m_depth_edit)
             {
-                MoveWindow(m_depth_edit, depth_edit_left, depth_controls_top, depth_edit_width, 28, TRUE);
-                ApplyEditTextInsets(m_depth_edit, 2, 5, 2, 4);
+                MoveWindow(
+                    m_depth_edit,
+                    depth_edit_left,
+                    depth_controls_top,
+                    depth_edit_width,
+                    ScaleIntForDpi(28.0f, dpi_scale),
+                    TRUE);
+                ApplyEditTextInsets(
+                    m_depth_edit,
+                    ScaleIntForDpi(2.0f, dpi_scale),
+                    ScaleIntForDpi(5.0f, dpi_scale),
+                    ScaleIntForDpi(2.0f, dpi_scale),
+                    ScaleIntForDpi(4.0f, dpi_scale));
             }
             if (m_depth_up_button)
             {
-                MoveWindow(m_depth_up_button, depth_button_left, depth_controls_top, depth_button_width, 13, TRUE);
+                MoveWindow(
+                    m_depth_up_button,
+                    depth_button_left,
+                    depth_controls_top,
+                    depth_button_width,
+                    ScaleIntForDpi(13.0f, dpi_scale),
+                    TRUE);
             }
             if (m_depth_down_button)
             {
-                MoveWindow(m_depth_down_button, depth_button_left, depth_controls_top + 14, depth_button_width, 14, TRUE);
+                MoveWindow(
+                    m_depth_down_button,
+                    depth_button_left,
+                    depth_controls_top + ScaleIntForDpi(14.0f, dpi_scale),
+                    depth_button_width,
+                    ScaleIntForDpi(14.0f, dpi_scale),
+                    TRUE);
             }
             if (m_show_tooltip_check)
             {
@@ -1653,7 +1733,7 @@ namespace space_scanner::gui
                     show_tooltip_left,
                     show_tooltip_top,
                     show_tooltip_width,
-                    18,
+                    ScaleIntForDpi(18.0f, dpi_scale),
                     TRUE);
             }
             if (m_show_status_bar_check)
@@ -1663,7 +1743,7 @@ namespace space_scanner::gui
                     show_status_bar_left,
                     show_status_bar_top,
                     show_status_bar_width,
-                    18,
+                    ScaleIntForDpi(18.0f, dpi_scale),
                     TRUE);
             }
         }
@@ -2380,20 +2460,22 @@ namespace space_scanner::gui
             const float width = static_cast<float>(std::max<LONG>(client.right - client.left, 1));
             const float height = static_cast<float>(std::max<LONG>(client.bottom - client.top, 1));
             const float dpi_scale = GetWindowDpiScale(m_hwnd);
+            const float outer_padding = ScaleForDpi(kOuterPadding, dpi_scale);
+            const float header_height = ScaleForDpi(kHeaderHeight, dpi_scale);
             const float status_bar_height = ScaleForDpi(kStatusBarHeight, dpi_scale);
             const float status_bar_gap = ScaleForDpi(kStatusBarGap, dpi_scale);
             const float status_bar_bottom_padding = ScaleForDpi(kStatusBarBottomPadding, dpi_scale);
             const float status_bar_top = std::max(
-                kOuterPadding + kHeaderHeight + 1.0f,
+                outer_padding + header_height + ScaleForDpi(1.0f, dpi_scale),
                 height - status_bar_bottom_padding - status_bar_height);
 
             if (m_show_status_bar)
             {
                 m_status_bar_rect = MakeRenderRect(
-                    kOuterPadding,
+                    outer_padding,
                     status_bar_top,
-                    std::max(width - kOuterPadding, kOuterPadding + 1.0f),
-                    std::max(status_bar_top + status_bar_height, status_bar_top + 1.0f));
+                    std::max(width - outer_padding, outer_padding + ScaleForDpi(1.0f, dpi_scale)),
+                    std::max(status_bar_top + status_bar_height, status_bar_top + ScaleForDpi(1.0f, dpi_scale)));
             }
             else
             {
@@ -2401,12 +2483,12 @@ namespace space_scanner::gui
             }
 
             m_canvas_rect = MakeRenderRect(
-                kOuterPadding,
-                kOuterPadding + kHeaderHeight,
-                std::max(width - kOuterPadding, kOuterPadding + 1.0f),
+                outer_padding,
+                outer_padding + header_height,
+                std::max(width - outer_padding, outer_padding + ScaleForDpi(1.0f, dpi_scale)),
                 std::max(
-                    (m_show_status_bar ? status_bar_top - status_bar_gap : height - kOuterPadding),
-                    kOuterPadding + kHeaderHeight + 1.0f));
+                    (m_show_status_bar ? status_bar_top - status_bar_gap : height - outer_padding),
+                    outer_padding + header_height + ScaleForDpi(1.0f, dpi_scale)));
         }
 
         void RebuildLayout()
