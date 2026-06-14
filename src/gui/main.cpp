@@ -1288,6 +1288,12 @@ namespace space_scanner::gui
             return std::max(minimum_width, measured_width);
         }
 
+        int GetButtonControlWidth(HWND button, int minimum_width, int horizontal_padding) const
+        {
+            const int measured_width = MeasureControlTextWidth(button) + (horizontal_padding * 2);
+            return std::max(minimum_width, measured_width);
+        }
+
         void CreateHeaderControls()
         {
             HFONT gui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -1537,9 +1543,10 @@ namespace space_scanner::gui
 
             const int scan_group_left = control_left + 2;
             const int scan_group_top_inner = group_top + 10;
-            const int browse_width = 94;
-            const int scan_width = 74;
-            const int reset_width = 72;
+            const int action_button_horizontal_padding = 20;
+            const int browse_width = GetButtonControlWidth(m_browse_button, 94, action_button_horizontal_padding);
+            const int scan_width = GetButtonControlWidth(m_scan_button, 74, action_button_horizontal_padding);
+            const int reset_width = GetButtonControlWidth(m_reset_button, 72, action_button_horizontal_padding);
             const int button_gap = group_box_horizontal_padding;
             const int browse_left = control_left + control_area_width - 12 - browse_width;
             const int scan_left = browse_left - button_gap - scan_width;
