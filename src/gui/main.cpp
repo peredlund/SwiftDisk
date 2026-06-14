@@ -1577,19 +1577,15 @@ namespace space_scanner::gui
 
             const int scan_group_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
             const int scan_group_top_inner = group_top + ScaleIntForDpi(10.0f, dpi_scale);
-            const int action_button_horizontal_padding = ScaleIntForDpi(20.0f, dpi_scale);
-            const int browse_width = GetButtonControlWidth(
-                m_browse_button,
-                ScaleIntForDpi(94.0f, dpi_scale),
-                action_button_horizontal_padding);
-            const int scan_width = GetButtonControlWidth(
-                m_scan_button,
-                ScaleIntForDpi(74.0f, dpi_scale),
-                action_button_horizontal_padding);
-            const int reset_width = GetButtonControlWidth(
-                m_reset_button,
-                ScaleIntForDpi(72.0f, dpi_scale),
-                action_button_horizontal_padding);
+            const int action_button_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
+            const int action_button_width = std::max({
+                GetButtonControlWidth(m_browse_button, 0, action_button_horizontal_padding),
+                GetButtonControlWidth(m_scan_button, 0, action_button_horizontal_padding),
+                GetButtonControlWidth(m_reset_button, 0, action_button_horizontal_padding)
+            });
+            const int browse_width = action_button_width;
+            const int scan_width = action_button_width;
+            const int reset_width = action_button_width;
             const int button_gap = group_box_horizontal_padding;
             const int browse_left = control_left + control_area_width - ScaleIntForDpi(12.0f, dpi_scale) - browse_width;
             const int scan_left = browse_left - button_gap - scan_width;
