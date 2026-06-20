@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "gui/app_settings.h"
 #include "gui/direct2d_renderer.h"
 
 #include "common/file_tree.h"
@@ -77,16 +78,31 @@ namespace swift_disk::gui
         std::wstring display_text;
     };
 
+    std::wstring TrimPathQuoteCharacters(std::wstring path)
+    {
+        while (!path.empty() && path.front() == L'"')
+        {
+            path.erase(path.begin());
+        }
+        while (!path.empty() && path.back() == L'"')
+        {
+            path.pop_back();
+        }
+        return path;
+    }
+
     std::wstring NormalizeScanPath(const std::wstring& path)
     {
-        if (path.size() == 2 &&
-            ((path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z')) &&
-            path[1] == L':')
+        std::wstring normalized_path = TrimPathQuoteCharacters(path);
+        if (normalized_path.size() == 2 &&
+            ((normalized_path[0] >= L'A' && normalized_path[0] <= L'Z') ||
+                (normalized_path[0] >= L'a' && normalized_path[0] <= L'z')) &&
+            normalized_path[1] == L':')
         {
-            return path + L'\\';
+            return normalized_path + L'\\';
         }
 
-        return path;
+        return normalized_path;
     }
 
     wchar_t ToUpperDriveLetter(wchar_t drive_letter)
@@ -233,6 +249,18 @@ namespace swift_disk::gui
         }
 
         return _wcsicmp(file_system_name, L"NTFS") == 0;
+    }
+
+    bool IsExistingDirectoryPath(const std::wstring& path)
+    {
+        if (path.empty())
+        {
+            return false;
+        }
+
+        const DWORD attributes = GetFileAttributesW(path.c_str());
+        return attributes != INVALID_FILE_ATTRIBUTES &&
+            (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
     }
 
     GuiOptions ParseOptions()
@@ -385,6 +413,11 @@ namespace swift_disk::gui
             m_shared_scan_state(std::make_shared<SharedScanState>()),
             m_requested_path_is_ntfs(IsNtfsPath(m_options.path))
         {
+            const AppSettings settings = LoadAppSettings();
+            m_max_depth = settings.GetMaxDepth();
+            m_show_tooltip = settings.GetShowTooltip();
+            m_show_status_bar = settings.GetShowStatusBar();
+            m_last_scan_path = NormalizeScanPath(settings.GetLastScanPath());
         }
 
         bool Create(HINSTANCE instance, int show_command)
@@ -489,6 +522,8 @@ namespace swift_disk::gui
                 CreateHeaderControls();
                 if (!m_options.path.empty())
                 {
+                    m_last_scan_path = m_options.path;
+                    SaveCurrentAppSettings();
                     StartScan();
                 }
                 else
@@ -575,6 +610,7 @@ namespace swift_disk::gui
                 }
                 break;
             case WM_DESTROY:
+                SaveCurrentAppSettings();
                 StopTooltipAnimation();
                 DestroyControlHoverTracking();
                 DestroyControlThemeResources();
@@ -1326,10 +1362,25 @@ namespace swift_disk::gui
             return std::max(minimum_width, measured_width);
         }
 
+        std::wstring GetInitialPathFieldValue() const
+        {
+            if (!m_options.path.empty())
+            {
+                return m_options.path;
+            }
+
+            if (IsExistingDirectoryPath(m_last_scan_path))
+            {
+                return m_last_scan_path;
+            }
+
+            return GetDefaultPathFieldValue();
+        }
+
         void CreateHeaderControls()
         {
             HFONT gui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-            const std::wstring initial_path = m_options.path.empty() ? GetDefaultPathFieldValue() : m_options.path;
+            const std::wstring initial_path = GetInitialPathFieldValue();
 
             m_path_edit = CreateWindowExW(
                 0,
@@ -1347,8 +1398,8 @@ namespace swift_disk::gui
             if (m_path_edit)
             {
                 m_path_combo_edit = FindWindowExW(m_path_edit, nullptr, L"Edit", nullptr);
-                RefreshNtfsDriveDropdown();
                 SetWindowTextW(m_path_edit, initial_path.c_str());
+                RefreshNtfsDriveDropdown();
             }
 
             m_scan_button = CreateWindowExW(
@@ -1787,6 +1838,7 @@ namespace swift_disk::gui
             SendMessageW(m_path_edit, WM_SETREDRAW, FALSE, 0);
             SendMessageW(m_path_edit, CB_RESETCONTENT, 0, 0);
             int selected_index = -1;
+            std::wstring display_text = current_text;
             for (const DriveListEntry& entry : m_ntfs_drive_entries)
             {
                 const int item_index = static_cast<int>(SendMessageW(
@@ -1797,6 +1849,7 @@ namespace swift_disk::gui
                 if (current_text == entry.display_text || current_text == entry.root_path)
                 {
                     selected_index = item_index;
+                    display_text = entry.display_text;
                 }
             }
             if (selected_index >= 0)
@@ -1807,7 +1860,7 @@ namespace swift_disk::gui
                     static_cast<WPARAM>(selected_index),
                     0);
             }
-            SetWindowTextW(m_path_edit, current_text.c_str());
+            SetWindowTextW(m_path_edit, display_text.c_str());
             SendMessageW(m_path_edit, WM_SETREDRAW, TRUE, 0);
             InvalidateRect(m_path_edit, nullptr, TRUE);
         }
@@ -1911,6 +1964,16 @@ namespace swift_disk::gui
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }
 
+        void SaveCurrentAppSettings() const
+        {
+            AppSettings settings;
+            settings.SetMaxDepth(m_max_depth);
+            settings.SetShowTooltip(m_show_tooltip);
+            settings.SetShowStatusBar(m_show_status_bar);
+            settings.SetLastScanPath(m_last_scan_path);
+            SaveAppSettings(settings);
+        }
+
         void ApplyDepthLimit(int depth_limit)
         {
             const int clamped_depth_limit = std::clamp(depth_limit, 1, 32);
@@ -1920,6 +1983,7 @@ namespace swift_disk::gui
             }
 
             m_max_depth = clamped_depth_limit;
+            SaveCurrentAppSettings();
             m_expanded_reveal_nodes.clear();
             if (m_tree && !m_scan_in_progress)
             {
@@ -2111,15 +2175,17 @@ namespace swift_disk::gui
                 return;
             }
 
-            const std::wstring path = TrimWhitespace(GetPathFromEdit());
+            const std::wstring path = NormalizeScanPath(TrimWhitespace(GetPathFromEdit()));
             if (path.empty())
             {
                 MessageBoxW(m_hwnd, L"Please enter a folder path to scan.", L"SwiftDisk", MB_OK | MB_ICONINFORMATION);
                 return;
             }
 
-            m_options.path = NormalizeScanPath(path);
+            m_options.path = path;
             m_requested_path_is_ntfs = IsNtfsPath(m_options.path);
+            m_last_scan_path = m_options.path;
+            SaveCurrentAppSettings();
             StartScan();
         }
 
@@ -2174,6 +2240,7 @@ namespace swift_disk::gui
             {
                 m_show_tooltip = !m_show_tooltip;
                 SetCheckboxState(m_show_tooltip_check, m_show_tooltip);
+                SaveCurrentAppSettings();
                 if (!m_show_tooltip)
                 {
                     StopTooltipAnimation();
@@ -2194,6 +2261,7 @@ namespace swift_disk::gui
             {
                 m_show_status_bar = !m_show_status_bar;
                 SetCheckboxState(m_show_status_bar_check, m_show_status_bar);
+                SaveCurrentAppSettings();
                 RebuildLayout();
                 InvalidateCanvas();
                 return;
@@ -3317,6 +3385,7 @@ namespace swift_disk::gui
         std::vector<BreadcrumbStrip> m_breadcrumbs;
         bool m_show_tooltip = true;
         bool m_show_status_bar = false;
+        std::wstring m_last_scan_path;
         bool m_updating_depth_edit = false;
         bool m_tooltip_animation_active = false;
         bool m_suppress_next_left_button_down = false;
