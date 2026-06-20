@@ -10,7 +10,7 @@
 #include <sstream>
 #include <utility>
 
-namespace space_scanner::ntfs
+namespace swift_disk::ntfs
 {
 
 namespace
@@ -441,4 +441,4 @@ bool ValidateVolumeWithWin32(
     return true;
 }
 
-} // namespace space_scanner::ntfs
+} // namespace swift_disk::ntfs

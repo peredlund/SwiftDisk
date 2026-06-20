@@ -7,7 +7,7 @@
 
 #include "common/file_tree.h"
 
-namespace space_scanner::visualization
+namespace swift_disk::visualization
 {
 
 struct TreemapLayoutOptions
@@ -61,4 +61,4 @@ TreemapVisualStyle BuildTreemapVisualStyle(
     const std::wstring& path,
     bool is_dir);
 
-} // namespace space_scanner::visualization
+} // namespace swift_disk::visualization

@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace space_scanner
+namespace swift_disk
 {
 
 struct Node
@@ -62,4 +62,4 @@ class FileTree
     mutable std::unordered_map<uint64_t, std::wstring> m_path_cache;
 };
 
-} // namespace space_scanner
+} // namespace swift_disk

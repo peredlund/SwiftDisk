@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace space_scanner::ntfs
+namespace swift_disk::ntfs
 {
 
 namespace
@@ -427,4 +427,4 @@ bool ExtractMftDataRuns(uint8_t* record, size_t record_size, uint32_t bytes_per_
     return false;
 }
 
-} // namespace space_scanner::ntfs
+} // namespace swift_disk::ntfs

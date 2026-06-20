@@ -1,6 +1,6 @@
 #include "common/stopwatch.h"
 
-namespace space_scanner
+namespace swift_disk
 {
 
 /**
@@ -31,4 +31,4 @@ double Stopwatch::ElapsedSeconds() const
     return elapsed.count();
 }
 
-} // namespace space_scanner
+} // namespace swift_disk

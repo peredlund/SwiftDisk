@@ -9,7 +9,7 @@
 #include <cstring>
 #include <iterator>
 
-namespace space_scanner::ntfs
+namespace swift_disk::ntfs
 {
 
 namespace
@@ -395,4 +395,4 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
     return true;
 }
 
-} // namespace space_scanner::ntfs
+} // namespace swift_disk::ntfs

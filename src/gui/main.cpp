@@ -27,7 +27,7 @@
 #include "core/ntfs/mft_scanner.h"
 #include "visualization/treemap.h"
 
-namespace space_scanner::gui
+namespace swift_disk::gui
 {
 
     using Microsoft::WRL::ComPtr;
@@ -396,7 +396,7 @@ namespace space_scanner::gui
             window_class.hInstance = instance;
             window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
             window_class.hbrBackground = nullptr;
-            window_class.lpszClassName = L"SpaceScannerMainWindow";
+            window_class.lpszClassName = L"SwiftDiskMainWindow";
             if (!RegisterClassExW(&window_class))
             {
                 return false;
@@ -405,7 +405,7 @@ namespace space_scanner::gui
             m_hwnd = CreateWindowExW(
                 0,
                 window_class.lpszClassName,
-                L"SpaceScanner",
+                L"SwiftDisk",
                 WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
@@ -448,7 +448,7 @@ namespace space_scanner::gui
         static constexpr float kTooltipAnimationSmoothing = 0.38f;
         static constexpr float kTooltipAnimationSnapDistance = 1.5f;
         static constexpr size_t kMaxBreadcrumbStrips = 5;
-        static constexpr const wchar_t* kControlWindowPropName = L"SpaceScannerMainWindow";
+        static constexpr const wchar_t* kControlWindowPropName = L"SwiftDiskMainWindow";
         static constexpr BYTE kWindowBackgroundRed = 23;
         static constexpr BYTE kWindowBackgroundGreen = 27;
         static constexpr BYTE kWindowBackgroundBlue = 32;
@@ -2114,7 +2114,7 @@ namespace space_scanner::gui
             const std::wstring path = TrimWhitespace(GetPathFromEdit());
             if (path.empty())
             {
-                MessageBoxW(m_hwnd, L"Please enter a folder path to scan.", L"SpaceScanner", MB_OK | MB_ICONINFORMATION);
+                MessageBoxW(m_hwnd, L"Please enter a folder path to scan.", L"SwiftDisk", MB_OK | MB_ICONINFORMATION);
                 return;
             }
 
@@ -2907,7 +2907,7 @@ namespace space_scanner::gui
                     MessageBoxW(
                         m_hwnd,
                         L"The selected path could not be copied to the clipboard.",
-                        L"SpaceScanner",
+                        L"SwiftDisk",
                         MB_OK | MB_ICONERROR);
                 }
             }
@@ -2927,7 +2927,7 @@ namespace space_scanner::gui
                 MessageBoxW(
                     m_hwnd,
                     L"Windows could not open this file. Try Open with...",
-                    L"SpaceScanner",
+                    L"SwiftDisk",
                     MB_OK | MB_ICONERROR);
             }
         }
@@ -2949,7 +2949,7 @@ namespace space_scanner::gui
                 MessageBoxW(
                     m_hwnd,
                     L"Windows could not show Open with for this file.",
-                    L"SpaceScanner",
+                    L"SwiftDisk",
                     MB_OK | MB_ICONERROR);
             }
         }
@@ -2972,7 +2972,7 @@ namespace space_scanner::gui
                 MessageBoxW(
                     m_hwnd,
                     L"File Explorer could not open the selected path.",
-                    L"SpaceScanner",
+                    L"SwiftDisk",
                     MB_OK | MB_ICONERROR);
             }
         }
@@ -2992,7 +2992,7 @@ namespace space_scanner::gui
                 MessageBoxW(
                     m_hwnd,
                     L"Windows could not open the selected path properties.",
-                    L"SpaceScanner",
+                    L"SwiftDisk",
                     MB_OK | MB_ICONERROR);
             }
         }
@@ -3335,26 +3335,26 @@ namespace space_scanner::gui
         std::vector<std::pair<HWND, WNDPROC>> m_subclassed_controls;
     };
 
-} // namespace space_scanner::gui
+} // namespace swift_disk::gui
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
 {
     SetProcessDPIAware();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
-    space_scanner::gui::GuiOptions options = space_scanner::gui::ParseOptions();
+    swift_disk::gui::GuiOptions options = swift_disk::gui::ParseOptions();
     if (options.show_help)
     {
         MessageBoxW(
             nullptr,
-            L"SpaceScanner GUI\n\nUsage:\n  space_scanner_gui.exe --path C:\\\n",
-            L"SpaceScanner",
+            L"SwiftDisk GUI\n\nUsage:\n  swift_disk_gui.exe --path C:\\\n",
+            L"SwiftDisk",
             MB_OK | MB_ICONINFORMATION);
         CoUninitialize();
         return 0;
     }
 
-    space_scanner::gui::MainWindow window(std::move(options));
+    swift_disk::gui::MainWindow window(std::move(options));
     if (!window.Create(instance, show_command))
     {
         CoUninitialize();

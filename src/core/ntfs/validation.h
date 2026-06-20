@@ -8,7 +8,7 @@
 #include "common/file_tree.h"
 #include "core/ntfs/mft_scanner.h"
 
-namespace space_scanner::ntfs
+namespace swift_disk::ntfs
 {
 
 struct ValidationMismatch
@@ -61,4 +61,4 @@ bool ValidateVolumeWithWin32(
     ValidationReport* out_report,
     std::wstring* error);
 
-} // namespace space_scanner::ntfs
+} // namespace swift_disk::ntfs

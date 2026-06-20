@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace space_scanner::ntfs
+namespace swift_disk::ntfs
 {
 
 struct DataRun;
@@ -55,4 +55,4 @@ class NtfsVolume
     std::wstring m_volume_path;
 };
 
-} // namespace space_scanner::ntfs
+} // namespace swift_disk::ntfs

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <unordered_set>
 
-namespace space_scanner
+namespace swift_disk
 {
 
 /**
@@ -339,4 +339,4 @@ std::wstring FileTree::BuildPath(uint64_t id) const
     return path;
 }
 
-} // namespace space_scanner
+} // namespace swift_disk

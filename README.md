@@ -1,4 +1,4 @@
-# SpaceScanner
+# SwiftDisk
 
 Open-source, commercial-friendly disk space analyzer for Windows. The long-term goal is a WizTree-like UX using the NTFS MFT for very fast scans and a native Win32 + Direct2D UI.
 
@@ -34,12 +34,12 @@ cmake --open build
 
 ## Run
 ```powershell
-build\Release\space_scanner_cli.exe scan --path C:\
-build\Release\space_scanner_cli.exe scan --path E:\Video
-build\Release\space_scanner_gui.exe --path C:\
+build\Release\swift_disk_cli.exe scan --path C:\
+build\Release\swift_disk_cli.exe scan --path E:\Video
+build\Release\swift_disk_gui.exe --path C:\
 ```
 
-Note: `space_scanner_gui.exe` is built to request administrator privileges on launch, so Windows will show a UAC prompt when you start it.
+Note: `swift_disk_gui.exe` is built to request administrator privileges on launch, so Windows will show a UAC prompt when you start it.
 This is because reading the NTFS MFT requires direct volume access and need elevated privileges.
 This tool opens volumes read-only and refuses to scan if write access is requested.
 

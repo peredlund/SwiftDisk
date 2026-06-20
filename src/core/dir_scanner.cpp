@@ -5,7 +5,7 @@
 #include <cwchar>
 #include <vector>
 
-namespace space_scanner
+namespace swift_disk
 {
 
 /**
@@ -132,4 +132,4 @@ bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_
     return true;
 }
 
-} // namespace space_scanner
+} // namespace swift_disk

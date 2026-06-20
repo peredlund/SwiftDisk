@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace space_scanner::ntfs
+namespace swift_disk::ntfs
 {
 
 struct DataRun
@@ -28,4 +28,4 @@ struct ParsedRecord
 bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sector, uint64_t frn, ParsedRecord* out);
 bool ExtractMftDataRuns(uint8_t* record, size_t record_size, uint32_t bytes_per_sector, std::vector<DataRun>* runs, uint64_t* data_size);
 
-} // namespace space_scanner::ntfs
+} // namespace swift_disk::ntfs

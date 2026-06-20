@@ -1,4 +1,4 @@
-# SpaceScanner NTFS MFT Parsing and Size Aggregation
+# SwiftDisk NTFS MFT Parsing and Size Aggregation
 
 This document explains how the current codebase scans NTFS by reading the Master File Table (MFT), parses MFT records, builds an in-memory tree, and computes file/folder sizes.
 

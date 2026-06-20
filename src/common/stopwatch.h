@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-namespace space_scanner
+namespace swift_disk
 {
 
 /**
@@ -20,4 +20,4 @@ class Stopwatch
     std::chrono::steady_clock::time_point m_start;
 };
 
-} // namespace space_scanner
+} // namespace swift_disk

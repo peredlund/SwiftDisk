@@ -12,7 +12,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace space_scanner::visualization
+namespace swift_disk::visualization
 {
 
 namespace
@@ -896,4 +896,4 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, const TreemapL
     return BuildTreemapLayout(tree, tree.RootId(), options);
 }
 
-} // namespace space_scanner::visualization
+} // namespace swift_disk::visualization

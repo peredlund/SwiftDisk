@@ -11,7 +11,7 @@
 #include <sstream>
 #include <utility>
 
-namespace space_scanner::gui
+namespace swift_disk::gui
 {
 
 
@@ -888,7 +888,7 @@ namespace space_scanner::gui
         return value * m_ui_scale;
     }
 
-} // namespace space_scanner::gui
+} // namespace swift_disk::gui
 
 
 
@@ -900,7 +900,7 @@ namespace space_scanner::gui
 #include <cwchar>
 #include <sstream>
 
-namespace space_scanner::gui
+namespace swift_disk::gui
 {
 
     namespace
@@ -1638,7 +1638,7 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
     DrawHeaderGroupBox(state.treemap_group_rect, L"Treemap");
 
     DrawTextLine(
-        L"SpaceScanner",
+        L"SwiftDisk",
         RenderTextFormat::Title,
         MakeRenderRect(
             state.header_info_rect.left,
@@ -1996,7 +1996,7 @@ void Direct2DRenderer::DrawStatusBar(const MainWindowDrawingState& state)
 }
 
 
-} // namespace space_scanner::gui
+} // namespace swift_disk::gui
 
 
 

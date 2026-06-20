@@ -4,9 +4,9 @@
 
 #include "common/file_tree.h"
 
-namespace space_scanner
+namespace swift_disk
 {
 
 bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_root_id);
 
-} // namespace space_scanner
+} // namespace swift_disk

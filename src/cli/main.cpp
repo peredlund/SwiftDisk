@@ -14,7 +14,7 @@
 #include "core/dir_scanner.h"
 #include "core/ntfs/mft_scanner.h"
 #include "core/ntfs/validation.h"
-namespace space_scanner
+namespace swift_disk
 {
 
 struct Options
@@ -67,10 +67,10 @@ bool IsNtfsPath(const std::wstring& path)
 
 void PrintUsage()
 {
-    std::wcout << L"SpaceScanner CLI\n";
+    std::wcout << L"SwiftDisk CLI\n";
     std::wcout << L"Usage:\n";
-    std::wcout << L"  space_scanner_cli.exe scan --path C:\\\n";
-    std::wcout << L"  space_scanner_cli.exe scan --path C:\\\\Users\n";
+    std::wcout << L"  swift_disk_cli.exe scan --path C:\\\n";
+    std::wcout << L"  swift_disk_cli.exe scan --path C:\\\\Users\n";
     std::wcout << L"Options:\n";
     std::wcout
         << L"  --top N          Number of entries to list (default 20)\n";
@@ -468,7 +468,7 @@ bool WriteJsonReport(const std::wstring& path, const Options& options,
     return true;
 }
 
-} // namespace space_scanner
+} // namespace swift_disk
 
 /**
  CLI entry point that runs NTFS or directory scan and prints summary.
@@ -481,7 +481,7 @@ bool WriteJsonReport(const std::wstring& path, const Options& options,
  **/
 int wmain(int argc, wchar_t* argv[])
 {
-    using namespace space_scanner;
+    using namespace swift_disk;
 
     Options options;
     if (!ParseArgs(argc, argv, &options))

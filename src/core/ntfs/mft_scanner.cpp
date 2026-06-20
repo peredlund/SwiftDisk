@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace space_scanner::ntfs
+namespace swift_disk::ntfs
 {
 
 namespace
@@ -384,4 +384,4 @@ bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* er
     return true;
 }
 
-} // namespace space_scanner::ntfs
+} // namespace swift_disk::ntfs

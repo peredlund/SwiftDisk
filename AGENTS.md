@@ -1,4 +1,4 @@
-# SpaceScanner Instructions
+# SwiftDisk Instructions
 
 These instructions apply to the entire repository unless a more specific `AGENTS.md` exists in a subdirectory.
 

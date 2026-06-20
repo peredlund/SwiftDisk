@@ -4,7 +4,7 @@
 
 #include "common/file_tree.h"
 
-namespace space_scanner::ntfs
+namespace swift_disk::ntfs
 {
 
 struct MftScanStats
@@ -28,4 +28,4 @@ struct MftScanStats
 bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, MftScanStats* out_stats);
 bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* error, MftScanStats* out_stats);
 
-} // namespace space_scanner::ntfs
+} // namespace swift_disk::ntfs

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace space_scanner::gui
+namespace swift_disk::gui
 {
 
     struct RenderPoint
@@ -51,4 +51,4 @@ namespace space_scanner::gui
         return RenderRect{ left, top, right, bottom };
     }
 
-} // namespace space_scanner::gui
+} // namespace swift_disk::gui

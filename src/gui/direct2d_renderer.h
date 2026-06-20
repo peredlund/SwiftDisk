@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace space_scanner::gui
+namespace swift_disk::gui
 {
 
     inline constexpr float kOuterPadding = 18.0f;
@@ -77,7 +77,7 @@ namespace space_scanner::gui
     class Direct2DRenderer;
 
     /**
-    Draws the SpaceScanner main window using Direct2D.
+    Draws the SwiftDisk main window using Direct2D.
     **/
     class MainWindowPainter
     {
@@ -99,4 +99,4 @@ namespace space_scanner::gui
         std::unique_ptr<Direct2DRenderer> m_renderer;
     };
 
-} // namespace space_scanner::gui
+} // namespace swift_disk::gui
