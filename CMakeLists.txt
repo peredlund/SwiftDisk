@@ -46,6 +46,8 @@ else()
 endif()
 
 add_executable(swift_disk_gui WIN32
+    src/gui/app_settings.cpp
+    src/gui/app_settings.h
     src/gui/direct2d_renderer.cpp
     src/gui/direct2d_renderer.h
     src/gui/drawing_state.h
@@ -54,6 +56,7 @@ add_executable(swift_disk_gui WIN32
 
 target_link_libraries(swift_disk_gui PRIVATE
     swift_disk_core
+    advapi32
     d2d1
     dwrite
     shell32
