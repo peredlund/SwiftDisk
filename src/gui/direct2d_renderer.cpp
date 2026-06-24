@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cwchar>
+#include <iterator>
 #include <memory>
 #include <sstream>
 #include <utility>
@@ -149,6 +150,7 @@ namespace swift_disk::gui
 
     using Microsoft::WRL::ComPtr;
 
+    //Use unnamed namespace to aviod external linkage for local helper functions.
     namespace
     {
 
@@ -216,8 +218,6 @@ namespace swift_disk::gui
             rect.bottom + amount);
     }
 
-    }
-
     D2D1_COLOR_F MakeD2DColor(std::uint8_t red, std::uint8_t green, std::uint8_t blue, float alpha = 1.0f)
     {
         return D2D1::ColorF(
@@ -225,6 +225,61 @@ namespace swift_disk::gui
             static_cast<float>(green) / 255.0f,
             static_cast<float>(blue) / 255.0f,
             alpha);
+    }
+
+    std::wstring HumanizeBytes(std::uint64_t bytes)
+    {
+        static constexpr const wchar_t* kUnits[] = { L"B", L"KiB", L"MiB", L"GiB", L"TiB", L"PiB" };
+        double value = static_cast<double>(bytes);
+        size_t unit_index = 0;
+        while (value >= 1024.0 && unit_index + 1 < std::size(kUnits))
+        {
+            value /= 1024.0;
+            ++unit_index;
+        }
+
+        wchar_t buffer[64] = {};
+        swprintf_s(buffer, L"%.2f %s", value, kUnits[unit_index]);
+        return buffer;
+    }
+
+    std::wstring FormatSeconds(double seconds)
+    {
+        wchar_t buffer[64] = {};
+        swprintf_s(buffer, L"%.2f s", seconds);
+        return buffer;
+    }
+
+    D2D1_COLOR_F ParseHexColor(const std::string& value, float alpha = 1.0f)
+    {
+        if (value.size() != 7 || value[0] != '#')
+        {
+            return MakeD2DColor(120, 150, 190, alpha);
+        }
+
+        auto hex = [](char ch) -> std::uint8_t
+        {
+            if (ch >= '0' && ch <= '9')
+            {
+                return static_cast<std::uint8_t>(ch - '0');
+            }
+            if (ch >= 'a' && ch <= 'f')
+            {
+                return static_cast<std::uint8_t>(10 + ch - 'a');
+            }
+            if (ch >= 'A' && ch <= 'F')
+            {
+                return static_cast<std::uint8_t>(10 + ch - 'A');
+            }
+            return 0;
+        };
+
+        const std::uint8_t red = static_cast<std::uint8_t>((hex(value[1]) << 4) | hex(value[2]));
+        const std::uint8_t green = static_cast<std::uint8_t>((hex(value[3]) << 4) | hex(value[4]));
+        const std::uint8_t blue = static_cast<std::uint8_t>((hex(value[5]) << 4) | hex(value[6]));
+        return MakeD2DColor(red, green, blue, alpha);
+    }
+
     }
 
     HRESULT Direct2DRenderer::CreateDeviceResources(HWND hwnd, const RenderVisualPalette& palette)
@@ -888,83 +943,6 @@ namespace swift_disk::gui
         return value * m_ui_scale;
     }
 
-} // namespace swift_disk::gui
-
-
-
-
-#include "gui/direct2d_renderer.h"
-
-#include <algorithm>
-#include <cmath>
-#include <cwchar>
-#include <sstream>
-
-namespace swift_disk::gui
-{
-
-    namespace
-    {
-        std::wstring HumanizeBytes(std::uint64_t bytes)
-        {
-            static constexpr const wchar_t* kUnits[] = { L"B", L"KiB", L"MiB", L"GiB", L"TiB", L"PiB" };
-            double value = static_cast<double>(bytes);
-            size_t unit_index = 0;
-            while (value >= 1024.0 && unit_index + 1 < std::size(kUnits))
-            {
-                value /= 1024.0;
-                ++unit_index;
-            }
-
-            wchar_t buffer[64] = {};
-            swprintf_s(buffer, L"%.2f %s", value, kUnits[unit_index]);
-            return buffer;
-        }
-
-        std::wstring FormatSeconds(double seconds)
-        {
-            wchar_t buffer[64] = {};
-            swprintf_s(buffer, L"%.2f s", seconds);
-            return buffer;
-        }
-
-        D2D1_COLOR_F ColorFromRgb(BYTE red, BYTE green, BYTE blue, float alpha = 1.0f)
-        {
-            return D2D1::ColorF(static_cast<float>(red) / 255.0f, static_cast<float>(green) / 255.0f, static_cast<float>(blue) / 255.0f, alpha);
-        }
-
-        D2D1_COLOR_F ParseHexColor(const std::string& value, float alpha = 1.0f)
-        {
-            if (value.size() != 7 || value[0] != '#')
-            {
-                return ColorFromRgb(120, 150, 190, alpha);
-            }
-
-            auto hex = [](char ch) -> std::uint8_t
-                {
-                    if (ch >= '0' && ch <= '9')
-                    {
-                        return static_cast<std::uint8_t>(ch - '0');
-                    }
-                    if (ch >= 'a' && ch <= 'f')
-                    {
-                        return static_cast<std::uint8_t>(10 + ch - 'a');
-                    }
-                    if (ch >= 'A' && ch <= 'F')
-                    {
-                        return static_cast<std::uint8_t>(10 + ch - 'A');
-                    }
-                    return 0;
-                };
-
-            const BYTE red = static_cast<BYTE>((hex(value[1]) << 4) | hex(value[2]));
-            const BYTE green = static_cast<BYTE>((hex(value[3]) << 4) | hex(value[4]));
-            const BYTE blue = static_cast<BYTE>((hex(value[5]) << 4) | hex(value[6]));
-            return D2D1::ColorF(static_cast<float>(red) / 255.0f, static_cast<float>(green) / 255.0f, static_cast<float>(blue) / 255.0f, alpha);
-        }
-
-    }
-
     MainWindowPainter::MainWindowPainter()
         : m_renderer(std::make_unique<Direct2DRenderer>())
     {
@@ -1020,7 +998,7 @@ namespace swift_disk::gui
         }
         else
         {
-            Clear(ColorFromRgb(
+            Clear(MakeD2DColor(
                 state.palette.window_background_red,
                 state.palette.window_background_green,
                 state.palette.window_background_blue));
@@ -1262,6 +1240,13 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
         return;
     }
 
+    if (!state.rects || !state.breadcrumbs)
+    {
+        return;
+    }
+
+    const auto& rects = *state.rects;
+    const auto& breadcrumbs = *state.breadcrumbs;
     const Node* focused_node = state.tree->GetNode(state.view_root_id);
     const std::wstring focused_path = focused_node
         ? state.tree->BuildPath(state.view_root_id)
@@ -1275,7 +1260,7 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
         focused_name,
         focused_path,
         true);
-    if ((*state.breadcrumbs).empty())
+    if (breadcrumbs.empty())
     {
         const RenderRect shadow_rect = MakeRenderRect(
             state.focus_up_rect.left + Scale(8.0f),
@@ -1308,9 +1293,9 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
     }
     else
     {
-        for (size_t index = 0; index < (*state.breadcrumbs).size(); ++index)
+        for (size_t index = 0; index < breadcrumbs.size(); ++index)
         {
-            const BreadcrumbStrip& strip = (*state.breadcrumbs)[index];
+            const BreadcrumbStrip& strip = breadcrumbs[index];
             if (!IsRenderRectEmpty(state.paint_rect) &&
                 !RenderRectsIntersect(InflateRenderRect(strip.frame_rect, Scale(12.0f)), state.paint_rect))
             {
@@ -1398,9 +1383,9 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
     m_tile_brush->SetColor(ParseHexColor(frame_style.fill_color));
     FillRectangle(state.treemap_content_rect, m_tile_brush.Get());
 
-    for (size_t index = 0; index < (*state.rects).size(); ++index)
+    for (size_t index = 0; index < rects.size(); ++index)
     {
-        const visualization::TreemapRect& rect = (*state.rects)[index];
+        const visualization::TreemapRect& rect = rects[index];
         const RenderRect draw_rect = MakeRenderRect(
             state.treemap_content_rect.left + static_cast<float>(rect.x),
             state.treemap_content_rect.top + static_cast<float>(rect.y),
@@ -1720,14 +1705,16 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
         return false;
     }
 
-    if (state.scan_in_progress || !state.tree)
+    if (state.scan_in_progress || !state.tree || !state.rects || !state.breadcrumbs)
     {
         return false;
     }
 
-    if (state.hovered_breadcrumb_index >= 0 && state.hovered_breadcrumb_index < static_cast<int>((*state.breadcrumbs).size()))
+    const auto& rects = *state.rects;
+    const auto& breadcrumbs = *state.breadcrumbs;
+    if (state.hovered_breadcrumb_index >= 0 && state.hovered_breadcrumb_index < static_cast<int>(breadcrumbs.size()))
     {
-        const BreadcrumbStrip& strip = (*state.breadcrumbs)[static_cast<size_t>(state.hovered_breadcrumb_index)];
+        const BreadcrumbStrip& strip = breadcrumbs[static_cast<size_t>(state.hovered_breadcrumb_index)];
         *hovered_bounds = strip.rect;
         *follow_tooltip = true;
 
@@ -1746,9 +1733,9 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
         return true;
     }
 
-    if (state.hovered_index >= 0 && state.hovered_index < static_cast<int>((*state.rects).size()))
+    if (state.hovered_index >= 0 && state.hovered_index < static_cast<int>(rects.size()))
     {
-        const visualization::TreemapRect& rect = (*state.rects)[static_cast<size_t>(state.hovered_index)];
+        const visualization::TreemapRect& rect = rects[static_cast<size_t>(state.hovered_index)];
         *hovered_bounds = GetHoveredRectBounds(state, rect);
         *follow_tooltip = true;
         *name_text = rect.path.empty() ? rect.label : rect.path;
