@@ -7,13 +7,21 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(swift_disk_core
     src/common/file_tree.cpp
+    src/common/file_tree.h
     src/common/stopwatch.cpp
+    src/common/stopwatch.h
     src/core/dir_scanner.cpp
+    src/core/dir_scanner.h
     src/core/ntfs/mft_parser.cpp
+    src/core/ntfs/mft_parser.h
     src/core/ntfs/mft_scanner.cpp
+    src/core/ntfs/mft_scanner.h
     src/core/ntfs/validation.cpp
+    src/core/ntfs/validation.h
     src/core/ntfs/ntfs_volume.cpp
+    src/core/ntfs/ntfs_volume.h
     src/visualization/treemap.cpp
+    src/visualization/treemap.h
 )
 
 target_include_directories(swift_disk_core PUBLIC
