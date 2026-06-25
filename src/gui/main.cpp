@@ -21,6 +21,7 @@
 
 #include "gui/app_settings.h"
 #include "gui/direct2d_renderer.h"
+#include "gui/resource.h"
 
 #include "common/file_tree.h"
 #include "common/stopwatch.h"
@@ -427,6 +428,22 @@ namespace swift_disk::gui
             window_class.style = CS_HREDRAW | CS_VREDRAW;
             window_class.lpfnWndProc = &MainWindow::WindowProc;
             window_class.hInstance = instance;
+            window_class.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_SWIFT_DISK_APP));
+            if (!window_class.hIcon)
+            {
+                window_class.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+            }
+            window_class.hIconSm = static_cast<HICON>(LoadImageW(
+                instance,
+                MAKEINTRESOURCEW(IDI_SWIFT_DISK_APP),
+                IMAGE_ICON,
+                GetSystemMetrics(SM_CXSMICON),
+                GetSystemMetrics(SM_CYSMICON),
+                LR_DEFAULTCOLOR | LR_SHARED));
+            if (!window_class.hIconSm)
+            {
+                window_class.hIconSm = window_class.hIcon;
+            }
             window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
             window_class.hbrBackground = nullptr;
             window_class.lpszClassName = L"SwiftDiskMainWindow";

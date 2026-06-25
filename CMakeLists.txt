@@ -53,6 +53,14 @@ else()
     target_compile_options(swift_disk_cli PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+set(SWIFT_DISK_GUI_RESOURCES)
+if (WIN32)
+    enable_language(RC)
+    list(APPEND SWIFT_DISK_GUI_RESOURCES
+        src/gui/swift_disk_gui.rc
+    )
+endif()
+
 add_executable(swift_disk_gui WIN32
     src/gui/app_settings.cpp
     src/gui/app_settings.h
@@ -60,6 +68,8 @@ add_executable(swift_disk_gui WIN32
     src/gui/direct2d_renderer.h
     src/gui/drawing_state.h
     src/gui/main.cpp
+    src/gui/resource.h
+    ${SWIFT_DISK_GUI_RESOURCES}
 )
 
 target_link_libraries(swift_disk_gui PRIVATE

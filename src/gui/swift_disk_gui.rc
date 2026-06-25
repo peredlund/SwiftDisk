@@ -1,0 +1,3 @@
+#include "resource.h"
+
+IDI_SWIFT_DISK_APP ICON "../../assets/swiftdisk-icon-cyan-bolt-blocks.ico"
