@@ -37,7 +37,6 @@ struct TreemapRect
     double height = 0.0;
     bool is_dir = false;
     std::wstring label;
-    std::wstring path;
     std::string fill_color;
     std::string label_text_color;
     std::string secondary_text_color;

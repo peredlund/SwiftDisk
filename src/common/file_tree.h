@@ -15,6 +15,7 @@ struct Node
     std::wstring name;
     bool is_dir = false;
     uint64_t size = 0;
+    uint64_t path_hash = 0;
 };
 
 /**
@@ -47,6 +48,7 @@ class FileTree
     uint64_t RootId() const;
 
     void Finalize();
+    void RefreshPathHashes();
     TreeStats ComputeStats() const;
     std::vector<const Node*> GetAllNodes() const;
     const std::vector<uint64_t>* GetChildIds(uint64_t id) const;
@@ -55,11 +57,11 @@ class FileTree
 
   private:
     size_t GetDepth(uint64_t id, std::unordered_map<uint64_t, size_t>& cache) const;
+    void RefreshPathHashesFromOrderedIds(const std::vector<uint64_t>& ids, bool deepest_first);
 
     uint64_t m_root_id = 0;
     std::unordered_map<uint64_t, Node> m_nodes;
     std::unordered_map<uint64_t, std::vector<uint64_t>> m_children;
-    mutable std::unordered_map<uint64_t, std::wstring> m_path_cache;
 };
 
 } // namespace swift_disk

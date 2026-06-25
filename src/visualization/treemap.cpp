@@ -30,10 +30,10 @@ struct LayoutItem
 {
     uint64_t node_id = 0;
     uint64_t size = 0;
+    uint64_t color_hash = 0;
     bool is_dir = false;
     bool is_hidden = false;
     std::wstring label;
-    std::wstring path;
 };
 
 struct ChildCollection
@@ -107,7 +107,7 @@ uint64_t SumSizes(const std::vector<LayoutItem>& items, size_t begin, size_t end
     return total;
 }
 
-uint64_t HashPath(const std::wstring& value)
+uint64_t HashText(std::wstring_view value)
 {
     uint64_t hash = 1469598103934665603ull;
     for (wchar_t ch : value)
@@ -206,16 +206,15 @@ TextPalette TextColorsForFill(std::string_view fill_color)
     return {"#102033", "#102033", "#f8fbff", "#f8fbff"};
 }
 
-std::string ColorForItem(const LayoutItem& item)
+std::string ColorForHash(uint64_t hash, bool is_dir)
 {
-    const uint64_t hash = HashPath(item.path.empty() ? item.label : item.path);
     const uint32_t base = static_cast<uint32_t>(hash & 0x00FFFFFFu);
 
     uint32_t red = 64u + ((base >> 16) & 0x7Fu);
     uint32_t green = 64u + ((base >> 8) & 0x7Fu);
     uint32_t blue = 64u + (base & 0x7Fu);
 
-    if (item.is_dir)
+    if (is_dir)
     {
         red = std::min<uint32_t>(red + 18u, 220u);
         green = std::min<uint32_t>(green + 14u, 220u);
@@ -229,6 +228,18 @@ std::string ColorForItem(const LayoutItem& item)
     }
 
     return HexColor((red << 16) | (green << 8) | blue);
+}
+
+TreemapVisualStyle BuildTreemapVisualStyleFromHash(uint64_t color_hash, bool is_dir)
+{
+    TreemapVisualStyle style;
+    style.fill_color = ColorForHash(color_hash, is_dir);
+    const TextPalette palette = TextColorsForFill(style.fill_color);
+    style.label_text_color = palette.primary;
+    style.secondary_text_color = palette.secondary;
+    style.text_outline_color = palette.outline;
+    style.text_plate_color = palette.plate;
+    return style;
 }
 
 bool IsExpandedNode(const std::unordered_set<uint64_t>& expanded_nodes, uint64_t node_id)
@@ -276,7 +287,7 @@ ChildCollection CollectChildren(
         item.size = child->size;
         item.is_dir = child->is_dir;
         item.label = child->name.empty() ? L"(unnamed)" : child->name;
-        item.path = tree.BuildPath(child->id);
+        item.color_hash = child->path_hash == 0 ? HashText(item.label) : child->path_hash;
         collection.total_size += item.size;
         collection.items.push_back(std::move(item));
     }
@@ -348,8 +359,7 @@ void EmitNodeRect(
     rect.height = bounds.height;
     rect.is_dir = item.is_dir;
     rect.label = item.label;
-    rect.path = item.path;
-    const TreemapVisualStyle style = BuildTreemapVisualStyle(item.label, item.path, item.is_dir);
+    const TreemapVisualStyle style = BuildTreemapVisualStyleFromHash(item.color_hash, item.is_dir);
     rect.fill_color = style.fill_color;
     rect.label_text_color = style.label_text_color;
     rect.secondary_text_color = style.secondary_text_color;
@@ -536,7 +546,7 @@ void EmitVisibleSubtree(
     item.size = node->size;
     item.is_dir = node->is_dir;
     item.label = node->name.empty() ? (node->id == root_id ? L"(root)" : L"(unnamed)") : node->name;
-    item.path = tree.BuildPath(node->id);
+    item.color_hash = node->path_hash == 0 ? HashText(item.label) : node->path_hash;
     EmitNodeRect(item, depth, bounds, rects);
 
     if (!node->is_dir)
@@ -724,17 +734,11 @@ TreemapVisualStyle BuildTreemapVisualStyle(
 {
     LayoutItem item;
     item.label = label;
-    item.path = path;
+    const std::wstring_view color_key = path.empty() ? std::wstring_view(label) : std::wstring_view(path);
+    item.color_hash = HashText(color_key);
     item.is_dir = is_dir;
 
-    TreemapVisualStyle style;
-    style.fill_color = ColorForItem(item);
-    const TextPalette palette = TextColorsForFill(style.fill_color);
-    style.label_text_color = palette.primary;
-    style.secondary_text_color = palette.secondary;
-    style.text_outline_color = palette.outline;
-    style.text_plate_color = palette.plate;
-    return style;
+    return BuildTreemapVisualStyleFromHash(item.color_hash, item.is_dir);
 }
 
 /**
@@ -873,7 +877,7 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
         item.size = root->size;
         item.is_dir = root->is_dir;
         item.label = root->name.empty() ? L"(root)" : root->name;
-        item.path = tree.BuildPath(root->id);
+        item.color_hash = root->path_hash == 0 ? HashText(item.label) : root->path_hash;
         EmitNodeRect(item, 0, root_bounds, &rects);
         return rects;
     }

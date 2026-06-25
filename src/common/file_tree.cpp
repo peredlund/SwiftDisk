@@ -6,6 +6,35 @@
 namespace swift_disk
 {
 
+namespace
+{
+
+constexpr uint64_t kFnvOffsetBasis = 1469598103934665603ull;
+constexpr uint64_t kFnvPrime = 1099511628211ull;
+
+uint64_t AppendPathHashCharacter(uint64_t hash, wchar_t ch)
+{
+    hash ^= static_cast<uint64_t>(static_cast<uint16_t>(ch));
+    hash *= kFnvPrime;
+    return hash;
+}
+
+uint64_t AppendPathHashString(uint64_t hash, const std::wstring& value)
+{
+    for (wchar_t ch : value)
+    {
+        hash = AppendPathHashCharacter(hash, ch);
+    }
+    return hash;
+}
+
+uint64_t HashPathComponent(const std::wstring& value)
+{
+    return AppendPathHashString(kFnvOffsetBasis, value);
+}
+
+} // namespace
+
 /**
  Inserts or replaces a node and updates parent-child indices.
  
@@ -55,7 +84,6 @@ void FileTree::Reserve(size_t node_count)
 {
     m_nodes.reserve(node_count);
     m_children.reserve(node_count);
-    m_path_cache.reserve(node_count);
 }
 
 void FileTree::SetRootId(uint64_t id)
@@ -144,7 +172,79 @@ void FileTree::Finalize()
         parent_it->second.size += node.size;
     }
 
-    m_path_cache.clear();
+    RefreshPathHashesFromOrderedIds(ids, true);
+}
+
+/**
+ Refreshes compact full-path hashes for every node without building full path
+ strings. The hashes let treemap layout keep stable per-path colors without a
+ retained full-path cache.
+ **/
+void FileTree::RefreshPathHashes()
+{
+    std::unordered_map<uint64_t, size_t> depth_cache;
+    std::vector<uint64_t> ids;
+    ids.reserve(m_nodes.size());
+    for (const auto& entry : m_nodes)
+    {
+        ids.push_back(entry.first);
+    }
+
+    std::sort(ids.begin(), ids.end(), 
+        [&](uint64_t a, uint64_t b) { return GetDepth(a, depth_cache) < GetDepth(b, depth_cache); });
+
+    RefreshPathHashesFromOrderedIds(ids, false);
+}
+
+void FileTree::RefreshPathHashesFromOrderedIds(const std::vector<uint64_t>& ids, bool deepest_first)
+{
+    auto refresh_node = [&](uint64_t id)
+    {
+        auto it = m_nodes.find(id);
+        if (it == m_nodes.end())
+        {
+            return;
+        }
+
+        Node& node = it->second;
+        if (node.parent_id == 0 || node.parent_id == node.id || node.id == m_root_id)
+        {
+            node.path_hash = node.name.empty() ? kFnvOffsetBasis : HashPathComponent(node.name);
+            return;
+        }
+
+        auto parent_it = m_nodes.find(node.parent_id);
+        if (parent_it == m_nodes.end())
+        {
+            node.path_hash = node.name.empty() ? kFnvOffsetBasis : HashPathComponent(node.name);
+            return;
+        }
+
+        uint64_t hash = parent_it->second.path_hash;
+        if (!node.name.empty())
+        {
+            if (hash != kFnvOffsetBasis)
+            {
+                hash = AppendPathHashCharacter(hash, L'\\');
+            }
+            hash = AppendPathHashString(hash, node.name);
+        }
+        node.path_hash = hash;
+    };
+
+    if (deepest_first)
+    {
+        for (auto it = ids.rbegin(); it != ids.rend(); ++it)
+        {
+            refresh_node(*it);
+        }
+        return;
+    }
+
+    for (uint64_t id : ids)
+    {
+        refresh_node(id);
+    }
 }
 
 /**
@@ -287,12 +387,6 @@ std::vector<const Node*> FileTree::TopN(size_t n) const
  **/
 std::wstring FileTree::BuildPath(uint64_t id) const
 {
-    auto cached = m_path_cache.find(id);
-    if (cached != m_path_cache.end())
-    {
-        return cached->second;
-    }
-
     std::vector<std::wstring> parts;
     uint64_t current = id;
     size_t guard = 0;
@@ -335,7 +429,6 @@ std::wstring FileTree::BuildPath(uint64_t id) const
         path.append(*it);
     }
 
-    m_path_cache[id] = path;
     return path;
 }
 

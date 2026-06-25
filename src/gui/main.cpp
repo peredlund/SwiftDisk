@@ -2671,13 +2671,10 @@ namespace swift_disk::gui
             m_layout_options.minimum_label_width = 72.0 * dpi_scale;
             m_layout_options.minimum_label_height = 28.0 * dpi_scale;
             m_layout_options.max_depth = local_depth_limit;
-            m_layout_options.max_rectangles = 20000;
+            m_layout_options.max_rectangles = 100000;
             m_layout_options.max_children_per_directory = 0;
             m_layout_options.minimum_child_ratio = 0.0;
             m_layout_options.expanded_node_ids.assign(m_expanded_reveal_nodes.begin(), m_expanded_reveal_nodes.end());
-            //m_layout_options.max_rectangles = 5000;
-            //m_layout_options.max_children_per_directory = 56;
-            //m_layout_options.minimum_child_ratio = 0.0015;
             m_rects = visualization::BuildTreemapLayout(*m_tree, m_view_root_id, m_layout_options);
         }
 

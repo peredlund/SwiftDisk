@@ -1738,7 +1738,15 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
         const visualization::TreemapRect& rect = rects[static_cast<size_t>(state.hovered_index)];
         *hovered_bounds = GetHoveredRectBounds(state, rect);
         *follow_tooltip = true;
-        *name_text = rect.path.empty() ? rect.label : rect.path;
+        if (state.tree)
+        {
+            const std::wstring path = state.tree->BuildPath(rect.node_id);
+            *name_text = path.empty() ? rect.label : path;
+        }
+        else
+        {
+            *name_text = rect.label;
+        }
         *size_text = L"Size: " + HumanizeBytes(rect.size);
         return true;
     }

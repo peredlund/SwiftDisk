@@ -377,6 +377,7 @@ bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* er
         }
     }
 
+    tree->RefreshPathHashes();
     if (out_stats)
     {
         *out_stats = stats;
