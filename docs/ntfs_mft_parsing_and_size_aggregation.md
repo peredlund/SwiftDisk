@@ -53,7 +53,7 @@ Primary NTFS path:
 5. `FileTree::Finalize` for bottom-up folder aggregation
 6. `FileTree::ComputeStats` for totals/reachability
 
-CLI entry (`src/cli/main.cpp`) runs this pipeline and prints scan/stats/top-N output.
+The GUI entry (`src/gui/main.cpp`) runs this pipeline and renders the resulting tree as an interactive treemap.
 
 ## 3. Reading Raw MFT Bytes
 

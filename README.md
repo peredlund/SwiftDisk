@@ -3,11 +3,11 @@
 Open-source, commercial-friendly disk space analyzer for Windows. The long-term goal is a WizTree-like UX using the NTFS MFT for very fast scans and a native Win32 + Direct2D UI.
 
 ## Status
-- Core scanning engine and CLI are in place.
+- Core scanning engine and GUI are in place.
 - NTFS MFT scanning is implemented for local NTFS volumes.
-- GUI shell is now in place (Win32 + Direct2D/DirectWrite) with clickable treemap navigation and in-app path selection.
+- Native Win32 + Direct2D/DirectWrite UI is in place with clickable treemap navigation and in-app path selection.
 
-## Build (CLI)
+## Build
 ```powershell
 cmake -S . -B build
 cmake --build build --config Release
@@ -34,8 +34,6 @@ cmake --open build
 
 ## Run
 ```powershell
-build\Release\swift_disk_cli.exe scan --path C:\
-build\Release\swift_disk_cli.exe scan --path E:\Video
 build\Release\swift_disk_gui.exe --path C:\
 ```
 

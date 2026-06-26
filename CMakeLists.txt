@@ -41,18 +41,6 @@ target_compile_definitions(swift_disk_core PRIVATE
     _UNICODE
 )
 
-add_executable(swift_disk_cli
-    src/cli/main.cpp
-)
-
-target_link_libraries(swift_disk_cli PRIVATE swift_disk_core)
-
-if (MSVC)
-    target_compile_options(swift_disk_cli PRIVATE /W4 /permissive- /EHsc)
-else()
-    target_compile_options(swift_disk_cli PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
 set(SWIFT_DISK_GUI_RESOURCES)
 if (WIN32)
     enable_language(RC)
