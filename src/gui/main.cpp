@@ -1284,6 +1284,13 @@ namespace swift_disk::gui
                     return result;
                 }
                 break;
+            case WM_KEYDOWN:
+                if (IsPathFieldControl(control) && w_param == VK_RETURN)
+                {
+                    BeginScanFromPathShortcut();
+                    return 0;
+                }
+                break;
             case WM_MOUSELEAVE:
                 OnControlMouseLeave(control);
                 break;
@@ -1967,6 +1974,35 @@ namespace swift_disk::gui
             }
         }
 
+        void CommitVisiblePathDropdownSelection()
+        {
+            if (!m_path_edit || !SendMessageW(m_path_edit, CB_GETDROPPEDSTATE, 0, 0))
+            {
+                return;
+            }
+
+            const LRESULT selected_index = SendMessageW(m_path_edit, CB_GETCURSEL, 0, 0);
+            if (selected_index == CB_ERR)
+            {
+                return;
+            }
+
+            const LRESULT text_length = SendMessageW(m_path_edit, CB_GETLBTEXTLEN, selected_index, 0);
+            if (text_length == CB_ERR || text_length < 0)
+            {
+                return;
+            }
+
+            std::wstring selected_text(static_cast<size_t>(text_length) + 1, L'\0');
+            SendMessageW(
+                m_path_edit,
+                CB_GETLBTEXT,
+                static_cast<WPARAM>(selected_index),
+                reinterpret_cast<LPARAM>(selected_text.data()));
+            selected_text.resize(static_cast<size_t>(text_length));
+            SetWindowTextW(m_path_edit, selected_text.c_str());
+        }
+
         void SetScanControlsEnabled(bool enabled)
         {
             if (m_path_edit)
@@ -2271,6 +2307,13 @@ namespace swift_disk::gui
             StartScan();
         }
 
+        void BeginScanFromPathShortcut()
+        {
+            CommitVisiblePathDropdownSelection();
+            HidePathDropdown();
+            BeginScanFromUiPath();
+        }
+
         void OnCommand(int control_id, int notification_code, HWND control)
         {
             if (control_id == IDC_PATH_EDIT && control == m_path_edit)
@@ -2376,6 +2419,7 @@ namespace swift_disk::gui
                 {
                     SendMessageW(m_path_edit, CB_SETCURSEL, static_cast<WPARAM>(-1), 0);
                     SetWindowTextW(m_path_edit, selected_path.c_str());
+                    SetFocus(m_path_combo_edit ? m_path_combo_edit : m_path_edit);
                 }
             }
         }
@@ -3295,6 +3339,10 @@ namespace swift_disk::gui
             if (key_code == VK_BACK)
             {
                 NavigateUp();
+            }
+            else if (key_code == VK_RETURN)
+            {
+                BeginScanFromPathShortcut();
             }
             else if (key_code == VK_HOME && m_tree)
             {
