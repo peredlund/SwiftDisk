@@ -250,6 +250,24 @@ namespace swift_disk::gui
         return buffer;
     }
 
+    std::wstring GetVolumeSpaceTargetText(const std::wstring& volume_root_path)
+    {
+        std::wstring target = volume_root_path;
+        std::replace(target.begin(), target.end(), L'/', L'\\');
+
+        while (target.size() > 3 && target.back() == L'\\')
+        {
+            target.pop_back();
+        }
+
+        if (target.size() >= 2 && target[1] == L':')
+        {
+            return target.substr(0, 2);
+        }
+
+        return target.empty() ? L"volume" : target;
+    }
+
     D2D1_COLOR_F ParseHexColor(const std::string& value, float alpha = 1.0f)
     {
         if (value.size() != 7 || value[0] != '#')
@@ -1641,6 +1659,12 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
     const std::wstring focused_size = focused_node
         ? HumanizeBytes(focused_node->size)
         : L"-";
+    const Node* scanned_root_node = state.tree
+        ? state.tree->GetNode(state.tree->RootId())
+        : nullptr;
+    const std::wstring scanned_size = scanned_root_node
+        ? HumanizeBytes(scanned_root_node->size)
+        : L"-";
 
     DrawTextLine(
         focused_path,
@@ -1655,13 +1679,30 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
     std::wstringstream summary;
     if (state.scan_in_progress)
     {
-        summary << L"Backend: " << (state.requested_path_is_ntfs ? L"NTFS MFT" : L"Directory")
-            << L"  |  Status: scanning";
+        summary << L"Status: scanning";
     }
     else if (state.tree)
     {
-        summary << L"Backend: " << (state.used_mft_scan ? L"NTFS MFT" : L"Directory")
-            << L"  |  Focus size: " << focused_size
+        if (state.has_volume_space_info)
+        {
+            summary << L"Total: " << HumanizeBytes(state.volume_total_bytes)
+                << L"  |  Scanned: " << scanned_size
+                << L"  |  ";
+            if (state.scanned_path_is_volume_root)
+            {
+                summary << L"Free: ";
+            }
+            else
+            {
+                summary << L"Free on " << GetVolumeSpaceTargetText(state.volume_root_path) << L" ";
+            }
+            summary << HumanizeBytes(state.volume_free_bytes);
+        }
+        else
+        {
+            summary << L"Scanned: " << scanned_size;
+        }
+        summary << L"  |  Current: " << focused_size
             << L"  |  Nodes: " << state.tree->NodeCount()
             << L"  |  Scan: " << FormatSeconds(state.elapsed_seconds);
     }
@@ -1676,7 +1717,7 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
 
     DrawTextLine(
         summary.str(),
-        RenderTextFormat::Body,
+        RenderTextFormat::Small,
         MakeRenderRect(
             state.header_info_rect.left,
             state.header_info_rect.top + Scale(68.0f),
