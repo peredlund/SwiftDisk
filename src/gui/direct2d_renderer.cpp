@@ -1247,13 +1247,14 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
                 state.canvas_rect.top + Scale(70.0f)),
             m_text_brush.Get());
         DrawTextLine(
-            L"Choose a folder above, then click Scan or Browse to start.",
+            L"Choose a folder above, then click Scan or press Enter.\n"
+            L"See Help for controls, options, and navigation.",
             RenderTextFormat::Body,
             MakeRenderRect(
                 state.canvas_rect.left + Scale(24.0f),
                 state.canvas_rect.top + Scale(78.0f),
                 state.canvas_rect.right - Scale(24.0f),
-                state.canvas_rect.top + Scale(104.0f)),
+                state.canvas_rect.top + Scale(128.0f)),
             m_muted_brush.Get());
         return;
     }
