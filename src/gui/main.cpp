@@ -45,8 +45,9 @@ namespace swift_disk::gui
     constexpr int IDC_SHOW_STATUS_BAR_CHECK = 1007;
     constexpr int IDC_DEPTH_UP_BUTTON = 1008;
     constexpr int IDC_DEPTH_DOWN_BUTTON = 1009;
-    constexpr int IDC_RESET_BUTTON = 1010;
+    constexpr int IDC_HOME_BUTTON = 1010;
     constexpr int IDC_HELP_BUTTON = 1011;
+    constexpr int IDC_CLEAR_BUTTON = 1012;
     constexpr int IDC_HELP_TEXT = 1101;
     constexpr int IDC_HELP_CLOSE_BUTTON = 1102;
     constexpr int IDM_TREEMAP_OPEN_IN_EXPLORER = 2001;
@@ -1087,8 +1088,9 @@ namespace swift_disk::gui
             {
             case IDC_SCAN_BUTTON:
             case IDC_BROWSE_BUTTON:
-            case IDC_RESET_BUTTON:
+            case IDC_HOME_BUTTON:
             case IDC_HELP_BUTTON:
+            case IDC_CLEAR_BUTTON:
             case IDC_DEPTH_UP_BUTTON:
             case IDC_DEPTH_DOWN_BUTTON:
                 DrawCustomButton(*draw_item);
@@ -1128,8 +1130,9 @@ namespace swift_disk::gui
                 control == m_path_combo_edit ||
                 control == m_scan_button ||
                 control == m_browse_button ||
-                control == m_reset_button ||
+                control == m_home_button ||
                 control == m_help_button ||
+                control == m_clear_button ||
                 control == m_depth_edit ||
                 control == m_depth_up_button ||
                 control == m_depth_down_button ||
@@ -1349,8 +1352,9 @@ namespace swift_disk::gui
             AddControlHoverTracking(m_path_combo_edit);
             AddControlHoverTracking(m_scan_button);
             AddControlHoverTracking(m_browse_button);
-            AddControlHoverTracking(m_reset_button);
+            AddControlHoverTracking(m_home_button);
             AddControlHoverTracking(m_help_button);
+            AddControlHoverTracking(m_clear_button);
             AddControlHoverTracking(m_depth_edit);
             AddControlHoverTracking(m_depth_up_button);
             AddControlHoverTracking(m_depth_down_button);
@@ -1532,17 +1536,31 @@ namespace swift_disk::gui
                 nullptr,
                 nullptr);
 
-            m_reset_button = CreateWindowExW(
+            m_home_button = CreateWindowExW(
                 0,
                 L"BUTTON",
-                L"Reset view",
+                L"Home",
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
                 0,
                 0,
                 0,
                 0,
                 m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_RESET_BUTTON)),
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_HOME_BUTTON)),
+                nullptr,
+                nullptr);
+
+            m_clear_button = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Clear",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                0,
+                0,
+                0,
+                0,
+                m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_CLEAR_BUTTON)),
                 nullptr,
                 nullptr);
 
@@ -1661,9 +1679,13 @@ namespace swift_disk::gui
             {
                 SendMessageW(m_browse_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
             }
-            if (m_reset_button)
+            if (m_home_button)
             {
-                SendMessageW(m_reset_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+                SendMessageW(m_home_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+            }
+            if (m_clear_button)
+            {
+                SendMessageW(m_clear_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
             }
             if (m_help_button)
             {
@@ -1752,13 +1774,15 @@ namespace swift_disk::gui
             const int action_button_width = std::max({
                 GetButtonControlWidth(m_browse_button, 0, action_button_horizontal_padding),
                 GetButtonControlWidth(m_scan_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_reset_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_help_button, 0, action_button_horizontal_padding)
+                GetButtonControlWidth(m_home_button, 0, action_button_horizontal_padding),
+                GetButtonControlWidth(m_help_button, 0, action_button_horizontal_padding),
+                GetButtonControlWidth(m_clear_button, 0, action_button_horizontal_padding)
             });
             const int browse_width = action_button_width;
             const int scan_width = action_button_width;
-            const int reset_width = action_button_width;
+            const int home_width = action_button_width;
             const int help_width = action_button_width;
+            const int clear_width = action_button_width;
             const int button_gap = group_box_horizontal_padding;
             const int browse_left = control_left + control_area_width - ScaleIntForDpi(12.0f, dpi_scale) - browse_width;
             const int scan_left = browse_left - button_gap - scan_width;
@@ -1789,10 +1813,11 @@ namespace swift_disk::gui
                 depth_label_width + depth_label_gap + depth_edit_width + depth_button_gap + depth_button_width;
             const int treemap_control_gap = group_box_horizontal_padding;
             const int treemap_group_width = (group_box_horizontal_padding * 2) +
-                depth_group_width + treemap_control_gap + reset_width;
+                depth_group_width + treemap_control_gap + home_width + button_gap + clear_width;
             const int treemap_group_left = display_group_left + display_group_width + lower_group_gap;
             const int depth_controls_left = treemap_group_left + group_box_horizontal_padding;
-            const int reset_left = depth_controls_left + depth_group_width + treemap_control_gap;
+            const int home_left = depth_controls_left + depth_group_width + treemap_control_gap;
+            const int clear_left = home_left + home_width + button_gap;
             const int help_left = browse_left;
 
             m_header_info_rect = MakeRenderRect(
@@ -1842,9 +1867,13 @@ namespace swift_disk::gui
             {
                 MoveWindow(m_scan_button, scan_left, scan_group_top_inner, scan_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
             }
-            if (m_reset_button)
+            if (m_home_button)
             {
-                MoveWindow(m_reset_button, reset_left, depth_controls_top, reset_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
+                MoveWindow(m_home_button, home_left, depth_controls_top, home_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
+            }
+            if (m_clear_button)
+            {
+                MoveWindow(m_clear_button, clear_left, depth_controls_top, clear_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
             }
             if (m_browse_button)
             {
@@ -2040,6 +2069,19 @@ namespace swift_disk::gui
             SetWindowTextW(m_path_edit, selected_text.c_str());
         }
 
+        void UpdateTreemapActionControlsEnabled(bool controls_enabled = true)
+        {
+            const bool enabled = controls_enabled && !m_scan_in_progress && m_tree != nullptr;
+            if (m_home_button)
+            {
+                EnableWindow(m_home_button, enabled);
+            }
+            if (m_clear_button)
+            {
+                EnableWindow(m_clear_button, enabled && !m_expanded_reveal_nodes.empty());
+            }
+        }
+
         void SetScanControlsEnabled(bool enabled)
         {
             if (m_path_edit)
@@ -2050,10 +2092,7 @@ namespace swift_disk::gui
             {
                 EnableWindow(m_scan_button, enabled);
             }
-            if (m_reset_button)
-            {
-                EnableWindow(m_reset_button, enabled && m_tree != nullptr);
-            }
+            UpdateTreemapActionControlsEnabled(enabled);
             if (m_depth_edit)
             {
                 EnableWindow(m_depth_edit, enabled);
@@ -2121,6 +2160,7 @@ namespace swift_disk::gui
         void RebuildAndRedraw()
         {
             RebuildLayout();
+            UpdateTreemapActionControlsEnabled();
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }
 
@@ -2151,14 +2191,26 @@ namespace swift_disk::gui
             }
         }
 
-        void ResetTreemapView()
+        void GoToScanRoot()
         {
             if (!m_tree || m_scan_in_progress)
             {
                 return;
             }
 
-            ApplyFreshScanResultView();
+            m_view_root_id = m_tree->RootId();
+            RebuildAndRedraw();
+        }
+
+        void ClearRememberedExpandedFolders()
+        {
+            if (!m_tree || m_scan_in_progress || m_expanded_reveal_nodes.empty())
+            {
+                return;
+            }
+
+            m_expanded_reveal_nodes.clear();
+            RebuildAndRedraw();
         }
 
         void ApplyFreshScanResultView()
@@ -2391,13 +2443,14 @@ namespace swift_disk::gui
                 L"- The Depth value limits how many levels SwiftDisk expands automatically.\r\n"
                 L"- If you click a folder that is deeper than the current depth limit, SwiftDisk remembers that path as intentionally expanded.\r\n"
                 L"- Remembered expanded folders get one extra reveal level when they appear inside an ancestor view, so the path you drilled into remains easier to follow.\r\n"
-                L"- Changing Depth, starting a fresh scan, or using Reset view clears those remembered expanded folders.\r\n"
+                L"- Changing Depth, starting a fresh scan, or using Clear removes those remembered expanded folders.\r\n"
                 L"\r\n"
                 L"Display options\r\n"
                 L"- Tooltip shows the full path and size for the tile or parent folder bar under the mouse.\r\n"
                 L"- Status bar shows scan and selection details at the bottom of the window.\r\n"
                 L"- Depth controls how many folder levels are visible at once. Lower values keep the view simpler; higher values show more nested folders.\r\n"
-                L"- Reset view returns to the root of the current scan and clears temporary expanded-tile reveal state.";
+                L"- Home returns to the root of the current scan without clearing remembered expanded folders.\r\n"
+                L"- Clear removes remembered expanded folders without changing the current scan.";
         }
 
         static void LayoutHelpWindowControls(HWND hwnd)
@@ -2830,10 +2883,19 @@ namespace swift_disk::gui
                 return;
             }
 
-            if (control_id == IDC_RESET_BUTTON && notification_code == BN_CLICKED)
+            if (control_id == IDC_HOME_BUTTON && control == m_home_button)
             {
                 HidePathDropdown();
-                ResetTreemapView();
+                GoToScanRoot();
+                SetFocus(m_hwnd);
+                return;
+            }
+
+            if (control_id == IDC_CLEAR_BUTTON && control == m_clear_button)
+            {
+                HidePathDropdown();
+                ClearRememberedExpandedFolders();
+                SetFocus(m_hwnd);
                 return;
             }
 
@@ -3933,7 +3995,8 @@ namespace swift_disk::gui
         HWND m_path_combo_edit = nullptr;
         HWND m_scan_button = nullptr;
         HWND m_browse_button = nullptr;
-        HWND m_reset_button = nullptr;
+        HWND m_home_button = nullptr;
+        HWND m_clear_button = nullptr;
         HWND m_help_button = nullptr;
         HWND m_depth_label = nullptr;
         HWND m_depth_edit = nullptr;
