@@ -2357,7 +2357,7 @@ namespace swift_disk::gui
         {
             return
                 L"About SwiftDisk\r\n"
-                L"SwiftDisk helps you find what is using disk space by scanning a drive or folder and showing the result as an interactive treemap. It does this very quickly by bypassing the operating system and instead reading the information directly from a special file.\r\n"
+                L"SwiftDisk helps you find what is using disk space by scanning a drive or folder and showing the result as an interactive treemap. It does this very quickly by bypassing the operating system and instead reading the information directly from the drive's Master File Table file.\r\n"
                 L"\r\n"
                 L"Choose and scan\r\n"
                 L"- Use the path field to choose a drive, or type or paste a folder path.\r\n"
@@ -2382,6 +2382,11 @@ namespace swift_disk::gui
                 L"- Press Backspace or Escape to go up one folder level.\r\n"
                 L"- Press Home to return to the root of the current scan.\r\n"
                 L"\r\n"
+                L"Right-click actions\r\n"
+                L"- Right-click a tile or parent folder bar to open the context menu for that path.\r\n"
+                L"- Files can be opened directly or with Open with....\r\n"
+                L"- Files and folders can be opened in File Explorer, copied as a full path, or shown in Properties.\r\n"
+                L"\r\n"
                 L"Depth and expanded tiles\r\n"
                 L"- The Depth value limits how many levels SwiftDisk expands automatically.\r\n"
                 L"- If you click a folder that is deeper than the current depth limit, SwiftDisk remembers that path as intentionally expanded.\r\n"
@@ -2392,12 +2397,7 @@ namespace swift_disk::gui
                 L"- Tooltip shows the full path and size for the tile or parent folder bar under the mouse.\r\n"
                 L"- Status bar shows scan and selection details at the bottom of the window.\r\n"
                 L"- Depth controls how many folder levels are visible at once. Lower values keep the view simpler; higher values show more nested folders.\r\n"
-                L"- Reset view returns to the root of the current scan and clears temporary expanded-tile reveal state.\r\n"
-                L"\r\n"
-                L"Right-click actions\r\n"
-                L"- Right-click a tile or parent folder bar to open the context menu for that path.\r\n"
-                L"- Files can be opened directly or with Open with....\r\n"
-                L"- Files and folders can be opened in File Explorer, copied as a full path, or shown in Properties.";
+                L"- Reset view returns to the root of the current scan and clears temporary expanded-tile reveal state.";
         }
 
         static void LayoutHelpWindowControls(HWND hwnd)
