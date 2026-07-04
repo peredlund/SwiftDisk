@@ -627,6 +627,9 @@ namespace swift_disk::gui
             case WM_SIZE:
                 OnSize();
                 return 0;
+            case WM_GETMINMAXINFO:
+                OnGetMinMaxInfo(reinterpret_cast<MINMAXINFO*>(l_param));
+                return 0;
             case WM_PAINT:
                 OnPaint();
                 return 0;
@@ -1730,6 +1733,96 @@ namespace swift_disk::gui
             UpdateHeaderControlsLayout();
         }
 
+        int GetRequiredHeaderControlAreaWidth(float dpi_scale) const
+        {
+            const int group_box_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
+            const int action_button_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
+            const int action_button_width = std::max({
+                GetButtonControlWidth(m_browse_button, 0, action_button_horizontal_padding),
+                GetButtonControlWidth(m_scan_button, 0, action_button_horizontal_padding),
+                GetButtonControlWidth(m_home_button, 0, action_button_horizontal_padding),
+                GetButtonControlWidth(m_help_button, 0, action_button_horizontal_padding),
+                GetButtonControlWidth(m_clear_button, 0, action_button_horizontal_padding)
+            });
+            const int button_gap = group_box_horizontal_padding;
+            const int scan_row_width =
+                ScaleIntForDpi(2.0f, dpi_scale) +
+                ScaleIntForDpi(180.0f, dpi_scale) +
+                button_gap +
+                action_button_width +
+                button_gap +
+                action_button_width +
+                ScaleIntForDpi(12.0f, dpi_scale);
+
+            const int display_checkbox_gap = ScaleIntForDpi(4.0f, dpi_scale);
+            const int checkbox_trailing_padding = ScaleIntForDpi(8.0f, dpi_scale);
+            const int show_group_right_padding = group_box_horizontal_padding - checkbox_trailing_padding;
+            const int show_tooltip_width = GetCheckboxControlWidth(m_show_tooltip_check, 0, dpi_scale);
+            const int show_status_bar_width = GetCheckboxControlWidth(m_show_status_bar_check, 0, dpi_scale);
+            const int checkbox_group_width =
+                show_tooltip_width + display_checkbox_gap + show_status_bar_width;
+            const int display_group_width =
+                group_box_horizontal_padding + checkbox_group_width + show_group_right_padding;
+
+            const int depth_label_width =
+                std::max(MeasureControlTextWidth(m_depth_label), ScaleIntForDpi(32.0f, dpi_scale));
+            const int depth_edit_width = ScaleIntForDpi(42.0f, dpi_scale);
+            const int depth_button_width = ScaleIntForDpi(18.0f, dpi_scale);
+            const int depth_button_gap = ScaleIntForDpi(4.0f, dpi_scale);
+            const int depth_label_gap = ScaleIntForDpi(2.0f, dpi_scale);
+            const int depth_group_width =
+                depth_label_width + depth_label_gap + depth_edit_width + depth_button_gap + depth_button_width;
+            const int treemap_control_gap = group_box_horizontal_padding;
+            const int treemap_group_width = (group_box_horizontal_padding * 2) +
+                depth_group_width + treemap_control_gap + action_button_width + button_gap + action_button_width;
+            const int lower_row_width =
+                ScaleIntForDpi(2.0f, dpi_scale) +
+                display_group_width +
+                group_box_horizontal_padding +
+                treemap_group_width +
+                group_box_horizontal_padding +
+                ScaleIntForDpi(12.0f, dpi_scale) +
+                action_button_width;
+
+            return std::max(scan_row_width, lower_row_width);
+        }
+
+        int GetMinimumHeaderClientWidth(float dpi_scale) const
+        {
+            const int outer_padding = ScaleIntForDpi(kOuterPadding, dpi_scale);
+            const int inner_padding = ScaleIntForDpi(22.0f, dpi_scale);
+            const int header_info_min_width = ScaleIntForDpi(120.0f, dpi_scale);
+            const int header_info_gap = ScaleIntForDpi(18.0f, dpi_scale);
+            return std::max(
+                ScaleIntForDpi(640.0f, dpi_scale),
+                GetRequiredHeaderControlAreaWidth(dpi_scale) +
+                    ((outer_padding + inner_padding) * 2) +
+                    header_info_min_width +
+                    header_info_gap);
+        }
+
+        void OnGetMinMaxInfo(MINMAXINFO* info) const
+        {
+            if (!info || !m_hwnd)
+            {
+                return;
+            }
+
+            const float dpi_scale = GetWindowDpiScale(m_hwnd);
+            RECT min_rect = {
+                0,
+                0,
+                GetMinimumHeaderClientWidth(dpi_scale),
+                1
+            };
+            const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(m_hwnd, GWL_STYLE));
+            const DWORD ex_style = static_cast<DWORD>(GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE));
+            AdjustWindowRectEx(&min_rect, style, FALSE, ex_style);
+            info->ptMinTrackSize.x = std::max<LONG>(
+                info->ptMinTrackSize.x,
+                min_rect.right - min_rect.left);
+        }
+
         void UpdateHeaderControlsLayout()
         {
             if (!m_hwnd)
@@ -1746,30 +1839,24 @@ namespace swift_disk::gui
             const int inner_padding = ScaleIntForDpi(22.0f, dpi_scale);
             const int group_gap = ScaleIntForDpi(6.0f, dpi_scale);
             const int group_top = outer_padding + ScaleIntForDpi(4.0f, dpi_scale);
+            const int control_area_right = width - outer_padding - inner_padding;
             const int max_control_area_width = std::max(
                 ScaleIntForDpi(340.0f, dpi_scale),
-                width - (outer_padding * 2) - (inner_padding * 2) - ScaleIntForDpi(140.0f, dpi_scale));
+                width - (outer_padding * 2) - (inner_padding * 2));
             const int min_control_area_width = std::min(ScaleIntForDpi(560.0f, dpi_scale), max_control_area_width);
-            const int control_area_width = std::clamp(
+            const int nominal_control_area_width = std::clamp(
                 static_cast<int>((width - (outer_padding * 2) - (inner_padding * 2)) * 0.48f),
                 min_control_area_width,
                 std::min(ScaleIntForDpi(680.0f, dpi_scale), max_control_area_width));
-            const int control_left = width - outer_padding - inner_padding - control_area_width;
             const int scan_group_height = ScaleIntForDpi(40.0f, dpi_scale);
             const int lower_row_vertical_offset = ScaleIntForDpi(10.0f, dpi_scale);
             const int lower_group_top = group_top + scan_group_height + group_gap + lower_row_vertical_offset;
             const int lower_group_height = ScaleIntForDpi(30.0f, dpi_scale);
-            const int header_info_left = outer_padding + inner_padding;
-            const int header_info_right =
-                std::max(header_info_left + ScaleIntForDpi(120.0f, dpi_scale), control_left - ScaleIntForDpi(18.0f, dpi_scale));
             const int header_text_vertical_offset = ScaleIntForDpi(-5.0f, dpi_scale);
             const int header_text_top = group_top + header_text_vertical_offset;
             const int group_box_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
             const int group_box_top_padding = ScaleIntForDpi(10.0f, dpi_scale);
             const int group_box_bottom_padding = ScaleIntForDpi(9.0f, dpi_scale);
-
-            const int scan_group_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
-            const int scan_group_top_inner = group_top + ScaleIntForDpi(10.0f, dpi_scale);
             const int action_button_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
             const int action_button_width = std::max({
                 GetButtonControlWidth(m_browse_button, 0, action_button_horizontal_padding),
@@ -1784,13 +1871,7 @@ namespace swift_disk::gui
             const int help_width = action_button_width;
             const int clear_width = action_button_width;
             const int button_gap = group_box_horizontal_padding;
-            const int browse_left = control_left + control_area_width - ScaleIntForDpi(12.0f, dpi_scale) - browse_width;
-            const int scan_left = browse_left - button_gap - scan_width;
-            const int edit_width = std::max(
-                ScaleIntForDpi(180.0f, dpi_scale),
-                scan_left - button_gap - scan_group_left);
 
-            const int lower_row_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
             const int display_checkbox_gap = ScaleIntForDpi(4.0f, dpi_scale);
             const int lower_group_gap = group_box_horizontal_padding;
             const int checkbox_trailing_padding = ScaleIntForDpi(8.0f, dpi_scale);
@@ -1799,7 +1880,6 @@ namespace swift_disk::gui
             const int show_status_bar_width = GetCheckboxControlWidth(m_show_status_bar_check, 0, dpi_scale);
             const int checkbox_group_width =
                 show_tooltip_width + display_checkbox_gap + show_status_bar_width;
-            const int display_group_left = lower_row_left;
             const int display_group_width =
                 group_box_horizontal_padding + checkbox_group_width + show_group_right_padding;
 
@@ -1812,13 +1892,32 @@ namespace swift_disk::gui
             const int depth_group_width =
                 depth_label_width + depth_label_gap + depth_edit_width + depth_button_gap + depth_button_width;
             const int treemap_control_gap = group_box_horizontal_padding;
-            const int treemap_group_width = (group_box_horizontal_padding * 2) +
+            const int desired_treemap_group_width = (group_box_horizontal_padding * 2) +
                 depth_group_width + treemap_control_gap + home_width + button_gap + clear_width;
+            const int required_control_area_width = GetRequiredHeaderControlAreaWidth(dpi_scale);
+            const int control_area_width = std::clamp(
+                std::max(nominal_control_area_width, required_control_area_width),
+                min_control_area_width,
+                max_control_area_width);
+            const int control_left = control_area_right - control_area_width;
+            const int scan_group_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
+            const int scan_group_top_inner = group_top + ScaleIntForDpi(10.0f, dpi_scale);
+            const int browse_left = control_left + control_area_width - ScaleIntForDpi(12.0f, dpi_scale) - browse_width;
+            const int scan_left = browse_left - button_gap - scan_width;
+            const int edit_width = std::max(
+                ScaleIntForDpi(180.0f, dpi_scale),
+                scan_left - button_gap - scan_group_left);
+            const int lower_row_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
+            const int display_group_left = lower_row_left;
             const int treemap_group_left = display_group_left + display_group_width + lower_group_gap;
+            const int help_left = browse_left;
+            const int treemap_group_width = desired_treemap_group_width;
             const int depth_controls_left = treemap_group_left + group_box_horizontal_padding;
             const int home_left = depth_controls_left + depth_group_width + treemap_control_gap;
             const int clear_left = home_left + home_width + button_gap;
-            const int help_left = browse_left;
+            const int header_info_left = outer_padding + inner_padding;
+            const int header_info_right =
+                std::max(header_info_left + ScaleIntForDpi(1.0f, dpi_scale), control_left - ScaleIntForDpi(18.0f, dpi_scale));
 
             m_header_info_rect = MakeRenderRect(
                 static_cast<float>(header_info_left),
