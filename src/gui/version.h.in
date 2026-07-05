@@ -1,0 +1,3 @@
+#pragma once
+
+#define SWIFT_DISK_VERSION L"@PROJECT_VERSION@"

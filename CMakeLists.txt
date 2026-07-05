@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(SwiftDisk LANGUAGES CXX)
+project(SwiftDisk VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,6 +49,12 @@ if (WIN32)
     )
 endif()
 
+configure_file(
+    src/gui/version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/gui/version.h
+    @ONLY
+)
+
 add_executable(swift_disk_gui WIN32
     src/gui/app_settings.cpp
     src/gui/app_settings.h
@@ -66,6 +72,10 @@ target_link_libraries(swift_disk_gui PRIVATE
     d2d1
     dwrite
     shell32
+)
+
+target_include_directories(swift_disk_gui PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
 if (MSVC)

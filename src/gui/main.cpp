@@ -22,12 +22,16 @@
 #include "gui/app_settings.h"
 #include "gui/direct2d_renderer.h"
 #include "gui/resource.h"
+#include "gui/version.h"
 
 #include "common/file_tree.h"
 #include "common/stopwatch.h"
 #include "core/dir_scanner.h"
 #include "core/ntfs/mft_scanner.h"
 #include "visualization/treemap.h"
+
+#define SWIFT_DISK_WIDE_STRING_IMPL(value) L##value
+#define SWIFT_DISK_WIDE_STRING(value) SWIFT_DISK_WIDE_STRING_IMPL(value)
 
 namespace swift_disk::gui
 {
@@ -48,8 +52,9 @@ namespace swift_disk::gui
     constexpr int IDC_HOME_BUTTON = 1010;
     constexpr int IDC_HELP_BUTTON = 1011;
     constexpr int IDC_CLEAR_BUTTON = 1012;
-    constexpr int IDC_HELP_TEXT = 1101;
-    constexpr int IDC_HELP_CLOSE_BUTTON = 1102;
+    constexpr int IDC_ABOUT_BUTTON = 1013;
+    constexpr int IDC_INFO_TEXT = 1101;
+    constexpr int IDC_INFO_CLOSE_BUTTON = 1102;
     constexpr int IDM_TREEMAP_OPEN_IN_EXPLORER = 2001;
     constexpr int IDM_TREEMAP_COPY_FULL_PATH = 2002;
     constexpr int IDM_TREEMAP_PROPERTIES = 2003;
@@ -81,7 +86,7 @@ namespace swift_disk::gui
         std::unique_ptr<ScanPayload> pending_payload;
     };
 
-    struct HelpWindowState
+    struct InfoWindowState
     {
         HBRUSH background_brush = nullptr;
         HBRUSH text_background_brush = nullptr;
@@ -1094,6 +1099,7 @@ namespace swift_disk::gui
             case IDC_HOME_BUTTON:
             case IDC_HELP_BUTTON:
             case IDC_CLEAR_BUTTON:
+            case IDC_ABOUT_BUTTON:
             case IDC_DEPTH_UP_BUTTON:
             case IDC_DEPTH_DOWN_BUTTON:
                 DrawCustomButton(*draw_item);
@@ -1136,6 +1142,7 @@ namespace swift_disk::gui
                 control == m_home_button ||
                 control == m_help_button ||
                 control == m_clear_button ||
+                control == m_about_button ||
                 control == m_depth_edit ||
                 control == m_depth_up_button ||
                 control == m_depth_down_button ||
@@ -1358,6 +1365,7 @@ namespace swift_disk::gui
             AddControlHoverTracking(m_home_button);
             AddControlHoverTracking(m_help_button);
             AddControlHoverTracking(m_clear_button);
+            AddControlHoverTracking(m_about_button);
             AddControlHoverTracking(m_depth_edit);
             AddControlHoverTracking(m_depth_up_button);
             AddControlHoverTracking(m_depth_down_button);
@@ -1581,6 +1589,20 @@ namespace swift_disk::gui
                 nullptr,
                 nullptr);
 
+            m_about_button = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"About",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                0,
+                0,
+                0,
+                0,
+                m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_ABOUT_BUTTON)),
+                nullptr,
+                nullptr);
+
             m_depth_label = CreateWindowExW(
                 0,
                 L"STATIC",
@@ -1694,6 +1716,10 @@ namespace swift_disk::gui
             {
                 SendMessageW(m_help_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
             }
+            if (m_about_button)
+            {
+                SendMessageW(m_about_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+            }
             if (m_depth_label)
             {
                 SendMessageW(m_depth_label, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
@@ -1742,7 +1768,8 @@ namespace swift_disk::gui
                 GetButtonControlWidth(m_scan_button, 0, action_button_horizontal_padding),
                 GetButtonControlWidth(m_home_button, 0, action_button_horizontal_padding),
                 GetButtonControlWidth(m_help_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_clear_button, 0, action_button_horizontal_padding)
+                GetButtonControlWidth(m_clear_button, 0, action_button_horizontal_padding),
+                GetButtonControlWidth(m_about_button, 0, action_button_horizontal_padding)
             });
             const int button_gap = group_box_horizontal_padding;
             const int scan_row_width =
@@ -1782,6 +1809,8 @@ namespace swift_disk::gui
                 treemap_group_width +
                 group_box_horizontal_padding +
                 ScaleIntForDpi(12.0f, dpi_scale) +
+                action_button_width +
+                button_gap +
                 action_button_width;
 
             return std::max(scan_row_width, lower_row_width);
@@ -1863,13 +1892,15 @@ namespace swift_disk::gui
                 GetButtonControlWidth(m_scan_button, 0, action_button_horizontal_padding),
                 GetButtonControlWidth(m_home_button, 0, action_button_horizontal_padding),
                 GetButtonControlWidth(m_help_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_clear_button, 0, action_button_horizontal_padding)
+                GetButtonControlWidth(m_clear_button, 0, action_button_horizontal_padding),
+                GetButtonControlWidth(m_about_button, 0, action_button_horizontal_padding)
             });
             const int browse_width = action_button_width;
             const int scan_width = action_button_width;
             const int home_width = action_button_width;
             const int help_width = action_button_width;
             const int clear_width = action_button_width;
+            const int about_width = action_button_width;
             const int button_gap = group_box_horizontal_padding;
 
             const int display_checkbox_gap = ScaleIntForDpi(4.0f, dpi_scale);
@@ -1910,7 +1941,8 @@ namespace swift_disk::gui
             const int lower_row_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
             const int display_group_left = lower_row_left;
             const int treemap_group_left = display_group_left + display_group_width + lower_group_gap;
-            const int help_left = browse_left;
+            const int about_left = browse_left;
+            const int help_left = about_left - button_gap - help_width;
             const int treemap_group_width = desired_treemap_group_width;
             const int depth_controls_left = treemap_group_left + group_box_horizontal_padding;
             const int home_left = depth_controls_left + depth_group_width + treemap_control_gap;
@@ -1981,6 +2013,10 @@ namespace swift_disk::gui
             if (m_help_button)
             {
                 MoveWindow(m_help_button, help_left, depth_controls_top, help_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
+            }
+            if (m_about_button)
+            {
+                MoveWindow(m_about_button, about_left, depth_controls_top, about_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
             }
             if (m_depth_label)
             {
@@ -2211,6 +2247,10 @@ namespace swift_disk::gui
             if (m_help_button)
             {
                 EnableWindow(m_help_button, TRUE);
+            }
+            if (m_about_button)
+            {
+                EnableWindow(m_about_button, TRUE);
             }
             if (m_show_tooltip_check)
             {
@@ -2499,9 +2539,9 @@ namespace swift_disk::gui
             StartScan();
         }
 
-        static const wchar_t* HelpWindowClassName()
+        static const wchar_t* InfoWindowClassName()
         {
-            return L"SwiftDiskHelpWindow";
+            return L"SwiftDiskInfoWindow";
         }
 
         static std::wstring BuildHelpText()
@@ -2552,7 +2592,41 @@ namespace swift_disk::gui
                 L"- Clear removes remembered expanded folders without changing the current scan.";
         }
 
-        static void LayoutHelpWindowControls(HWND hwnd)
+        static std::wstring BuildAboutText()
+        {
+            std::wstringstream stream;
+            stream
+                << L"SwiftDisk\r\n"
+                << L"Version: " << SWIFT_DISK_VERSION << L"\r\n"
+                << L"Build date: " << SWIFT_DISK_WIDE_STRING(__DATE__) << L"\r\n"
+                << L"\r\n"
+                << L"License\r\n"
+                << L"MIT License\r\n"
+                << L"\r\n"
+                << L"Copyright (c) 2026 Per Edlund\r\n"
+                << L"\r\n"
+                << L"Permission is hereby granted, free of charge, to any person obtaining a copy "
+                << L"of this software and associated documentation files (the \"Software\"), to deal "
+                << L"in the Software without restriction, including without limitation the rights "
+                << L"to use, copy, modify, merge, publish, distribute, sublicense, and/or sell "
+                << L"copies of the Software, and to permit persons to whom the Software is "
+                << L"furnished to do so, subject to the following conditions:\r\n"
+                << L"\r\n"
+                << L"The above copyright notice and this permission notice shall be included in all "
+                << L"copies or substantial portions of the Software.\r\n"
+                << L"\r\n"
+                << L"THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR "
+                << L"IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, "
+                << L"FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE "
+                << L"AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER "
+                << L"LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, "
+                << L"OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE "
+                << L"SOFTWARE.";
+
+            return stream.str();
+        }
+
+        static void LayoutInfoWindowControls(HWND hwnd)
         {
             RECT client = {};
             GetClientRect(hwnd, &client);
@@ -2564,11 +2638,11 @@ namespace swift_disk::gui
             const int button_top = std::max(padding, height - padding - button_height);
             const int edit_bottom = std::max(padding, button_top - padding);
 
-            HWND help_text = GetDlgItem(hwnd, IDC_HELP_TEXT);
-            if (help_text)
+            HWND info_text = GetDlgItem(hwnd, IDC_INFO_TEXT);
+            if (info_text)
             {
                 MoveWindow(
-                    help_text,
+                    info_text,
                     padding,
                     padding,
                     std::max(1, width - (padding * 2)),
@@ -2576,7 +2650,7 @@ namespace swift_disk::gui
                     TRUE);
             }
 
-            HWND close_button = GetDlgItem(hwnd, IDC_HELP_CLOSE_BUTTON);
+            HWND close_button = GetDlgItem(hwnd, IDC_INFO_CLOSE_BUTTON);
             if (close_button)
             {
                 MoveWindow(
@@ -2589,12 +2663,12 @@ namespace swift_disk::gui
             }
         }
 
-        static HelpWindowState* GetHelpWindowState(HWND hwnd)
+        static InfoWindowState* GetInfoWindowState(HWND hwnd)
         {
-            return reinterpret_cast<HelpWindowState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            return reinterpret_cast<InfoWindowState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
         }
 
-        static void FillHelpWindowRect(HDC hdc, const RECT& rect, COLORREF color)
+        static void FillInfoWindowRect(HDC hdc, const RECT& rect, COLORREF color)
         {
             HBRUSH brush = CreateSolidBrush(color);
             if (!brush)
@@ -2606,7 +2680,7 @@ namespace swift_disk::gui
             DeleteObject(brush);
         }
 
-        static void DrawHelpWindowFrame(HDC hdc, const RECT& rect, COLORREF color)
+        static void DrawInfoWindowFrame(HDC hdc, const RECT& rect, COLORREF color)
         {
             HPEN pen = CreatePen(PS_SOLID, 1, color);
             if (!pen)
@@ -2622,7 +2696,7 @@ namespace swift_disk::gui
             DeleteObject(pen);
         }
 
-        static void DrawHelpWindowButton(const DRAWITEMSTRUCT& draw_item)
+        static void DrawInfoWindowButton(const DRAWITEMSTRUCT& draw_item)
         {
             if (!draw_item.hDC || !draw_item.hwndItem)
             {
@@ -2644,8 +2718,8 @@ namespace swift_disk::gui
             {
                 fill_color = ColorRefFromRgb(kControlHoverRed, kControlHoverGreen, kControlHoverBlue);
             }
-            FillHelpWindowRect(draw_item.hDC, rect, fill_color);
-            DrawHelpWindowFrame(
+            FillInfoWindowRect(draw_item.hDC, rect, fill_color);
+            DrawInfoWindowFrame(
                 draw_item.hDC,
                 rect,
                 focused
@@ -2679,42 +2753,42 @@ namespace swift_disk::gui
             }
         }
 
-        static LRESULT CALLBACK HelpWindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
+        static LRESULT CALLBACK InfoWindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
         {
             switch (message)
             {
             case WM_CREATE:
             {
                 const CREATESTRUCTW* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
-                const wchar_t* help_text_value = create
+                const wchar_t* info_text_value = create
                     ? static_cast<const wchar_t*>(create->lpCreateParams)
                     : L"";
                 HFONT gui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-                auto* state = new HelpWindowState();
+                auto* state = new InfoWindowState();
                 state->background_brush = CreateSolidBrush(
                     ColorRefFromRgb(kHeaderPanelRed, kHeaderPanelGreen, kHeaderPanelBlue));
                 state->text_background_brush = CreateSolidBrush(
                     ColorRefFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue));
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
 
-                HWND help_text = CreateWindowExW(
+                HWND info_text = CreateWindowExW(
                     0,
                     L"EDIT",
-                    help_text_value,
+                    info_text_value,
                     WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_BORDER | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
                     0,
                     0,
                     0,
                     0,
                     hwnd,
-                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_HELP_TEXT)),
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_INFO_TEXT)),
                     nullptr,
                     nullptr);
-                if (help_text)
+                if (info_text)
                 {
-                    SendMessageW(help_text, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-                    SendMessageW(help_text, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(8, 8));
-                    SendMessageW(help_text, EM_SETSEL, 0, 0);
+                    SendMessageW(info_text, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+                    SendMessageW(info_text, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(8, 8));
+                    SendMessageW(info_text, EM_SETSEL, 0, 0);
                 }
 
                 HWND close_button = CreateWindowExW(
@@ -2727,7 +2801,7 @@ namespace swift_disk::gui
                     0,
                     0,
                     hwnd,
-                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_HELP_CLOSE_BUTTON)),
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_INFO_CLOSE_BUTTON)),
                     nullptr,
                     nullptr);
                 if (close_button)
@@ -2735,12 +2809,12 @@ namespace swift_disk::gui
                     SendMessageW(close_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
                 }
 
-                LayoutHelpWindowControls(hwnd);
+                LayoutInfoWindowControls(hwnd);
                 return 0;
             }
             case WM_ERASEBKGND:
             {
-                HelpWindowState* state = GetHelpWindowState(hwnd);
+                InfoWindowState* state = GetInfoWindowState(hwnd);
                 RECT client = {};
                 GetClientRect(hwnd, &client);
                 FillRect(
@@ -2752,16 +2826,16 @@ namespace swift_disk::gui
                 return 1;
             }
             case WM_SIZE:
-                LayoutHelpWindowControls(hwnd);
+                LayoutInfoWindowControls(hwnd);
                 return 0;
             case WM_CTLCOLORSTATIC:
             case WM_CTLCOLOREDIT:
             {
                 HDC hdc = reinterpret_cast<HDC>(w_param);
                 HWND control = reinterpret_cast<HWND>(l_param);
-                if (control == GetDlgItem(hwnd, IDC_HELP_TEXT))
+                if (control == GetDlgItem(hwnd, IDC_INFO_TEXT))
                 {
-                    HelpWindowState* state = GetHelpWindowState(hwnd);
+                    InfoWindowState* state = GetInfoWindowState(hwnd);
                     SetTextColor(hdc, ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
                     SetBkColor(hdc, ColorRefFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue));
                     SetBkMode(hdc, OPAQUE);
@@ -2775,15 +2849,15 @@ namespace swift_disk::gui
             case WM_DRAWITEM:
             {
                 const auto* draw_item = reinterpret_cast<const DRAWITEMSTRUCT*>(l_param);
-                if (draw_item && draw_item->CtlID == IDC_HELP_CLOSE_BUTTON)
+                if (draw_item && draw_item->CtlID == IDC_INFO_CLOSE_BUTTON)
                 {
-                    DrawHelpWindowButton(*draw_item);
+                    DrawInfoWindowButton(*draw_item);
                     return TRUE;
                 }
                 break;
             }
             case WM_COMMAND:
-                if (LOWORD(w_param) == IDC_HELP_CLOSE_BUTTON ||
+                if (LOWORD(w_param) == IDC_INFO_CLOSE_BUTTON ||
                     LOWORD(w_param) == IDOK ||
                     LOWORD(w_param) == IDCANCEL)
                 {
@@ -2796,7 +2870,7 @@ namespace swift_disk::gui
                 return 0;
             case WM_DESTROY:
             {
-                HelpWindowState* state = GetHelpWindowState(hwnd);
+                InfoWindowState* state = GetInfoWindowState(hwnd);
                 if (state)
                 {
                     if (state->background_brush)
@@ -2819,12 +2893,12 @@ namespace swift_disk::gui
             return DefWindowProcW(hwnd, message, w_param, l_param);
         }
 
-        static bool RegisterHelpWindowClass(HINSTANCE instance)
+        static bool RegisterInfoWindowClass(HINSTANCE instance)
         {
             WNDCLASSW window_class = {};
-            window_class.lpfnWndProc = &MainWindow::HelpWindowProc;
+            window_class.lpfnWndProc = &MainWindow::InfoWindowProc;
             window_class.hInstance = instance;
-            window_class.lpszClassName = HelpWindowClassName();
+            window_class.lpszClassName = InfoWindowClassName();
             window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
             window_class.hbrBackground = nullptr;
 
@@ -2836,42 +2910,45 @@ namespace swift_disk::gui
             return GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
         }
 
-        void ShowHelpWindow() const
+        void ShowInfoWindow(
+            const wchar_t* title,
+            const std::wstring& text,
+            int width,
+            int height) const
         {
             HINSTANCE instance = GetModuleHandleW(nullptr);
-            if (!RegisterHelpWindowClass(instance))
+            if (!RegisterInfoWindowClass(instance))
             {
                 return;
             }
 
-            const std::wstring help_text = BuildHelpText();
-            HWND help_window = CreateWindowExW(
+            HWND info_window = CreateWindowExW(
                 WS_EX_DLGMODALFRAME,
-                HelpWindowClassName(),
-                L"SwiftDisk Help",
+                InfoWindowClassName(),
+                title,
                 WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                680,
-                560,
+                width,
+                height,
                 m_hwnd,
                 nullptr,
                 instance,
-                const_cast<wchar_t*>(help_text.c_str()));
-            if (!help_window)
+                const_cast<wchar_t*>(text.c_str()));
+            if (!info_window)
             {
                 return;
             }
 
             EnableWindow(m_hwnd, FALSE);
-            ShowWindow(help_window, SW_SHOW);
-            UpdateWindow(help_window);
+            ShowWindow(info_window, SW_SHOW);
+            UpdateWindow(info_window);
 
             MSG message = {};
             BOOL get_message_result = 0;
-            while (IsWindow(help_window) && (get_message_result = GetMessageW(&message, nullptr, 0, 0)) > 0)
+            while (IsWindow(info_window) && (get_message_result = GetMessageW(&message, nullptr, 0, 0)) > 0)
             {
-                if (!IsDialogMessageW(help_window, &message))
+                if (!IsDialogMessageW(info_window, &message))
                 {
                     TranslateMessage(&message);
                     DispatchMessageW(&message);
@@ -2888,6 +2965,16 @@ namespace swift_disk::gui
             {
                 PostQuitMessage(static_cast<int>(message.wParam));
             }
+        }
+
+        void ShowHelpWindow() const
+        {
+            ShowInfoWindow(L"SwiftDisk Help", BuildHelpText(), 680, 560);
+        }
+
+        void ShowAboutWindow() const
+        {
+            ShowInfoWindow(L"About SwiftDisk", BuildAboutText(), 520, 420);
         }
 
         void BeginScanFromPathShortcut()
@@ -3002,6 +3089,13 @@ namespace swift_disk::gui
             {
                 HidePathDropdown();
                 ShowHelpWindow();
+                return;
+            }
+
+            if (control_id == IDC_ABOUT_BUTTON && control == m_about_button)
+            {
+                HidePathDropdown();
+                ShowAboutWindow();
                 return;
             }
 
@@ -4097,6 +4191,7 @@ namespace swift_disk::gui
         HWND m_home_button = nullptr;
         HWND m_clear_button = nullptr;
         HWND m_help_button = nullptr;
+        HWND m_about_button = nullptr;
         HWND m_depth_label = nullptr;
         HWND m_depth_edit = nullptr;
         HWND m_depth_up_button = nullptr;
