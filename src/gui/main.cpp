@@ -2966,7 +2966,7 @@ namespace swift_disk::gui
 
         void ShowHelpWindow() const
         {
-            ShowInfoWindow(L"SwiftDisk Help", BuildHelpText(), 680, 560);
+            ShowInfoWindow(L"SwiftDisk Help", BuildHelpText(), 680, 730);
         }
 
         void ShowAboutWindow() const
