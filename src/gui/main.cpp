@@ -1778,8 +1778,7 @@ namespace swift_disk::gui
                 button_gap +
                 action_button_width +
                 button_gap +
-                action_button_width +
-                ScaleIntForDpi(12.0f, dpi_scale);
+                action_button_width;
 
             const int display_checkbox_gap = ScaleIntForDpi(4.0f, dpi_scale);
             const int checkbox_trailing_padding = ScaleIntForDpi(8.0f, dpi_scale);
@@ -1808,7 +1807,6 @@ namespace swift_disk::gui
                 group_box_horizontal_padding +
                 treemap_group_width +
                 group_box_horizontal_padding +
-                ScaleIntForDpi(12.0f, dpi_scale) +
                 action_button_width +
                 button_gap +
                 action_button_width;
@@ -1933,7 +1931,7 @@ namespace swift_disk::gui
             const int control_left = control_area_right - control_area_width;
             const int scan_group_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
             const int scan_group_top_inner = group_top + ScaleIntForDpi(10.0f, dpi_scale);
-            const int browse_left = control_left + control_area_width - ScaleIntForDpi(12.0f, dpi_scale) - browse_width;
+            const int browse_left = control_left + control_area_width - browse_width;
             const int scan_left = browse_left - button_gap - scan_width;
             const int edit_width = std::max(
                 ScaleIntForDpi(180.0f, dpi_scale),
