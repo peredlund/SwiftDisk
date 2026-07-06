@@ -755,9 +755,8 @@ TreemapVisualStyle BuildTreemapVisualStyle(
       budget is exhausted. Selecting a child spends one rectangle from the budget.
       If that child is a directory and depth permits, it starts contributing its
       own children as future candidates. Nodes listed in
-      `options.expanded_node_ids` add one extra reveal level once they appear as
-      descendants inside an ancestor view, so only the explicitly expanded paths
-      can drill deeper than the base depth.
+      `options.expanded_node_ids` extend the visible depth along explicitly
+      expanded paths, so only those paths can drill deeper than the base depth.
    5. After the visible child counts are chosen, emit the actual rectangles in a
       second pass. The current view root emits only its visible children directly
       into the treemap bounds, while deeper directories emit themselves first and
