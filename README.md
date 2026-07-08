@@ -49,4 +49,4 @@ build\Release\SwiftDisk.exe
 ```
 ## License
 
-SwiftDisk is released under the GNU General Public License version 3 See [LICENSE](LICENSE).
+SwiftDisk is released under the GNU General Public License version 3. See [LICENSE](LICENSE).
