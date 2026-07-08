@@ -2,7 +2,8 @@
 
 SwiftDisk is a disk space analyzer for Windows that helps you find what is using disk space by scanning a drive or folder and showing the result as an interactive treemap. It does this very quickly by bypassing the operating system and instead reading the information directly from the drive's NTFS Master File Table.
 
-## [Download here](https://github.com/peredlund/SwiftDisk/releases)
+## Download
+[Download here.](https://github.com/peredlund/SwiftDisk/releases)
 
 ## Supported Windows Versions
 
