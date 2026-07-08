@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Per Edlund
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "core/ntfs/validation.h"
 
 #include <windows.h>

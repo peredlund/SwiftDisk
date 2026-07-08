@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Per Edlund
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
 #define SWIFT_DISK_VERSION L"@PROJECT_VERSION@"

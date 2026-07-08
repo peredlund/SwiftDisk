@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Per Edlund
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "gui/direct2d_renderer.h"
 
 #include <d2d1.h>

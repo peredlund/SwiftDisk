@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Per Edlund
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
@@ -2598,28 +2601,22 @@ namespace swift_disk::gui
                 << L"Build date: " << SWIFT_DISK_WIDE_STRING(__DATE__) << L"\r\n"
                 << L"\r\n"
                 << L"License\r\n"
-                << L"MIT License\r\n"
+                << L"GNU General Public License version 3\r\n"
                 << L"\r\n"
-                << L"Copyright (c) 2026 Per Edlund\r\n"
+                << L"Copyright (C) 2026 Per Edlund\r\n"
                 << L"\r\n"
-                << L"Permission is hereby granted, free of charge, to any person obtaining a copy "
-                << L"of this software and associated documentation files (the \"Software\"), to deal "
-                << L"in the Software without restriction, including without limitation the rights "
-                << L"to use, copy, modify, merge, publish, distribute, sublicense, and/or sell "
-                << L"copies of the Software, and to permit persons to whom the Software is "
-                << L"furnished to do so, subject to the following conditions:\r\n"
+                << L"This program is free software: you can redistribute it and/or modify\r\n"
+                << L"it under the terms of the GNU General Public License as published by\r\n"
+                << L"the Free Software Foundation, either version 3 of the License, or\r\n"
+                << L"(at your option) any later version.\r\n"
                 << L"\r\n"
-                << L"The above copyright notice and this permission notice shall be included in all "
-                << L"copies or substantial portions of the Software.\r\n"
+                << L"This program is distributed in the hope that it will be useful,\r\n"
+                << L"but WITHOUT ANY WARRANTY; without even the implied warranty of\r\n"
+                << L"MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the\r\n"
+                << L"GNU General Public License for more details.\r\n"
                 << L"\r\n"
-                << L"THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR "
-                << L"IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, "
-                << L"FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE "
-                << L"AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER "
-                << L"LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, "
-                << L"OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE "
-                << L"SOFTWARE.";
-
+                << L"You should have received a copy of the GNU General Public License\r\n"
+                << L"along with this program.If not, see < https://www.gnu.org/licenses/>.";
             return stream.str();
         }
 
@@ -2971,7 +2968,7 @@ namespace swift_disk::gui
 
         void ShowAboutWindow() const
         {
-            ShowInfoWindow(L"About SwiftDisk", BuildAboutText(), 520, 420);
+            ShowInfoWindow(L"About SwiftDisk", BuildAboutText(), 460, 390);
         }
 
         void BeginScanFromPathShortcut()
