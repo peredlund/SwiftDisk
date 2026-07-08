@@ -1,45 +1,51 @@
-# SwiftDisk
+# SwiftDisk - fast disk usage visualization for NTFS drives
 
-Open-source, commercial-friendly disk space analyzer for Windows. The long-term goal is a WizTree-like UX using the NTFS MFT for very fast scans and a native Win32 + Direct2D UI.
+SwiftDisk is a disk space analyzer for Windows that helps you find what is using disk space by scanning a drive or folder and showing the result as an interactive treemap. It does this very quickly by bypassing the operating system and instead reading the information directly from the drive's NTFS Master File Table.
 
-## Status
-- Core scanning engine and GUI are in place.
-- NTFS MFT scanning is implemented for local NTFS volumes.
-- Native Win32 + Direct2D/DirectWrite UI is in place with clickable treemap navigation and in-app path selection.
+## [Download here](https://github.com/peredlund/SwiftDisk/releases)
 
-## Build
-```powershell
-cmake -S . -B build
-cmake --build build --config Release
-```
+## Supported Windows Versions
 
-## Generate Visual Studio 2026 Solution
-Use the Visual Studio 2026 CMake generator to create a `.sln` file and Visual Studio project files in the `build` directory:
+SwiftDisk supports Windows 10 and Windows 11.
+
+## Install
+
+To install SwiftDisk, unzip the downloaded file to a folder where you want to keep the app. To start the app, run `SwiftDisk.exe` from the unzipped folder. Windows will show a User Account Control prompt when SwiftDisk starts since it needs administrator permission to read the NTFS Master File Table.
+
+## Use SwiftDisk
+
+1. Start `SwiftDisk.exe`.
+2. Choose what to scan:
+   - Select a drive in the path field.
+   - Or type a folder path or click `Browse...` to select a folder.
+3. Click `Scan`, or press Enter to start the scan.
+4. Use the treemap to find large folders and files:
+   - Larger rectangles use more disk space.
+   - Hover over a rectangle to see its name and size.
+   - Click a folder rectangle to drill into it.
+   - Use the parent folder bars at the top of the treemap to go back up.
+   - Right-click a rectangle to open it, show it in File Explorer, copy its path, or view properties.
+5. Click `Help` to see more detailed instructions.
+
+## Why the scan is fast
+- On NTFS drives, SwiftDisk is very fast because it reads the MFT.
+- NTFS is the default file system for Windows operating systems and the MFT, or Master File Table, is NTFS's own index of files and folders.
+- Reading the MFT is much faster than scanning each folder one by one.
+
+## Build From Source
+
+SwiftDisk is a native Windows C++ application built with CMake. The build has been verified to work with Visual Studio 2026 as the CMake Generator.
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 18 2026" -A x64
-```
-
-Then build from the command line:
-
-```powershell
 cmake --build build --config Release
 ```
 
-Or open the generated solution in Visual Studio 2026:
+The executable is written to:
 
 ```powershell
-cmake --open build
+build\Release\SwiftDisk.exe
 ```
-
-## Run
-```powershell
-build\Release\SwiftDisk.exe --path C:\
-```
-
-Note: `SwiftDisk.exe` is built to request administrator privileges on launch, so Windows will show a UAC prompt when you start it.
-This is because reading the NTFS MFT requires direct volume access and need elevated privileges.
-This tool opens volumes read-only and refuses to scan if write access is requested.
-
 ## License
-MIT. See `LICENSE`.
+
+SwiftDisk is released under the MIT License. See [LICENSE](LICENSE).
