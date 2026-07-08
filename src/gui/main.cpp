@@ -4258,7 +4258,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
     {
         MessageBoxW(
             nullptr,
-            L"SwiftDisk GUI\n\nUsage:\n  swift_disk_gui.exe --path C:\\\n",
+            L"SwiftDisk\n\nUsage:\n  SwiftDisk.exe --path C:\\\n",
             L"SwiftDisk",
             MB_OK | MB_ICONINFORMATION);
         CoUninitialize();

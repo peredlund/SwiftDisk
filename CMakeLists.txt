@@ -66,6 +66,10 @@ add_executable(swift_disk_gui WIN32
     ${SWIFT_DISK_GUI_RESOURCES}
 )
 
+set_target_properties(swift_disk_gui PROPERTIES
+    OUTPUT_NAME SwiftDisk
+)
+
 target_link_libraries(swift_disk_gui PRIVATE
     swift_disk_core
     advapi32

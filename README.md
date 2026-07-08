@@ -34,10 +34,10 @@ cmake --open build
 
 ## Run
 ```powershell
-build\Release\swift_disk_gui.exe --path C:\
+build\Release\SwiftDisk.exe --path C:\
 ```
 
-Note: `swift_disk_gui.exe` is built to request administrator privileges on launch, so Windows will show a UAC prompt when you start it.
+Note: `SwiftDisk.exe` is built to request administrator privileges on launch, so Windows will show a UAC prompt when you start it.
 This is because reading the NTFS MFT requires direct volume access and need elevated privileges.
 This tool opens volumes read-only and refuses to scan if write access is requested.
 
