@@ -73,13 +73,8 @@ namespace swift_disk::gui
     struct ScanPayload
     {
         std::unique_ptr<FileTree> tree;
-        bool has_volume_space_info = false;
-        bool scanned_path_is_volume_root = false;
         double elapsed_seconds = 0.0;
-        std::uint64_t volume_free_bytes = 0;
-        std::uint64_t volume_total_bytes = 0;
         std::wstring path;
-        std::wstring volume_root_path;
         std::wstring error;
     };
 
@@ -99,14 +94,6 @@ namespace swift_disk::gui
     {
         std::wstring root_path;
         std::wstring display_text;
-    };
-
-    struct VolumeSpaceInfo
-    {
-        std::wstring root_path;
-        std::uint64_t free_bytes = 0;
-        std::uint64_t total_bytes = 0;
-        bool path_is_volume_root = false;
     };
 
     std::wstring TrimPathQuoteCharacters(std::wstring path)
@@ -254,61 +241,6 @@ namespace swift_disk::gui
         }
 
         *volume_root = buffer;
-        return true;
-    }
-
-    std::wstring NormalizePathForComparison(std::wstring path)
-    {
-        std::replace(path.begin(), path.end(), L'/', L'\\');
-        if (path.size() == 2 && path[1] == L':')
-        {
-            path.push_back(L'\\');
-        }
-
-        while (path.size() > 3 && path.back() == L'\\')
-        {
-            path.pop_back();
-        }
-
-        return path;
-    }
-
-    bool AreSameFilesystemPath(const std::wstring& left, const std::wstring& right)
-    {
-        const std::wstring normalized_left = NormalizePathForComparison(left);
-        const std::wstring normalized_right = NormalizePathForComparison(right);
-        return _wcsicmp(normalized_left.c_str(), normalized_right.c_str()) == 0;
-    }
-
-    bool TryGetVolumeSpaceInfo(const std::wstring& path, VolumeSpaceInfo* info)
-    {
-        if (!info)
-        {
-            return false;
-        }
-
-        std::wstring volume_root;
-        if (!TryGetVolumeRoot(path, &volume_root))
-        {
-            return false;
-        }
-
-        ULARGE_INTEGER free_bytes_available = {};
-        ULARGE_INTEGER total_bytes = {};
-        ULARGE_INTEGER total_free_bytes = {};
-        if (!GetDiskFreeSpaceExW(
-            volume_root.c_str(),
-            &free_bytes_available,
-            &total_bytes,
-            &total_free_bytes))
-        {
-            return false;
-        }
-
-        info->root_path = std::move(volume_root);
-        info->free_bytes = total_free_bytes.QuadPart;
-        info->total_bytes = total_bytes.QuadPart;
-        info->path_is_volume_root = AreSameFilesystemPath(path, info->root_path);
         return true;
     }
 
@@ -2616,7 +2548,7 @@ namespace swift_disk::gui
                 << L"GNU General Public License for more details.\r\n"
                 << L"\r\n"
                 << L"You should have received a copy of the GNU General Public License\r\n"
-                << L"along with this program.If not, see < https://www.gnu.org/licenses/>.";
+                << L"along with this program. If not, see < https://www.gnu.org/licenses/>.";
             return stream.str();
         }
 
@@ -3118,11 +3050,6 @@ namespace swift_disk::gui
             ClearHoverState();
             m_rects.clear();
             m_breadcrumbs.clear();
-            m_has_volume_space_info = false;
-            m_scanned_path_is_volume_root = false;
-            m_volume_free_bytes = 0;
-            m_volume_total_bytes = 0;
-            m_volume_root_path.clear();
             m_status_text = L"Scanning " + m_options.path + L" ...";
             SetScanControlsEnabled(false);
             InvalidateRect(m_hwnd, nullptr, FALSE);
@@ -3136,16 +3063,6 @@ namespace swift_disk::gui
                     auto payload = std::make_unique<ScanPayload>();
                     payload->path = path;
                     payload->tree = std::make_unique<FileTree>();
-
-                    VolumeSpaceInfo volume_info;
-                    if (TryGetVolumeSpaceInfo(path, &volume_info))
-                    {
-                        payload->has_volume_space_info = true;
-                        payload->scanned_path_is_volume_root = volume_info.path_is_volume_root;
-                        payload->volume_free_bytes = volume_info.free_bytes;
-                        payload->volume_total_bytes = volume_info.total_bytes;
-                        payload->volume_root_path = std::move(volume_info.root_path);
-                    }
 
                     Stopwatch timer;
                     std::wstring error;
@@ -3221,11 +3138,6 @@ namespace swift_disk::gui
 
             m_tree = std::move(payload->tree);
             m_tree_stats = m_tree->ComputeStats();
-            m_has_volume_space_info = payload->has_volume_space_info;
-            m_scanned_path_is_volume_root = payload->scanned_path_is_volume_root;
-            m_volume_free_bytes = payload->volume_free_bytes;
-            m_volume_total_bytes = payload->volume_total_bytes;
-            m_volume_root_path = std::move(payload->volume_root_path);
             ApplyFreshScanResultView();
         }
 
@@ -4103,18 +4015,13 @@ namespace swift_disk::gui
             state.palette = GetRenderPalette();
             state.scan_in_progress = m_scan_in_progress;
             state.has_error = m_has_error;
-            state.has_volume_space_info = m_has_volume_space_info;
-            state.scanned_path_is_volume_root = m_scanned_path_is_volume_root;
             state.show_tooltip = m_show_tooltip;
             state.show_status_bar = m_show_status_bar;
             state.hovered_index = m_hovered_index;
             state.hovered_breadcrumb_index = m_hovered_breadcrumb_index;
             state.elapsed_seconds = m_elapsed_seconds;
-            state.volume_free_bytes = m_volume_free_bytes;
-            state.volume_total_bytes = m_volume_total_bytes;
             state.view_root_id = m_view_root_id;
             state.selected_path = m_options.path;
-            state.volume_root_path = m_volume_root_path;
             state.status_text = m_status_text;
             state.error_text = m_error_text;
             state.tree = m_tree.get();
@@ -4201,18 +4108,13 @@ namespace swift_disk::gui
 
         bool m_scan_in_progress = false;
         bool m_has_error = false;
-        bool m_has_volume_space_info = false;
-        bool m_scanned_path_is_volume_root = false;
         HWND m_hovered_control = nullptr;
         int m_hovered_index = -1;
         int m_hovered_breadcrumb_index = -1;
         int m_max_depth = kDefaultMaxDepth;
         double m_elapsed_seconds = 0.0;
-        std::uint64_t m_volume_free_bytes = 0;
-        std::uint64_t m_volume_total_bytes = 0;
         uint64_t m_view_root_id = 0;
         std::wstring m_scan_path;
-        std::wstring m_volume_root_path;
         std::wstring m_status_text;
         std::wstring m_error_text;
         FileTree::TreeStats m_tree_stats;

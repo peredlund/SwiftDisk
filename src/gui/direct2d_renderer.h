@@ -50,18 +50,13 @@ namespace swift_disk::gui
         RenderVisualPalette palette;
         bool scan_in_progress = false;
         bool has_error = false;
-        bool has_volume_space_info = false;
-        bool scanned_path_is_volume_root = false;
         bool show_tooltip = true;
         bool show_status_bar = false;
         int hovered_index = -1;
         int hovered_breadcrumb_index = -1;
         double elapsed_seconds = 0.0;
-        std::uint64_t volume_free_bytes = 0;
-        std::uint64_t volume_total_bytes = 0;
         std::uint64_t view_root_id = 0;
         std::wstring selected_path;
-        std::wstring volume_root_path;
         std::wstring status_text;
         std::wstring error_text;
         const FileTree* tree = nullptr;
