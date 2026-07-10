@@ -5,11 +5,11 @@ SwiftDisk is a disk space analyzer for Windows that helps you find what is using
 ## Download
 [Download here.](https://github.com/peredlund/SwiftDisk/releases)
 
-## Supported Windows Versions
+## Supported Windows versions
 
 SwiftDisk supports Windows 10, Windows 11, and Windows Server 2016 and later.
 
-## Screenhot
+## Screenshot
 
 ![SwiftDisk screenshot](assets/screenshot_70_percent.png)
 
@@ -37,7 +37,7 @@ To install SwiftDisk, unzip the downloaded file to a folder where you want to ke
 - NTFS is the default file system for Windows operating systems and the MFT, or Master File Table, is NTFS's own index of files and folders.
 - Reading the MFT is much faster than scanning each folder one by one.
 
-## Build From Source
+## Build from source
 
 SwiftDisk is a native Windows C++ application built with CMake. The build has been verified to work with Visual Studio 2026 as the CMake Generator.
 
