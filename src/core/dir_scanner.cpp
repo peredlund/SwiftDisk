@@ -17,7 +17,8 @@ namespace swift_disk
  Parameters:
    path: Input path.
  
- Returns: Path without a trailing separator (except drive root forms).
+ Returns: Path with one trailing separator removed when longer than a drive
+ root form.
  **/
 static std::wstring NormalizeRootName(std::wstring path)
 {
@@ -37,7 +38,8 @@ static std::wstring NormalizeRootName(std::wstring path)
    tree: Destination file tree.
    out_root_id: Optional output for assigned root id.
  
- Returns: true on success, otherwise false.
+ Returns: false when tree is null or root_path is empty; otherwise true.
+ Directories that cannot be enumerated are skipped.
  **/
 bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_root_id)
 {

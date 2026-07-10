@@ -91,7 +91,8 @@ NtfsVolume& NtfsVolume::operator=(NtfsVolume&& other) noexcept
  Parameters:
    drive_letter: Volume letter to open.
  
- Returns: true when open and metadata queries succeed.
+ Returns: true when the raw handle opens and the NTFS geometry query succeeds.
+ Filesystem-name detection is best effort and is reported by IsNtfs().
  **/
 bool NtfsVolume::Open(wchar_t drive_letter)
 {
@@ -193,10 +194,11 @@ const VolumeInfo& NtfsVolume::Info() const
 }
 
 /**
- Reads a single FILE record by FRN using FSCTL_GET_NTFS_FILE_RECORD.
+ Requests the first in-use FILE record at or below an FRN using
+ FSCTL_GET_NTFS_FILE_RECORD.
  
  Parameters:
-   frn: File record number.
+   frn: Maximum file record number to return.
    out_record: Destination buffer.
  
  Returns: true when a non-empty record is returned.
@@ -208,7 +210,7 @@ bool NtfsVolume::ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record)
         return false;
     }
 
-    // FSCTL_GET_NTFS_FILE_RECORD fetches one FILE record by reference number.
+    // The control code returns the first in-use record at or below this FRN.
     NTFS_FILE_RECORD_INPUT_BUFFER input = {};
     input.FileReferenceNumber.QuadPart = static_cast<LONGLONG>(frn);
 
@@ -263,15 +265,17 @@ bool NtfsVolume::GetMftDataRuns(std::vector<DataRun>* runs, uint64_t* data_size)
 }
 
 /**
- Streams MFT bytes via run list and emits fixed-size FILE records.
+ Streams MFT bytes via run list and emits fixed-size raw record slots.
  Reads run extents sequentially and preserves partial record tails
  between chunk reads.
  
  Parameters:
-   callback: Record callback invoked per decoded record.
-   out_records: Optional output for logical record count.
+   callback: Record callback invoked for each full raw record slot read.
+   out_records: Optional output for the final logical record index, including
+     slots skipped for sparse or invalid runs.
  
- Returns: true on successful full enumeration.
+ Returns: false on setup, seek, or read failure; otherwise true after the
+ available run data has been processed.
  **/
 bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* out_records)
 {

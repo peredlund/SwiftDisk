@@ -39,12 +39,13 @@ uint64_t HashPathComponent(const std::wstring& value)
 } // namespace
 
 /**
- Inserts or replaces a node and updates parent-child indices.
+ Inserts or replaces a node. For non-root nodes, appends the node id to the
+ supplied parent's child index; existing child-index entries are not rewritten.
  
  Parameters:
-   node: Node to insert.
+   node: Node to insert or replace.
  
- Returns: Inserted node id.
+ Returns: Inserted or replaced node id.
  **/
 uint64_t FileTree::AddNode(Node node)
 {
@@ -381,7 +382,7 @@ std::vector<const Node*> FileTree::TopN(size_t n) const
 }
 
 /**
- Builds and caches a path by walking parent links to the root.
+ Builds a path by walking parent links to the root.
  
  Parameters:
    id: Node id to render.

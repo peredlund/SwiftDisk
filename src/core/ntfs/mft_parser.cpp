@@ -182,7 +182,8 @@ uint8_t NamePreference(uint8_t name_type)
    frn: File record number associated with this record.
    out: Destination parsed record.
  
- Returns: true if the record signature/shape is parseable, otherwise false.
+ Returns: true when the minimum buffer size and FILE signature are accepted.
+ Attribute parsing may stop early and leave partial metadata.
  **/
 bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sector, uint64_t frn, ParsedRecord* out)
 {
@@ -199,9 +200,8 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
 
     if (!ApplyFixup(record, record_size, header->usa_offset, header->usa_count, bytes_per_sector))
     {
-        // FSCTL_GET_NTFS_FILE_RECORD may return a record with fixups already applied.
-        // In that case the USA check will fail, but the record is still parseable.
-        // Continue without applying fixups.
+        // Fixup validation failed. Continue parsing the original record bytes
+        // without modifying sector trailers.
     }
     else
     {
@@ -336,9 +336,8 @@ bool ExtractMftDataRuns(uint8_t* record, size_t record_size, uint32_t bytes_per_
 
     if (!ApplyFixup(record, record_size, header->usa_offset, header->usa_count, bytes_per_sector))
     {
-        // FSCTL_GET_NTFS_FILE_RECORD may return a record whose sector trailers
-        // no longer match the raw on-disk USA values. Keep parsing and let the
-        // attribute bounds checks below reject genuinely malformed records.
+        // Fixup validation failed. Continue parsing the original record bytes
+        // without modifying sector trailers.
     }
 
     header = reinterpret_cast<FileRecordHeader*>(record);
