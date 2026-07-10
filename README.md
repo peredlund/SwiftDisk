@@ -11,7 +11,7 @@ SwiftDisk supports Windows 10, Windows 11, and Windows Server 2016 and later.
 
 ## Screenhot
 
-![SwiftDisk screenshot](assets/screenshot.png)
+![SwiftDisk screenshot](assets/screenshot_70_percent.png)
 
 ## Install
 
