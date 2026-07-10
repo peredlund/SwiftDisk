@@ -478,11 +478,23 @@ namespace
     }
 } // namespace
 
+    /**
+    Shows the modal SwiftDisk Help window.
+
+    Parameters:
+      owner: Handle of the window that owns the Help window.
+    **/
     void ShowHelpWindow(HWND owner)
     {
         ShowInfoWindow(owner, L"SwiftDisk Help", BuildHelpText(), 680, 730);
     }
 
+    /**
+    Shows the modal SwiftDisk About window.
+
+    Parameters:
+      owner: Handle of the window that owns the About window.
+    **/
     void ShowAboutWindow(HWND owner)
     {
         ShowInfoWindow(owner, L"About SwiftDisk", BuildAboutText(), 460, 390);

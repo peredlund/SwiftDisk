@@ -8,20 +8,8 @@
 namespace swift_disk::gui
 {
 
-    /**
-    Shows the modal SwiftDisk Help window.
-
-    Parameters:
-      owner: Handle of the window that owns the Help window.
-    **/
     void ShowHelpWindow(HWND owner);
 
-    /**
-    Shows the modal SwiftDisk About window.
-
-    Parameters:
-      owner: Handle of the window that owns the About window.
-    **/
     void ShowAboutWindow(HWND owner);
 
 } // namespace swift_disk::gui

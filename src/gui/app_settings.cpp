@@ -116,46 +116,97 @@ namespace swift_disk::gui
         }
     }
 
+    /**
+    Returns whether treemap hover tooltips should be displayed.
+
+    Returns: True when tooltips should be displayed.
+    **/
     bool AppSettings::GetShowTooltip() const
     {
         return m_show_tooltip;
     }
 
+    /**
+    Updates whether treemap hover tooltips should be displayed.
+
+    Parameters:
+      show_tooltip: True when tooltips should be displayed.
+    **/
     void AppSettings::SetShowTooltip(bool show_tooltip)
     {
         m_show_tooltip = show_tooltip;
     }
 
+    /**
+    Returns whether the status bar should be displayed.
+
+    Returns: True when the status bar should be displayed.
+    **/
     bool AppSettings::GetShowStatusBar() const
     {
         return m_show_status_bar;
     }
 
+    /**
+    Updates whether the status bar should be displayed.
+
+    Parameters:
+      show_status_bar: True when the status bar should be displayed.
+    **/
     void AppSettings::SetShowStatusBar(bool show_status_bar)
     {
         m_show_status_bar = show_status_bar;
     }
 
+    /**
+    Returns the configured treemap depth limit.
+
+    Returns: Treemap depth limit clamped to the supported range.
+    **/
     int AppSettings::GetMaxDepth() const
     {
         return m_max_depth;
     }
 
+    /**
+    Updates the treemap depth limit.
+
+    Parameters:
+      max_depth: Treemap depth limit. Values outside the supported range are
+      clamped.
+    **/
     void AppSettings::SetMaxDepth(int max_depth)
     {
         m_max_depth = std::clamp(max_depth, kMinimumMaxDepth, kMaximumMaxDepth);
     }
 
+    /**
+    Returns the last path the user scanned.
+
+    Returns: Last scanned path, or an empty string when no path is stored.
+    **/
     const std::wstring& AppSettings::GetLastScanPath() const
     {
         return m_last_scan_path;
     }
 
+    /**
+    Updates the last path the user scanned.
+
+    Parameters:
+      last_scan_path: Last scanned path to restore on the next app launch.
+    **/
     void AppSettings::SetLastScanPath(std::wstring last_scan_path)
     {
         m_last_scan_path = std::move(last_scan_path);
     }
 
+    /**
+    Loads GUI preferences from the current user's registry hive.
+
+    Returns: Persisted settings, or default settings when values are missing or
+    unavailable.
+    **/
     AppSettings LoadAppSettings()
     {
         AppSettings settings;
@@ -195,6 +246,12 @@ namespace swift_disk::gui
         return settings;
     }
 
+    /**
+    Saves GUI preferences to the current user's registry hive.
+
+    Parameters:
+      settings: Settings to persist.
+    **/
     void SaveAppSettings(const AppSettings& settings)
     {
         HKEY key = nullptr;

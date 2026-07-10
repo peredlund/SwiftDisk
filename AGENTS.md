@@ -51,6 +51,7 @@ Returns: Description.
 **/
 ```
 
+- Place method and free-function documentation immediately above their definitions in the corresponding `.cpp` file, not above declarations in headers.
 - Use `//` comments only for short inline explanations.
 
 ## OpenAI Codex Windows App Instructions
