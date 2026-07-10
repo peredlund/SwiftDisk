@@ -94,20 +94,15 @@ namespace swift_disk::gui
         void DrawHeaderGroupBox(const RenderRect& rect, const std::wstring& label);
         void DrawTreemap(const MainWindowDrawingState& state);
         void DrawHeader(const MainWindowDrawingState& state);
-        RenderRect GetHoveredRectBounds(const MainWindowDrawingState& state, const visualization::TreemapRect& rect) const;
         bool TryGetHoverDisplayInfo(
             const MainWindowDrawingState& state,
             std::wstring* name_text,
-            std::wstring* size_text,
-            RenderRect* hovered_bounds,
-            bool* follow_tooltip) const;
+            std::wstring* size_text) const;
         RenderPoint ResolveTooltipPosition(
             const MainWindowDrawingState& state,
             const RenderPoint& anchor,
-            const RenderRect& hovered_rect,
             float tooltip_width,
-            float tooltip_height,
-            bool follow_tooltip) const;
+            float tooltip_height) const;
         bool BuildHoverTooltipLayout(const MainWindowDrawingState& state, HoverTooltipLayout* layout) const;
         void DrawHoverTooltip(const MainWindowDrawingState& state);
         void DrawStatusBar(const MainWindowDrawingState& state);
@@ -1822,15 +1817,6 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
         m_muted_brush.Get());
 }
 
-RenderRect Direct2DRenderer::GetHoveredRectBounds(const MainWindowDrawingState& state, const visualization::TreemapRect& rect) const
-{
-    return MakeRenderRect(
-        state.treemap_content_rect.left + static_cast<float>(rect.x),
-        state.treemap_content_rect.top + static_cast<float>(rect.y),
-        state.treemap_content_rect.left + static_cast<float>(rect.x + rect.width),
-        state.treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
-}
-
 /**
 Resolves the shared display text used by both the hover tooltip and status bar.
 Breadcrumbs take precedence over treemap tiles when both indices are present.
@@ -1844,11 +1830,9 @@ Returns: True when a valid hovered item was resolved.
 **/
 bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& state, 
     std::wstring* name_text,
-    std::wstring* size_text,
-    RenderRect* hovered_bounds,
-    bool* follow_tooltip) const
+    std::wstring* size_text) const
 {
-    if (!name_text || !size_text || !hovered_bounds || !follow_tooltip)
+    if (!name_text || !size_text)
     {
         return false;
     }
@@ -1863,8 +1847,6 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
     if (state.hovered_breadcrumb_index >= 0 && state.hovered_breadcrumb_index < static_cast<int>(breadcrumbs.size()))
     {
         const BreadcrumbStrip& strip = breadcrumbs[static_cast<size_t>(state.hovered_breadcrumb_index)];
-        *hovered_bounds = strip.rect;
-        *follow_tooltip = true;
 
         if (state.tree)
         {
@@ -1884,8 +1866,6 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
     if (state.hovered_index >= 0 && state.hovered_index < static_cast<int>(rects.size()))
     {
         const visualization::TreemapRect& rect = rects[static_cast<size_t>(state.hovered_index)];
-        *hovered_bounds = GetHoveredRectBounds(state, rect);
-        *follow_tooltip = true;
         if (state.tree)
         {
             const std::wstring path = state.tree->BuildPath(rect.node_id);
@@ -1915,10 +1895,8 @@ Returns: Clamped top-left position for the tooltip.
 **/
 RenderPoint Direct2DRenderer::ResolveTooltipPosition(const MainWindowDrawingState& state,
     const RenderPoint& anchor,
-    const RenderRect& hovered_rect,
     float tooltip_width,
-    float tooltip_height,
-    bool follow_tooltip) const
+    float tooltip_height) const
 {
     const float tooltip_inner_margin = Scale(kTooltipInnerMargin);
     float tooltip_left = anchor.x + Scale(kTooltipOffsetX);
@@ -1931,22 +1909,6 @@ RenderPoint Direct2DRenderer::ResolveTooltipPosition(const MainWindowDrawingStat
     if (tooltip_top + tooltip_height > state.canvas_rect.bottom - tooltip_inner_margin)
     {
         tooltip_top = anchor.y - tooltip_height - Scale(10.0f);
-    }
-
-    if (!follow_tooltip)
-    {
-        const float hovered_width = hovered_rect.right - hovered_rect.left;
-        const float hovered_height = hovered_rect.bottom - hovered_rect.top;
-        if (hovered_width >= tooltip_width + (tooltip_inner_margin * 2.0f) &&
-            hovered_height >= tooltip_height + (tooltip_inner_margin * 2.0f))
-        {
-            const float min_hovered_left = hovered_rect.left + tooltip_inner_margin;
-            const float max_hovered_left = hovered_rect.right - tooltip_width - tooltip_inner_margin;
-            const float min_hovered_top = hovered_rect.top + tooltip_inner_margin;
-            const float max_hovered_top = hovered_rect.bottom - tooltip_height - tooltip_inner_margin;
-            tooltip_left = std::clamp(tooltip_left, min_hovered_left, max_hovered_left);
-            tooltip_top = std::clamp(tooltip_top, min_hovered_top, max_hovered_top);
-        }
     }
 
     const float min_tooltip_left = state.canvas_rect.left + tooltip_inner_margin;
@@ -1985,9 +1947,7 @@ bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& sta
 
     std::wstring name_text;
     std::wstring size_text;
-    RenderRect hovered_bounds = state.canvas_rect;
-    bool follow_tooltip = false;
-    if (!TryGetHoverDisplayInfo(state, &name_text, &size_text, &hovered_bounds, &follow_tooltip))
+    if (!TryGetHoverDisplayInfo(state, &name_text, &size_text))
     {
         return false;
     }
@@ -2044,10 +2004,8 @@ bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& sta
     const float tooltip_height = (tooltip_padding_y * 2.0f) + name_height + tooltip_line_gap + size_height;
     const RenderPoint tooltip_origin = ResolveTooltipPosition(state, 
         state.tooltip_position,
-        hovered_bounds,
         tooltip_width,
-        tooltip_height,
-        follow_tooltip);
+        tooltip_height);
     const float tooltip_left = tooltip_origin.x;
     const float tooltip_top = tooltip_origin.y;
 
@@ -2158,9 +2116,7 @@ void Direct2DRenderer::DrawStatusBar(const MainWindowDrawingState& state)
 
     std::wstring name_text;
     std::wstring size_text;
-    RenderRect hovered_bounds = state.status_bar_rect;
-    bool follow_tooltip = true;
-    if (!TryGetHoverDisplayInfo(state, &name_text, &size_text, &hovered_bounds, &follow_tooltip))
+    if (!TryGetHoverDisplayInfo(state, &name_text, &size_text))
     {
         return;
     }
