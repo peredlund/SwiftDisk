@@ -7,7 +7,7 @@ SwiftDisk is a disk space analyzer for Windows that helps you find what is using
 
 ## Supported Windows Versions
 
-SwiftDisk supports Windows 10 and Windows 11.
+SwiftDisk supports Windows 10, Windows 11, and Windows Server 2016 and later.
 
 ## Install
 
