@@ -75,6 +75,8 @@ namespace swift_disk::gui
     struct SharedScanState
     {
         std::mutex mutex;
+        // The detached scan worker publishes exactly one result here before it
+        // notifies the UI thread with WM_APP_SCAN_COMPLETE or WM_APP_SCAN_FAILED.
         std::unique_ptr<ScanPayload> pending_payload;
     };
 
@@ -84,6 +86,15 @@ namespace swift_disk::gui
         std::wstring display_text;
     };
 
+    /**
+    Removes quote characters from both ends of path text without changing quotes
+    that are part of the path itself.
+
+    Parameters:
+      path: Path text to trim.
+
+    Returns: Path text without surrounding quotes.
+    **/
     std::wstring TrimPathQuoteCharacters(std::wstring path)
     {
         while (!path.empty() && path.front() == L'"')
@@ -97,6 +108,16 @@ namespace swift_disk::gui
         return path;
     }
 
+    /**
+    Normalizes user-entered scan paths while preserving all characters except
+    surrounding quote characters. Bare drive designators are converted to root
+    paths so Windows APIs interpret "C:" as C:\\ rather than a drive-relative path.
+
+    Parameters:
+      path: Path text from the command line, settings, or path field.
+
+    Returns: The normalized path.
+    **/
     std::wstring NormalizeScanPath(const std::wstring& path)
     {
         std::wstring normalized_path = TrimPathQuoteCharacters(path);
@@ -111,6 +132,14 @@ namespace swift_disk::gui
         return normalized_path;
     }
 
+    /**
+    Normalizes an ASCII drive letter for consistent path and dropdown display.
+
+    Parameters:
+      drive_letter: Drive letter to normalize.
+
+    Returns: The uppercase letter, or the input when it is not lowercase ASCII.
+    **/
     wchar_t ToUpperDriveLetter(wchar_t drive_letter)
     {
         if (drive_letter >= L'a' && drive_letter <= L'z')
@@ -121,6 +150,15 @@ namespace swift_disk::gui
         return drive_letter;
     }
 
+    /**
+    Maps a Windows drive type to the fallback label used when a volume has no
+    user-assigned name.
+
+    Parameters:
+      drive_type: Value returned by GetDriveTypeW.
+
+    Returns: User-facing drive type name.
+    **/
     std::wstring GetDriveTypeDisplayName(UINT drive_type)
     {
         switch (drive_type)
@@ -140,6 +178,12 @@ namespace swift_disk::gui
         }
     }
 
+    /**
+    Enumerates mounted NTFS volumes and builds the paired display and root-path
+    values used by the editable drive dropdown.
+
+    Returns: Available NTFS drives in the order reported by Windows.
+    **/
     std::vector<DriveListEntry> EnumerateNtfsDriveEntries()
     {
         const DWORD required_length = GetLogicalDriveStringsW(0, nullptr);
@@ -194,12 +238,20 @@ namespace swift_disk::gui
                 entries.push_back({ std::move(normalized_root), std::move(display_text) });
             }
 
+            // GetLogicalDriveStringsW returns consecutive null-terminated paths
+            // followed by an additional null, so advance past this path's null.
             root_path += wcslen(root_path) + 1;
         }
 
         return entries;
     }
 
+    /**
+    Chooses the initial drive-dropdown value, preferring the system drive letter
+    when it is NTFS and otherwise falling back to the first available NTFS drive.
+
+    Returns: Display text for the preferred drive, or an empty string.
+    **/
     std::wstring GetDefaultPathFieldValue()
     {
         const std::vector<DriveListEntry> entries = EnumerateNtfsDriveEntries();
@@ -214,6 +266,15 @@ namespace swift_disk::gui
         return entries.empty() ? std::wstring() : entries.front().display_text;
     }
 
+    /**
+    Resolves an arbitrary filesystem path to the root of its containing volume.
+
+    Parameters:
+      path: Filesystem path to resolve.
+      volume_root: Receives the volume root on success.
+
+    Returns: True when Windows returned a volume root that fit in the buffer.
+    **/
     bool TryGetVolumeRoot(const std::wstring& path, std::wstring* volume_root)
     {
         if (!volume_root || path.empty())
@@ -232,6 +293,15 @@ namespace swift_disk::gui
         return true;
     }
 
+    /**
+    Determines whether a path belongs to an NTFS volume so scan dispatch can use
+    the optimized MFT implementation.
+
+    Parameters:
+      path: Filesystem path to inspect.
+
+    Returns: True when the containing volume reports the NTFS filesystem.
+    **/
     bool IsNtfsPath(const std::wstring& path)
     {
         std::wstring volume_root;
@@ -257,6 +327,14 @@ namespace swift_disk::gui
         return _wcsicmp(file_system_name, L"NTFS") == 0;
     }
 
+    /**
+    Checks whether a path currently resolves to a directory.
+
+    Parameters:
+      path: Filesystem path to inspect.
+
+    Returns: True when the path exists and has the directory attribute.
+    **/
     bool IsExistingDirectoryPath(const std::wstring& path)
     {
         if (path.empty())
@@ -269,6 +347,12 @@ namespace swift_disk::gui
             (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
     }
 
+    /**
+    Parses supported command-line options and accepts a positional path for
+    compatibility with launching SwiftDisk directly against a folder.
+
+    Returns: Normalized startup options for the main window.
+    **/
     GuiOptions ParseOptions()
     {
         GuiOptions options;
@@ -301,6 +385,14 @@ namespace swift_disk::gui
         return options;
     }
 
+    /**
+    Formats a byte count using binary units and two fractional digits.
+
+    Parameters:
+      bytes: Byte count to format.
+
+    Returns: Human-readable size from bytes through pebibytes.
+    **/
     std::wstring HumanizeBytes(uint64_t bytes)
     {
         static constexpr const wchar_t* kUnits[] = { L"B", L"KiB", L"MiB", L"GiB", L"TiB", L"PiB" };
@@ -327,6 +419,15 @@ namespace swift_disk::gui
         return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     }
 
+    /**
+    Converts floating-point render bounds to an enclosing Win32 rectangle. The
+    outward rounding ensures invalidation includes every partially covered pixel.
+
+    Parameters:
+      rect: Floating-point bounds to convert.
+
+    Returns: Enclosing integer rectangle.
+    **/
     RECT RectFToRect(const RenderRect& rect)
     {
         RECT result = {};
@@ -337,6 +438,14 @@ namespace swift_disk::gui
         return result;
     }
 
+    /**
+    Converts a Win32 integer rectangle to renderer coordinates.
+
+    Parameters:
+      rect: Integer rectangle to convert.
+
+    Returns: Equivalent floating-point render rectangle.
+    **/
     RenderRect RectToRenderRect(const RECT& rect)
     {
         return MakeRenderRect(
@@ -351,6 +460,16 @@ namespace swift_disk::gui
         return rect.left >= rect.right || rect.top >= rect.bottom;
     }
 
+    /**
+    Combines two render rectangles while treating an empty rectangle as an
+    identity value for incremental redraw-bound accumulation.
+
+    Parameters:
+      left: First rectangle.
+      right: Second rectangle.
+
+    Returns: Bounds containing both non-empty rectangles.
+    **/
     RenderRect UnionRenderRect(const RenderRect& left, const RenderRect& right)
     {
         if (IsRenderRectEmpty(left))
@@ -369,6 +488,15 @@ namespace swift_disk::gui
             std::max(left.bottom, right.bottom));
     }
 
+    /**
+    Expands non-empty render bounds equally in every direction.
+
+    Parameters:
+      rect: Rectangle to expand.
+      amount: Expansion applied to each edge.
+
+    Returns: Expanded rectangle, or the original empty rectangle.
+    **/
     RenderRect InflateRenderRect(const RenderRect& rect, float amount)
     {
         if (IsRenderRectEmpty(rect))
@@ -383,6 +511,15 @@ namespace swift_disk::gui
             rect.bottom + amount);
     }
 
+    /**
+    Reads a window's horizontal DPI and converts it to a bounded scale relative
+    to the 96-DPI Win32 baseline.
+
+    Parameters:
+      hwnd: Window whose DPI should be queried.
+
+    Returns: DPI scale in the supported range, or 1.0 when unavailable.
+    **/
     float GetWindowDpiScale(HWND hwnd)
     {
         if (!hwnd)
@@ -414,6 +551,14 @@ namespace swift_disk::gui
     class MainWindow
     {
     public:
+        /**
+        Creates the in-memory main-window controller and restores persisted UI
+        preferences. The native window and controls are created separately by
+        Create().
+
+        Parameters:
+          options: Command-line options that take precedence over saved paths.
+        **/
         explicit MainWindow(GuiOptions options)
             : m_options(std::move(options)),
             m_shared_scan_state(std::make_shared<SharedScanState>())
@@ -425,6 +570,16 @@ namespace swift_disk::gui
             m_last_scan_path = NormalizeScanPath(settings.GetLastScanPath());
         }
 
+        /**
+        Registers the native window class, creates the top-level window, and
+        makes it visible. Child controls are initialized from WM_CREATE.
+
+        Parameters:
+          instance: Application module instance used for window resources.
+          show_command: Initial window display state supplied by Windows.
+
+        Returns: True when the top-level window was created successfully.
+        **/
         bool Create(HINSTANCE instance, int show_command)
         {
             WNDCLASSEXW window_class = {};
@@ -534,6 +689,17 @@ namespace swift_disk::gui
         static constexpr BYTE kControlHoverGreen = 76;
         static constexpr BYTE kControlHoverBlue = 90;
 
+        /**
+        Dispatches top-level Win32 messages into the window's scanning, layout,
+        painting, input, and resource-lifecycle handlers.
+
+        Parameters:
+          message: Win32 message identifier.
+          w_param: Message-specific word parameter.
+          l_param: Message-specific long parameter.
+
+        Returns: The result required by the handled message or DefWindowProcW.
+        **/
         LRESULT HandleMessage(UINT message, WPARAM w_param, LPARAM l_param)
         {
             switch (message)
@@ -646,6 +812,19 @@ namespace swift_disk::gui
             return DefWindowProcW(m_hwnd, message, w_param, l_param);
         }
 
+        /**
+        Bridges the static Win32 callback to the MainWindow instance stored on
+        the HWND during WM_NCCREATE.
+
+        Parameters:
+          hwnd: Window receiving the message.
+          message: Win32 message identifier.
+          w_param: Message-specific word parameter.
+          l_param: Message-specific long parameter.
+
+        Returns: The instance handler result, or the default window procedure
+        result before the instance is available.
+        **/
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
         {
             MainWindow* window = nullptr;
@@ -654,6 +833,8 @@ namespace swift_disk::gui
                 auto* create = reinterpret_cast<CREATESTRUCTW*>(l_param);
                 window = static_cast<MainWindow*>(create->lpCreateParams);
                 window->m_hwnd = hwnd;
+                // WM_NCCREATE is the first callback that carries lpCreateParams;
+                // retain the controller pointer for every later window message.
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(window));
             }
             else
@@ -669,6 +850,10 @@ namespace swift_disk::gui
             return window->HandleMessage(message, w_param, l_param);
         }
 
+        /**
+        Lazily creates the GDI brushes shared by standard and owner-drawn header
+        controls.
+        **/
         void CreateControlThemeResources()
         {
             if (!m_header_background_brush)
@@ -705,6 +890,10 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Releases every GDI brush owned by the window and clears its handle so the
+        cleanup remains safe after partial initialization.
+        **/
         void DestroyControlThemeResources()
         {
             if (m_header_background_brush)
@@ -729,6 +918,17 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Supplies text, background, and brush choices for standard controls that
+        must blend into the custom dark header.
+
+        Parameters:
+          hdc: Device context Windows will use to draw the control.
+          control: Control requesting its colors.
+          message: WM_CTLCOLOR message identifying the control category.
+
+        Returns: A brush handle for Windows to use, or zero for invalid input.
+        **/
         LRESULT HandleControlColor(HDC hdc, HWND control, UINT message)
         {
             if (!hdc || !control)
@@ -777,6 +977,14 @@ namespace swift_disk::gui
             return reinterpret_cast<LRESULT>(GetStockObject(HOLLOW_BRUSH));
         }
 
+        /**
+        Fills a GDI rectangle with a temporary solid brush.
+
+        Parameters:
+          hdc: Destination device context.
+          rect: Area to fill.
+          color: Fill color.
+        **/
         void FillGdiRect(HDC hdc, const RECT& rect, COLORREF color) const
         {
             HBRUSH brush = CreateSolidBrush(color);
@@ -789,6 +997,15 @@ namespace swift_disk::gui
             DeleteObject(brush);
         }
 
+        /**
+        Draws a one-pixel rectangular frame while preserving the device context's
+        previously selected pen and brush.
+
+        Parameters:
+          hdc: Destination device context.
+          rect: Frame bounds.
+          color: Frame color.
+        **/
         void DrawGdiFrame(HDC hdc, const RECT& rect, COLORREF color) const
         {
             HPEN pen = CreatePen(PS_SOLID, 1, color);
@@ -805,6 +1022,18 @@ namespace swift_disk::gui
             DeleteObject(pen);
         }
 
+        /**
+        Selects a button fill color using native interaction precedence so
+        disabled and pressed states remain unambiguous.
+
+        Parameters:
+          pressed: Whether the control is currently pressed.
+          disabled: Whether the control is disabled.
+          hovered: Whether the pointer is over the control.
+          checked: Whether a checkbox-style control is checked.
+
+        Returns: Fill color for the requested state.
+        **/
         COLORREF GetButtonFillColor(bool pressed, bool disabled, bool hovered, bool checked = false) const
         {
             if (disabled)
@@ -826,6 +1055,16 @@ namespace swift_disk::gui
             return ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue);
         }
 
+        /**
+        Selects the muted, normal, or active border used by an owner-drawn control.
+
+        Parameters:
+          disabled: Whether the control is disabled.
+          hovered: Whether the pointer is over the control.
+          checked: Whether a checkbox-style control is checked.
+
+        Returns: Border color for the requested state.
+        **/
         COLORREF GetButtonBorderColor(bool disabled, bool hovered, bool checked = false) const
         {
             if (disabled)
@@ -839,6 +1078,13 @@ namespace swift_disk::gui
             return ColorRefFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue);
         }
 
+        /**
+        Draws an owner-drawn button with the shared header palette while
+        preserving native pressed, disabled, and keyboard-focus feedback.
+
+        Parameters:
+          draw_item: Win32 owner-draw state and target device context.
+        **/
         void DrawCustomButton(const DRAWITEMSTRUCT& draw_item) const
         {
             if (!draw_item.hDC || !draw_item.hwndItem)
@@ -896,6 +1142,13 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Draws an owner-drawn checkbox whose checked value is backed by the
+        corresponding MainWindow setting instead of native button state alone.
+
+        Parameters:
+          draw_item: Win32 owner-draw state and target device context.
+        **/
         void DrawCustomCheckbox(const DRAWITEMSTRUCT& draw_item) const
         {
             if (!draw_item.hDC || !draw_item.hwndItem)
@@ -1008,6 +1261,15 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Routes WM_DRAWITEM requests to the custom button or checkbox renderer for
+        controls owned by MainWindow.
+
+        Parameters:
+          draw_item: Owner-draw request from Windows.
+
+        Returns: TRUE when the control was drawn, otherwise FALSE.
+        **/
         LRESULT HandleDrawItem(const DRAWITEMSTRUCT* draw_item) const
         {
             if (!draw_item)
@@ -1036,6 +1298,14 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Synchronizes a checkbox's native accessibility state with the setting
+        stored by MainWindow and schedules it for repainting.
+
+        Parameters:
+          checkbox: Checkbox control to update.
+          checked: New checked state.
+        **/
         void SetCheckboxState(HWND checkbox, bool checked) const
         {
             if (!checkbox)
@@ -1056,6 +1326,15 @@ namespace swift_disk::gui
             return control && control == m_hovered_control;
         }
 
+        /**
+        Determines whether a child control participates in shared hover tracking
+        and themed invalidation.
+
+        Parameters:
+          control: Child control to classify.
+
+        Returns: True when MainWindow subclasses and tracks the control.
+        **/
         bool IsTrackedControl(HWND control) const
         {
             return control == m_path_edit ||
@@ -1083,6 +1362,13 @@ namespace swift_disk::gui
             return control == m_path_edit || control == m_path_combo_edit;
         }
 
+        /**
+        Invalidates a themed control after an interaction-state change, including
+        the non-client frame used by edit controls.
+
+        Parameters:
+          control: Tracked control to repaint.
+        **/
         void InvalidateTrackedControl(HWND control) const
         {
             if (!control || !IsTrackedControl(control))
@@ -1092,6 +1378,8 @@ namespace swift_disk::gui
 
             if (IsEditControl(control))
             {
+                // Edit controls draw their non-client border separately, so a
+                // frame redraw is required for hover changes to reach it.
                 RedrawWindow(control, nullptr, nullptr, RDW_INVALIDATE | RDW_FRAME);
                 return;
             }
@@ -1099,6 +1387,13 @@ namespace swift_disk::gui
             InvalidateRect(control, nullptr, TRUE);
         }
 
+        /**
+        Changes the currently hovered header control and repaints both the old and
+        new controls so their themed backgrounds update immediately.
+
+        Parameters:
+          control: New hovered control, or null to clear hover state.
+        **/
         void SetHoveredControl(HWND control)
         {
             if (control && (!IsTrackedControl(control) || !IsWindowEnabled(control)))
@@ -1117,6 +1412,13 @@ namespace swift_disk::gui
             InvalidateTrackedControl(m_hovered_control);
         }
 
+        /**
+        Marks a child control as hovered and asks Windows for a matching
+        WM_MOUSELEAVE notification.
+
+        Parameters:
+          control: Child control currently under the pointer.
+        **/
         void OnControlMouseMove(HWND control)
         {
             SetHoveredControl(control);
@@ -1136,6 +1438,16 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Fills the four bands between an edit control's client bounds and its inset
+        text-formatting rectangle.
+
+        Parameters:
+          hdc: Destination device context.
+          client: Full edit client rectangle.
+          text_rect: Rectangle used by native text painting.
+          color: Padding background color.
+        **/
         void FillEditPadding(HDC hdc, const RECT& client, const RECT& text_rect, COLORREF color) const
         {
             RECT top_rect = client;
@@ -1159,6 +1471,14 @@ namespace swift_disk::gui
             FillGdiRect(hdc, right_rect, color);
         }
 
+        /**
+        Repaints the area outside an edit control's formatting rectangle. Native
+        edit painting only fills the text rectangle, which otherwise leaves the
+        custom hover background incomplete around the inset text.
+
+        Parameters:
+          control: Subclassed edit control whose padding should be painted.
+        **/
         void PaintEditPadding(HWND control) const
         {
             if (!IsEditControl(control))
@@ -1186,6 +1506,14 @@ namespace swift_disk::gui
             ReleaseDC(control, hdc);
         }
 
+        /**
+        Looks up the native procedure saved when a child control was subclassed.
+
+        Parameters:
+          control: Subclassed child control.
+
+        Returns: Original procedure, or null when the control is not registered.
+        **/
         WNDPROC GetOriginalControlProc(HWND control) const
         {
             for (const auto& subclassed_control : m_subclassed_controls)
@@ -1199,6 +1527,18 @@ namespace swift_disk::gui
             return nullptr;
         }
 
+        /**
+        Bridges a subclassed child-control procedure back to its MainWindow so
+        controls can share hover tracking, keyboard shortcuts, and edit painting.
+
+        Parameters:
+          hwnd: Child control receiving the message.
+          message: Win32 message identifier.
+          w_param: Message-specific word parameter.
+          l_param: Message-specific long parameter.
+
+        Returns: The result from the instance control handler or default procedure.
+        **/
         static LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
         {
             auto* window = reinterpret_cast<MainWindow*>(GetPropW(hwnd, kControlWindowPropName));
@@ -1210,6 +1550,18 @@ namespace swift_disk::gui
             return window->HandleControlMessage(hwnd, message, w_param, l_param);
         }
 
+        /**
+        Adds application-specific behavior around a subclassed control and then
+        delegates unhandled behavior to that control's original window procedure.
+
+        Parameters:
+          control: Child control receiving the message.
+          message: Win32 message identifier.
+          w_param: Message-specific word parameter.
+          l_param: Message-specific long parameter.
+
+        Returns: The handled result or the original control-procedure result.
+        **/
         LRESULT HandleControlMessage(HWND control, UINT message, WPARAM w_param, LPARAM l_param)
         {
             WNDPROC original_proc = GetOriginalControlProc(control);
@@ -1257,6 +1609,13 @@ namespace swift_disk::gui
             return CallWindowProcW(original_proc, control, message, w_param, l_param);
         }
 
+        /**
+        Subclasses one child control and records its original procedure so hover
+        behavior can be added without losing the control's native behavior.
+
+        Parameters:
+          control: Child control to subclass.
+        **/
         void AddControlHoverTracking(HWND control)
         {
             if (!control || GetPropW(control, kControlWindowPropName))
@@ -1279,6 +1638,10 @@ namespace swift_disk::gui
             m_subclassed_controls.emplace_back(control, original_proc);
         }
 
+        /**
+        Installs the shared child-control subclass on every interactive header
+        control that participates in custom hover or keyboard behavior.
+        **/
         void CreateControlHoverTracking()
         {
             AddControlHoverTracking(m_path_edit);
@@ -1296,6 +1659,10 @@ namespace swift_disk::gui
             AddControlHoverTracking(m_show_status_bar_check);
         }
 
+        /**
+        Restores every subclassed control's original procedure before the main
+        window releases its controller and associated properties.
+        **/
         void DestroyControlHoverTracking()
         {
             SetHoveredControl(nullptr);
@@ -1320,6 +1687,17 @@ namespace swift_disk::gui
             m_subclassed_controls.clear();
         }
 
+        /**
+        Applies DPI-scaled text padding to an edit control by updating both its
+        formatting rectangle and horizontal margins.
+
+        Parameters:
+          edit: Edit control to update.
+          left_padding: Left inset in physical pixels.
+          top_padding: Top inset in physical pixels.
+          right_padding: Right inset in physical pixels.
+          bottom_padding: Bottom inset in physical pixels.
+        **/
         void ApplyEditTextInsets(
             HWND edit,
             int left_padding,
@@ -1347,6 +1725,15 @@ namespace swift_disk::gui
                 MAKELPARAM(left_padding, right_padding));
         }
 
+        /**
+        Measures a control's current label using its assigned font and device
+        context.
+
+        Parameters:
+          control: Control whose label should be measured.
+
+        Returns: Label width in physical pixels, or zero when unavailable.
+        **/
         int MeasureControlTextWidth(HWND control) const
         {
             if (!control)
@@ -1381,6 +1768,17 @@ namespace swift_disk::gui
             return std::max(size.cx, 0L);
         }
 
+        /**
+        Calculates a checkbox width from its box, label, DPI-scaled spacing, and
+        caller-provided minimum.
+
+        Parameters:
+          checkbox: Checkbox whose label should be measured.
+          minimum_width: Lower width bound in physical pixels.
+          dpi_scale: Current window DPI scale.
+
+        Returns: Required checkbox width in physical pixels.
+        **/
         int GetCheckboxControlWidth(HWND checkbox, int minimum_width, float dpi_scale) const
         {
             const int checkbox_left_padding = ScaleIntForDpi(2.0f, dpi_scale);
@@ -1402,6 +1800,12 @@ namespace swift_disk::gui
             return std::max(minimum_width, measured_width);
         }
 
+        /**
+        Selects the initial path-field value using command-line path, valid saved
+        path, and default NTFS drive precedence.
+
+        Returns: Text to place in the path field at startup.
+        **/
         std::wstring GetInitialPathFieldValue() const
         {
             if (!m_options.path.empty())
@@ -1417,6 +1821,11 @@ namespace swift_disk::gui
             return GetDefaultPathFieldValue();
         }
 
+        /**
+        Creates the complete native header control set, applies the shared font
+        and persisted state, installs child-control subclassing, and performs the
+        initial layout.
+        **/
         void CreateHeaderControls()
         {
             HFONT gui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -1682,6 +2091,15 @@ namespace swift_disk::gui
             UpdateHeaderControlsLayout();
         }
 
+        /**
+        Calculates the minimum width needed by both header control rows using
+        measured label widths and the same gaps used by the layout routine.
+
+        Parameters:
+          dpi_scale: Current window DPI scale.
+
+        Returns: Required control-area width in physical pixels.
+        **/
         int GetRequiredHeaderControlAreaWidth(float dpi_scale) const
         {
             const int group_box_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
@@ -1737,6 +2155,15 @@ namespace swift_disk::gui
             return std::max(scan_row_width, lower_row_width);
         }
 
+        /**
+        Combines the control-area requirement with the summary area and outer
+        padding to determine the smallest usable client width.
+
+        Parameters:
+          dpi_scale: Current window DPI scale.
+
+        Returns: Minimum main-window client width in physical pixels.
+        **/
         int GetMinimumHeaderClientWidth(float dpi_scale) const
         {
             const int outer_padding = ScaleIntForDpi(kOuterPadding, dpi_scale);
@@ -1751,6 +2178,13 @@ namespace swift_disk::gui
                     header_info_gap);
         }
 
+        /**
+        Converts the minimum usable client width to a framed window width and
+        applies it to native resize tracking.
+
+        Parameters:
+          info: WM_GETMINMAXINFO structure to update.
+        **/
         void OnGetMinMaxInfo(MINMAXINFO* info) const
         {
             if (!info || !m_hwnd)
@@ -1773,6 +2207,11 @@ namespace swift_disk::gui
                 min_rect.right - min_rect.left);
         }
 
+        /**
+        Measures and positions all header controls for the current client width
+        and DPI while keeping the summary, scan, display, and treemap groups from
+        overlapping.
+        **/
         void UpdateHeaderControlsLayout()
         {
             if (!m_hwnd)
@@ -1905,6 +2344,8 @@ namespace swift_disk::gui
 
             if (m_path_edit)
             {
+                // A CBS_DROPDOWN window's height includes its expanded list, not
+                // only the visible edit row.
                 const int path_dropdown_height = ScaleIntForDpi(190.0f, dpi_scale);
                 MoveWindow(m_path_edit, scan_group_left, scan_group_top_inner, edit_width, path_dropdown_height, TRUE);
                 SendMessageW(m_path_edit, CB_SETDROPPEDWIDTH, static_cast<WPARAM>(edit_width), 0);
@@ -2007,6 +2448,12 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Reads the visible text from the editable path combo box, falling back to
+        startup options before the control exists.
+
+        Returns: Unmapped text currently shown in the path field.
+        **/
         std::wstring GetRawPathFieldText() const
         {
             if (!m_path_edit)
@@ -2023,6 +2470,12 @@ namespace swift_disk::gui
             return value;
         }
 
+        /**
+        Converts drive-dropdown display text back to its filesystem root while
+        leaving custom user-entered paths unchanged.
+
+        Returns: Filesystem path represented by the path field.
+        **/
         std::wstring GetPathFromEdit() const
         {
             const std::wstring value = GetRawPathFieldText();
@@ -2037,6 +2490,10 @@ namespace swift_disk::gui
             return value;
         }
 
+        /**
+        Re-enumerates NTFS drives and repopulates the editable combo box without
+        discarding a custom path currently typed by the user.
+        **/
         void RefreshNtfsDriveDropdown()
         {
             if (!m_path_edit)
@@ -2077,6 +2534,10 @@ namespace swift_disk::gui
             InvalidateRect(m_path_edit, nullptr, TRUE);
         }
 
+        /**
+        Refreshes the available NTFS drives immediately before opening the path
+        combo box so removable and newly mounted volumes are current.
+        **/
         void ShowPathDropdown()
         {
             if (!m_path_edit || !IsWindowEnabled(m_path_edit))
@@ -2096,6 +2557,11 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Copies the highlighted item from an open dropdown into the combo edit.
+        This makes an immediate Enter key scan use the visible selection even
+        before the combo box has emitted its normal selection commit.
+        **/
         void CommitVisiblePathDropdownSelection()
         {
             if (!m_path_edit || !SendMessageW(m_path_edit, CB_GETDROPPEDSTATE, 0, 0))
@@ -2125,6 +2591,13 @@ namespace swift_disk::gui
             SetWindowTextW(m_path_edit, selected_text.c_str());
         }
 
+        /**
+        Updates Home and Clear availability from scan state, tree availability,
+        and whether any explicit folder reveals can be cleared.
+
+        Parameters:
+          controls_enabled: Parent enable state imposed by the current operation.
+        **/
         void UpdateTreemapActionControlsEnabled(bool controls_enabled = true)
         {
             const bool enabled = controls_enabled && !m_scan_in_progress && m_tree != nullptr;
@@ -2138,6 +2611,13 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Enables or disables controls that can mutate scan or layout state while
+        leaving Help and About available during a background scan.
+
+        Parameters:
+          enabled: Whether scan-dependent controls may accept input.
+        **/
         void SetScanControlsEnabled(bool enabled)
         {
             if (m_path_edit)
@@ -2187,6 +2667,10 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Resets every treemap, breadcrumb, pointer, and tooltip field that belongs
+        to the current hover interaction and stops tooltip animation.
+        **/
         void ClearHoverState()
         {
             m_hovered_index = -1;
@@ -2198,6 +2682,10 @@ namespace swift_disk::gui
             StopTooltipAnimation();
         }
 
+        /**
+        Clears treemap, breadcrumb, and tooltip hover state and invalidates the
+        union of their old and new visual bounds.
+        **/
         void ClearHoverStateAndInvalidate()
         {
             if (m_hovered_index == -1 &&
@@ -2224,6 +2712,10 @@ namespace swift_disk::gui
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }
 
+        /**
+        Takes a snapshot of the current persistent UI preferences and last scan
+        path and writes it through the application settings helper.
+        **/
         void SaveCurrentAppSettings() const
         {
             AppSettings settings;
@@ -2234,6 +2726,14 @@ namespace swift_disk::gui
             SaveAppSettings(settings);
         }
 
+        /**
+        Applies and persists a clamped treemap depth limit. Any remembered
+        one-off folder expansions are cleared because they were derived from the
+        previous limit.
+
+        Parameters:
+          depth_limit: Requested absolute depth in the range 1 through 32.
+        **/
         void ApplyDepthLimit(int depth_limit)
         {
             const int clamped_depth_limit = std::clamp(depth_limit, 1, 32);
@@ -2251,6 +2751,9 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Returns the treemap to the scanned tree root when navigation is available.
+        **/
         void GoToScanRoot()
         {
             if (!m_tree || m_scan_in_progress)
@@ -2262,6 +2765,10 @@ namespace swift_disk::gui
             RebuildAndRedraw();
         }
 
+        /**
+        Removes all per-folder depth extensions and rebuilds the treemap using
+        only the configured global depth.
+        **/
         void ClearRememberedExpandedFolders()
         {
             if (!m_tree || m_scan_in_progress || m_expanded_reveal_nodes.empty())
@@ -2273,6 +2780,10 @@ namespace swift_disk::gui
             RebuildAndRedraw();
         }
 
+        /**
+        Transitions a successful scan result to its ready state, resets view
+        navigation, re-enables controls, and builds the initial layout.
+        **/
         void ApplyFreshScanResultView()
         {
             m_has_error = false;
@@ -2284,6 +2795,10 @@ namespace swift_disk::gui
             RebuildAndRedraw();
         }
 
+        /**
+        Resets navigation, explicit depth extensions, layout options, geometry,
+        breadcrumbs, and hover state for a newly assigned tree.
+        **/
         void ResetToFreshScanView()
         {
             if (!m_tree)
@@ -2299,6 +2814,13 @@ namespace swift_disk::gui
             ClearHoverState();
         }
 
+        /**
+        Updates the depth edit and applies the value while suppressing the
+        recursive EN_CHANGE notification caused by SetWindowTextW.
+
+        Parameters:
+          depth_limit: Requested depth value.
+        **/
         void SetDepthEditValue(int depth_limit)
         {
             if (!m_depth_edit)
@@ -2315,6 +2837,13 @@ namespace swift_disk::gui
             ApplyDepthLimit(clamped_depth_limit);
         }
 
+        /**
+        Applies a relative depth change using the current valid edit value or the
+        last accepted depth when the edit is temporarily invalid.
+
+        Parameters:
+          delta: Signed amount to add to the depth limit.
+        **/
         void AdjustDepthLimit(int delta)
         {
             int depth_limit = m_max_depth;
@@ -2326,6 +2855,15 @@ namespace swift_disk::gui
             SetDepthEditValue(depth_limit + delta);
         }
 
+        /**
+        Parses the depth edit as a complete decimal value and clamps it to the
+        supported range.
+
+        Parameters:
+          depth_limit: Receives the parsed value on success.
+
+        Returns: True when the edit contains a valid integer.
+        **/
         bool TryGetDepthLimitFromEdit(int* depth_limit) const
         {
             if (!depth_limit)
@@ -2358,6 +2896,15 @@ namespace swift_disk::gui
             return true;
         }
 
+        /**
+        Shows the modern Windows folder picker, seeded from the current path when
+        possible, and extracts a filesystem path from the selected shell item.
+
+        Parameters:
+          selected_path: Receives the selected folder path.
+
+        Returns: True when the user selected a filesystem folder.
+        **/
         bool BrowseForFolder(std::wstring* selected_path)
         {
             if (!selected_path)
@@ -2429,6 +2976,15 @@ namespace swift_disk::gui
             return true;
         }
 
+        /**
+        Removes leading and trailing ASCII whitespace accepted around path and
+        numeric edit values.
+
+        Parameters:
+          value: Text to trim.
+
+        Returns: Trimmed text, or an empty string for all-whitespace input.
+        **/
         static std::wstring TrimWhitespace(std::wstring value)
         {
             const size_t first = value.find_first_not_of(L" \t\r\n");
@@ -2440,6 +2996,10 @@ namespace swift_disk::gui
             return value.substr(first, last - first + 1);
         }
 
+        /**
+        Validates and normalizes the current path field, persists the accepted
+        path, and starts a scan unless one is already running.
+        **/
         void BeginScanFromUiPath()
         {
             if (m_scan_in_progress)
@@ -2467,6 +3027,15 @@ namespace swift_disk::gui
             BeginScanFromUiPath();
         }
 
+        /**
+        Handles header control notifications and keeps persisted settings,
+        control state, treemap layout, and focus behavior synchronized.
+
+        Parameters:
+          control_id: Application identifier for the source control.
+          notification_code: Control-specific WM_COMMAND notification.
+          control: Source control window.
+        **/
         void OnCommand(int control_id, int notification_code, HWND control)
         {
             if (control_id == IDC_PATH_EDIT && control == m_path_edit)
@@ -2600,6 +3169,11 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Transitions the UI into its scanning state and starts a detached worker
+        that selects the NTFS MFT scanner when possible, then publishes one
+        payload back to the UI thread.
+        **/
         void StartScan()
         {
             m_scan_in_progress = true;
@@ -2613,6 +3187,8 @@ namespace swift_disk::gui
 
             const HWND hwnd = m_hwnd;
             const std::wstring path = m_options.path;
+            // The shared state outlives MainWindow if the user closes the app
+            // while this detached worker is still scanning.
             const std::shared_ptr<SharedScanState> shared_state = m_shared_scan_state;
             std::thread(
                 [hwnd, path, shared_state]()
@@ -2651,6 +3227,8 @@ namespace swift_disk::gui
                         shared_state->pending_payload = std::move(payload);
                     }
 
+                    // Publish the payload before posting the message so the UI
+                    // can consume a complete result as soon as it handles it.
                     if (IsWindow(hwnd))
                     {
                         PostMessageW(hwnd, ok ? WM_APP_SCAN_COMPLETE : WM_APP_SCAN_FAILED, 0, 0);
@@ -2659,6 +3237,13 @@ namespace swift_disk::gui
             ).detach();
         }
 
+        /**
+        Consumes the worker's pending payload on the UI thread and transitions
+        the window to either an error state or a freshly rooted treemap view.
+
+        Parameters:
+          failed: Whether the worker posted the failure completion message.
+        **/
         void ApplyCompletedScan(bool failed)
         {
             std::unique_ptr<ScanPayload> payload;
@@ -2702,6 +3287,11 @@ namespace swift_disk::gui
         {
             m_painter.DiscardDeviceResources();
         }
+
+        /**
+        Repositions controls, resizes existing device resources, rebuilds render
+        geometry, and schedules a repaint after a client-size change.
+        **/
         void OnSize()
         {
             UpdateHeaderControlsLayout();
@@ -2713,6 +3303,10 @@ namespace swift_disk::gui
             InvalidateRect(m_hwnd, nullptr, FALSE);
         }
 
+        /**
+        Invalidates the treemap canvas together with the status bar when it is
+        visible, without forcing an unnecessary full-window repaint.
+        **/
         void InvalidateCanvas()
         {
             RECT redraw_rect = RectFToRect(m_canvas_rect);
@@ -2727,6 +3321,15 @@ namespace swift_disk::gui
             InvalidateRect(m_hwnd, &redraw_rect, FALSE);
         }
 
+        /**
+        Builds current renderer state and asks the painter to measure the tooltip
+        at a proposed anchor position.
+
+        Parameters:
+          tooltip_position: Proposed tooltip anchor in client coordinates.
+
+        Returns: Tooltip bounds, or an empty rectangle when tooltips are disabled.
+        **/
         RenderRect MeasureTooltipBoundsAt(const RenderPoint& tooltip_position)
         {
             if (!m_hwnd || !m_show_tooltip)
@@ -2739,6 +3342,14 @@ namespace swift_disk::gui
             return m_painter.GetHoverTooltipBounds(m_hwnd, state);
         }
 
+        /**
+        Invalidates the union of a tooltip's previous and newly measured bounds
+        so animation never leaves stale pixels behind.
+
+        Parameters:
+          old_bounds: Tooltip bounds from the previous frame.
+          new_position: Tooltip anchor position for the next frame.
+        **/
         void InvalidateTooltipTransition(const RenderRect& old_bounds, const RenderPoint& new_position)
         {
             RenderRect new_bounds = MeasureTooltipBoundsAt(new_position);
@@ -2754,6 +3365,15 @@ namespace swift_disk::gui
             m_tooltip_redraw_bounds = new_bounds;
         }
 
+        /**
+        Converts a treemap rectangle from layout-local coordinates into absolute
+        client-space render bounds.
+
+        Parameters:
+          rect_index: Index in the current treemap rectangle list.
+
+        Returns: Client-space bounds, or an empty rectangle for an invalid index.
+        **/
         RenderRect GetTreemapRectBounds(int rect_index) const
         {
             if (rect_index < 0 || rect_index >= static_cast<int>(m_rects.size()))
@@ -2769,6 +3389,16 @@ namespace swift_disk::gui
                 m_treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
         }
 
+        /**
+        Calculates conservative repaint bounds for either a breadcrumb frame or a
+        treemap hover outline, including its DPI-scaled visual overflow.
+
+        Parameters:
+          rect_index: Hovered treemap rectangle index.
+          breadcrumb_index: Hovered breadcrumb index, which takes precedence.
+
+        Returns: Inflated client-space hover bounds.
+        **/
         RenderRect GetHoverVisualBounds(int rect_index, int breadcrumb_index) const
         {
             const float dpi_scale = GetWindowDpiScale(m_hwnd);
@@ -2782,6 +3412,15 @@ namespace swift_disk::gui
             return InflateRenderRect(GetTreemapRectBounds(rect_index), ScaleForDpi(4.0f, dpi_scale));
         }
 
+        /**
+        Invalidates every region affected by a hover change: old and new hover
+        visuals, tooltip bounds, and the optional status bar.
+
+        Parameters:
+          old_hovered_index: Previously hovered treemap rectangle index.
+          old_hovered_breadcrumb_index: Previously hovered breadcrumb index.
+          old_tooltip_bounds: Tooltip bounds before the state change.
+        **/
         void InvalidateHoverTransition(
             int old_hovered_index,
             int old_hovered_breadcrumb_index,
@@ -2815,6 +3454,10 @@ namespace swift_disk::gui
             m_tooltip_redraw_bounds = MakeRenderRect(0, 0, 0, 0);
         }
 
+        /**
+        Divides the client area below the header into treemap and optional status
+        bar rectangles while retaining valid one-pixel bounds in tiny windows.
+        **/
         void UpdateCanvasRect()
         {
             RECT client = {};
@@ -2853,6 +3496,11 @@ namespace swift_disk::gui
                     outer_padding + header_height + ScaleForDpi(1.0f, dpi_scale)));
         }
 
+        /**
+        Rebuilds breadcrumb frames and the treemap for the current view root. The
+        user-facing depth limit is converted from an absolute scan-tree depth to
+        the local depth expected by the treemap layout engine.
+        **/
         void RebuildLayout()
         {
             UpdateCanvasRect();
@@ -2957,6 +3605,8 @@ namespace swift_disk::gui
             const float height = std::max(m_treemap_content_rect.bottom - m_treemap_content_rect.top, 1.0f);
             const size_t current_root_depth = GetAbsoluteNodeDepth(m_view_root_id);
             const size_t base_visible_depth = static_cast<size_t>(std::max(m_max_depth, 0));
+            // BuildTreemapLayout counts descendants below its supplied root;
+            // subtract the root's absolute depth and the root level itself.
             const size_t local_depth_limit =
                 current_root_depth < base_visible_depth
                     ? (base_visible_depth - current_root_depth - 1)
@@ -2976,6 +3626,15 @@ namespace swift_disk::gui
             m_rects = visualization::BuildTreemapLayout(*m_tree, m_view_root_id, m_layout_options);
         }
 
+        /**
+        Finds the topmost treemap rectangle at a client-space point.
+
+        Parameters:
+          x: Horizontal client coordinate.
+          y: Vertical client coordinate.
+
+        Returns: Rectangle index, or -1 when no rectangle is hit.
+        **/
         int HitTestTreemap(float x, float y) const
         {
             if (m_scan_in_progress || !m_tree)
@@ -2991,6 +3650,8 @@ namespace swift_disk::gui
 
             const float local_x = x - m_treemap_content_rect.left;
             const float local_y = y - m_treemap_content_rect.top;
+            // Later rectangles are painted over earlier ones, so test them in
+            // reverse order to match the visual stacking order.
             for (int index = static_cast<int>(m_rects.size()) - 1; index >= 0; --index)
             {
                 const visualization::TreemapRect& rect = m_rects[static_cast<size_t>(index)];
@@ -3003,6 +3664,15 @@ namespace swift_disk::gui
             return -1;
         }
 
+        /**
+        Finds the breadcrumb strip containing a client-space point.
+
+        Parameters:
+          x: Horizontal client coordinate.
+          y: Vertical client coordinate.
+
+        Returns: Breadcrumb index, or -1 when no strip is hit.
+        **/
         int HitTestBreadcrumb(float x, float y) const
         {
             if (m_scan_in_progress || !m_tree)
@@ -3020,6 +3690,14 @@ namespace swift_disk::gui
             return -1;
         }
 
+        /**
+        Tracks treemap and breadcrumb hover transitions, advances the tooltip
+        target, and selects a cursor that reflects breadcrumb clickability.
+
+        Parameters:
+          x: Horizontal client coordinate.
+          y: Vertical client coordinate.
+        **/
         void OnMouseMove(int x, int y)
         {
             TRACKMOUSEEVENT track = {};
@@ -3098,6 +3776,15 @@ namespace swift_disk::gui
             SetCursor(LoadCursorW(nullptr, breadcrumb_is_clickable ? IDC_HAND : IDC_ARROW));
         }
 
+        /**
+        Navigates through breadcrumb or treemap clicks. Directory clicks beyond
+        the configured depth are remembered as explicit reveals, while file
+        clicks focus their containing directory when useful.
+
+        Parameters:
+          x: Horizontal client coordinate.
+          y: Vertical client coordinate.
+        **/
         void OnLeftButtonDown(int x, int y)
         {
             HidePathDropdown();
@@ -3137,6 +3824,8 @@ namespace swift_disk::gui
             {
                 const size_t clicked_depth = GetAbsoluteNodeDepth(rect.node_id);
                 const size_t expanded_ancestor_count = CountExpandedRevealAncestorsExclusive(rect.node_id);
+                // Each explicitly revealed ancestor extends the effective depth
+                // by one, so only remember this node when it crosses that limit.
                 if (clicked_depth >= static_cast<size_t>(m_max_depth) + expanded_ancestor_count)
                 {
                     m_expanded_reveal_nodes.insert(rect.node_id);
@@ -3156,6 +3845,10 @@ namespace swift_disk::gui
             RebuildAndRedraw();
         }
 
+        /**
+        Prepares for context-menu interaction by closing the path dropdown,
+        clearing hover visuals, and returning keyboard focus to the main window.
+        **/
         void OnRightButtonDown()
         {
             HidePathDropdown();
@@ -3164,6 +3857,14 @@ namespace swift_disk::gui
             SetCursor(LoadCursorW(nullptr, IDC_ARROW));
         }
 
+        /**
+        Resolves a right-click against breadcrumbs before treemap rectangles and
+        opens the context menu for the selected node.
+
+        Parameters:
+          x: Horizontal client coordinate.
+          y: Vertical client coordinate.
+        **/
         void OnRightButtonUp(int x, int y)
         {
             HidePathDropdown();
@@ -3189,6 +3890,15 @@ namespace swift_disk::gui
             ShowNodeContextMenu(rect.node_id, x, y);
         }
 
+        /**
+        Resolves a tree node to its full path, converts the click to screen
+        coordinates, and opens the appropriate file or directory context menu.
+
+        Parameters:
+          node_id: Selected tree node.
+          x: Horizontal client coordinate.
+          y: Vertical client coordinate.
+        **/
         void ShowNodeContextMenu(uint64_t node_id, int x, int y)
         {
             if (!m_tree || node_id == 0)
@@ -3213,6 +3923,16 @@ namespace swift_disk::gui
             ShowTreemapContextMenu(menu_position, path, node->is_dir);
         }
 
+        /**
+        Builds and displays the context menu for a scanned path, dispatches the
+        selected shell action, and protects the treemap from the click that can
+        follow mouse-based popup cancellation.
+
+        Parameters:
+          menu_position: Popup location in screen coordinates.
+          path: Full filesystem path represented by the clicked node.
+          is_dir: Whether the path is a directory.
+        **/
         void ShowTreemapContextMenu(const POINT& menu_position, const std::wstring& path, bool is_dir)
         {
             HMENU menu = CreatePopupMenu();
@@ -3248,6 +3968,8 @@ namespace swift_disk::gui
                 const bool cancelled_with_escape = (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0;
                 if (!cancelled_with_escape)
                 {
+                    // A mouse click outside TrackPopupMenu dismisses the menu and
+                    // may then arrive as WM_LBUTTONDOWN on the main window.
                     m_suppress_next_left_button_down = true;
                 }
             }
@@ -3279,9 +4001,18 @@ namespace swift_disk::gui
                 OpenPathProperties(path);
             }
 
+            // Complete the standard foreground-popup sequence so Windows reliably
+            // dismisses the menu when focus changes later.
             PostMessageW(m_hwnd, WM_NULL, 0, 0);
         }
 
+        /**
+        Opens a file with its registered Windows shell action and reports launch
+        failures to the user.
+
+        Parameters:
+          path: File path to open.
+        **/
         void OpenFile(const std::wstring& path) const
         {
             HINSTANCE result = ShellExecuteW(m_hwnd, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
@@ -3295,6 +4026,13 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Shows the native Open With dialog for a file, treating user cancellation
+        as a normal outcome and reporting other shell failures.
+
+        Parameters:
+          path: File path for which an application should be selected.
+        **/
         void OpenFileWithDialog(const std::wstring& path) const
         {
             OPENASINFO open_as_info = {};
@@ -3317,6 +4055,14 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Opens a directory directly in File Explorer or selects a file within its
+        containing Explorer window.
+
+        Parameters:
+          path: Filesystem path to show.
+          is_dir: Whether the path is a directory.
+        **/
         void OpenPathInFileExplorer(const std::wstring& path, bool is_dir) const
         {
             HINSTANCE result = nullptr;
@@ -3340,6 +4086,12 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Invokes the Windows shell Properties verb for a scanned path.
+
+        Parameters:
+          path: File or directory whose properties should be shown.
+        **/
         void OpenPathProperties(const std::wstring& path) const
         {
             SHELLEXECUTEINFOW execute_info = {};
@@ -3360,6 +4112,15 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Copies Unicode text to the Windows clipboard using movable global memory
+        as required by SetClipboardData.
+
+        Parameters:
+          text: Text to place on the clipboard.
+
+        Returns: True when clipboard ownership of the text was transferred.
+        **/
         bool CopyTextToClipboard(const std::wstring& text) const
         {
             if (!OpenClipboard(m_hwnd))
@@ -3394,10 +4155,18 @@ namespace swift_disk::gui
                 return false;
             }
 
+            // SetClipboardData owns clipboard_memory after a successful call.
             CloseClipboard();
             return true;
         }
 
+        /**
+        Displays the selected tree node as the top level of the treemap and rebuilds
+        the navigation and layout state.
+
+        Parameters:
+          node_id: Tree node to display as the top level of the treemap.
+        **/
         void NavigateToNode(uint64_t node_id)
         {
             if (!m_tree || node_id == 0 || node_id == m_view_root_id)
@@ -3412,6 +4181,10 @@ namespace swift_disk::gui
             RebuildAndRedraw();
         }
 
+        /**
+        Navigates to the parent of the currently displayed node without moving above
+        the root of the scanned tree.
+        **/
         void NavigateUp()
         {
             if (!CanNavigateUp())
@@ -3433,6 +4206,15 @@ namespace swift_disk::gui
             return m_tree && m_view_root_id != 0 && m_view_root_id != m_tree->RootId();
         }
 
+        /**
+        Walks parent links to measure a node's depth relative to the scanned tree
+        root. Invalid or cyclic parent chains terminate defensively.
+
+        Parameters:
+          node_id: Node whose depth should be measured.
+
+        Returns: Number of parent edges between the node and scan root.
+        **/
         size_t GetAbsoluteNodeDepth(uint64_t node_id) const
         {
             if (!m_tree || node_id == 0)
@@ -3460,6 +4242,15 @@ namespace swift_disk::gui
             return depth;
         }
 
+        /**
+        Counts explicitly revealed ancestors of a node without counting the node
+        itself. This converts remembered reveals into an effective depth bonus.
+
+        Parameters:
+          node_id: Node whose ancestor chain should be inspected.
+
+        Returns: Number of remembered reveal ancestors.
+        **/
         size_t CountExpandedRevealAncestorsExclusive(uint64_t node_id) const
         {
             if (!m_tree || node_id == 0)
@@ -3490,6 +4281,13 @@ namespace swift_disk::gui
             return count;
         }
 
+        /**
+        Maps main-window navigation and scan shortcuts to their shared command
+        paths.
+
+        Parameters:
+          key_code: Virtual-key code from WM_KEYDOWN.
+        **/
         void OnKeyDown(UINT key_code)
         {
             if (key_code == VK_BACK || key_code == VK_ESCAPE)
@@ -3507,6 +4305,10 @@ namespace swift_disk::gui
             }
         }
 
+        /**
+        Starts the shared tooltip timer when tooltips are enabled and no animation
+        timer is already active.
+        **/
         void StartTooltipAnimation()
         {
             if (!m_show_tooltip || m_tooltip_animation_active || !m_hwnd)
@@ -3518,6 +4320,9 @@ namespace swift_disk::gui
             m_tooltip_animation_active = true;
         }
 
+        /**
+        Stops the tooltip timer and synchronizes the cached active-state flag.
+        **/
         void StopTooltipAnimation()
         {
             if (!m_tooltip_animation_active || !m_hwnd)
@@ -3529,6 +4334,10 @@ namespace swift_disk::gui
             m_tooltip_animation_active = false;
         }
 
+        /**
+        Moves the tooltip toward the latest mouse position using exponential
+        smoothing, invalidating only the old and new tooltip regions each frame.
+        **/
         void OnTooltipAnimationTimer()
         {
             if (!m_show_tooltip)
@@ -3566,6 +4375,12 @@ namespace swift_disk::gui
             InvalidateTooltipTransition(old_tooltip_bounds, m_tooltip_position);
         }
 
+        /**
+        Takes a lightweight view of current UI, scan, geometry, and interaction
+        state for the renderer. Referenced vectors remain owned by MainWindow.
+
+        Returns: Drawing state valid for the current UI-thread paint operation.
+        **/
         MainWindowDrawingState BuildDrawingState() const
         {
             MainWindowDrawingState state;
@@ -3597,6 +4412,12 @@ namespace swift_disk::gui
             return state;
         }
 
+        /**
+        Collects the main-window theme constants into the renderer's palette
+        structure.
+
+        Returns: Palette matching the native header and window controls.
+        **/
         RenderVisualPalette GetRenderPalette() const
         {
             return RenderVisualPalette{
@@ -3621,6 +4442,10 @@ namespace swift_disk::gui
             };
         }
 
+        /**
+        Paints the invalidated client region and records the renderer's current
+        tooltip bounds for precise invalidation during later hover animation.
+        **/
         void OnPaint()
         {
             PAINTSTRUCT paint = {};
@@ -3704,6 +4529,16 @@ namespace swift_disk::gui
 
 } // namespace swift_disk::gui
 
+/**
+Initializes process-wide Win32 services, creates the main window, and runs the
+application message loop.
+
+Parameters:
+  instance: Application module instance.
+  show_command: Initial window display state supplied by Windows.
+
+Returns: Process exit code from startup or the final WM_QUIT message.
+**/
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command)
 {
     SetProcessDPIAware();

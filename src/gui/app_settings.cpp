@@ -23,6 +23,16 @@ namespace swift_disk::gui
         constexpr int kMinimumMaxDepth = 1;
         constexpr int kMaximumMaxDepth = 32;
 
+        /**
+        Reads and validates a DWORD setting from an already opened registry key.
+
+        Parameters:
+          key: Registry key containing the setting.
+          value_name: Name of the registry value to read.
+          value: Receives the DWORD on success.
+
+        Returns: True when the value exists with the expected type and size.
+        **/
         bool TryReadDwordValue(HKEY key, const wchar_t* value_name, DWORD* value)
         {
             if (!value)
@@ -61,6 +71,16 @@ namespace swift_disk::gui
                 sizeof(value));
         }
 
+        /**
+        Reads a REG_SZ setting with a size query followed by a bounded data read.
+
+        Parameters:
+          key: Registry key containing the setting.
+          value_name: Name of the registry value to read.
+          value: Receives the string on success.
+
+        Returns: True when the value exists and can be read as REG_SZ.
+        **/
         bool TryReadStringValue(HKEY key, const wchar_t* value_name, std::wstring* value)
         {
             if (!value)
@@ -83,6 +103,8 @@ namespace swift_disk::gui
                 return false;
             }
 
+            // Registry sizes are reported in bytes. Round up defensively before
+            // adding a guaranteed terminator for malformed or legacy values.
             const size_t character_count =
                 (data_size + sizeof(wchar_t) - 1) / sizeof(wchar_t);
             std::vector<wchar_t> buffer(character_count + 1, L'\0');

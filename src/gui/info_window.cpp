@@ -55,6 +55,11 @@ namespace
         return L"SwiftDiskInfoWindow";
     }
 
+    /**
+    Builds the complete user-facing guidance shown in the Help window.
+
+    Returns: Help text with Win32 edit-control line endings.
+    **/
     std::wstring BuildHelpText()
     {
         return
@@ -102,6 +107,12 @@ namespace
             L"- Clear removes remembered expanded folders without changing the current scan.";
     }
 
+    /**
+    Builds the About text from generated version metadata, compiler build date,
+    copyright, and license information.
+
+    Returns: Formatted text shown in the About window.
+    **/
     std::wstring BuildAboutText()
     {
         std::wstringstream stream;
@@ -135,6 +146,13 @@ namespace
         return RGB(red, green, blue);
     }
 
+    /**
+    Positions the scrollable text and Close button within the current client area
+    while preserving fixed outer padding and valid minimum dimensions.
+
+    Parameters:
+      hwnd: Information window whose child controls should be positioned.
+    **/
     void LayoutInfoWindowControls(HWND hwnd)
     {
         RECT client = {};
@@ -177,6 +195,14 @@ namespace
         return reinterpret_cast<InfoWindowState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     }
 
+    /**
+    Fills a GDI rectangle with a temporary solid brush.
+
+    Parameters:
+      hdc: Destination device context.
+      rect: Area to fill.
+      color: Fill color.
+    **/
     void FillInfoWindowRect(HDC hdc, const RECT& rect, COLORREF color)
     {
         HBRUSH brush = CreateSolidBrush(color);
@@ -189,6 +215,15 @@ namespace
         DeleteObject(brush);
     }
 
+    /**
+    Draws a one-pixel GDI frame while restoring the device context's previously
+    selected pen and brush.
+
+    Parameters:
+      hdc: Destination device context.
+      rect: Frame bounds.
+      color: Frame color.
+    **/
     void DrawInfoWindowFrame(HDC hdc, const RECT& rect, COLORREF color)
     {
         HPEN pen = CreatePen(PS_SOLID, 1, color);
@@ -205,6 +240,13 @@ namespace
         DeleteObject(pen);
     }
 
+    /**
+    Draws the owner-drawn Close button with themed disabled, pressed, hover, and
+    keyboard-focus feedback.
+
+    Parameters:
+      draw_item: Win32 owner-draw state and destination device context.
+    **/
     void DrawInfoWindowButton(const DRAWITEMSTRUCT& draw_item)
     {
         if (!draw_item.hDC || !draw_item.hwndItem)
@@ -262,6 +304,18 @@ namespace
         }
     }
 
+    /**
+    Handles creation, layout, themed drawing, commands, and resource cleanup for
+    Help and About windows.
+
+    Parameters:
+      hwnd: Information window receiving the message.
+      message: Win32 message identifier.
+      w_param: Message-specific word parameter.
+      l_param: Message-specific long parameter.
+
+    Returns: The handled result or the default window-procedure result.
+    **/
     LRESULT CALLBACK InfoWindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
     {
         switch (message)
@@ -278,6 +332,8 @@ namespace
                 ColorRefFromRgb(kHeaderPanelRed, kHeaderPanelGreen, kHeaderPanelBlue));
             state->m_text_background_brush = CreateSolidBrush(
                 ColorRefFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue));
+            // Keep the brushes with the HWND because later paint and destroy
+            // messages do not carry the creation context.
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
 
             HWND info_text = CreateWindowExW(
@@ -402,6 +458,15 @@ namespace
         return DefWindowProcW(hwnd, message, w_param, l_param);
     }
 
+    /**
+    Registers the shared native window class used by both Help and About. An
+    existing registration is treated as success so either window can open first.
+
+    Parameters:
+      instance: Application module that owns the window class.
+
+    Returns: True when the class is available for window creation.
+    **/
     bool RegisterInfoWindowClass(HINSTANCE instance)
     {
         WNDCLASSW window_class = {};
@@ -419,6 +484,17 @@ namespace
         return GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
     }
 
+    /**
+    Creates a modeless native window and runs a local message loop that gives it
+    modal behavior relative to its disabled owner.
+
+    Parameters:
+      owner: Window to disable while the information window is open.
+      title: Information-window title.
+      text: Read-only text displayed in the window.
+      width: Initial outer window width in pixels.
+      height: Initial outer window height in pixels.
+    **/
     void ShowInfoWindow(
         HWND owner,
         const wchar_t* title,
@@ -444,12 +520,16 @@ namespace
             owner,
             nullptr,
             instance,
+            // InfoWindowProc reads this pointer only during synchronous
+            // WM_CREATE handling; CreateWindowExW does not take ownership of it.
             const_cast<wchar_t*>(text.c_str()));
         if (!info_window)
         {
             return;
         }
 
+        // Disabling the owner and running this nested loop provides the modal
+        // behavior normally supplied by a dialog manager.
         EnableWindow(owner, FALSE);
         ShowWindow(info_window, SW_SHOW);
         UpdateWindow(info_window);
@@ -458,6 +538,8 @@ namespace
         BOOL get_message_result = 0;
         while (IsWindow(info_window) && (get_message_result = GetMessageW(&message, nullptr, 0, 0)) > 0)
         {
+            // Preserve dialog-style Tab, Enter, and Escape handling even though
+            // the window was created as a regular overlapped window.
             if (!IsDialogMessageW(info_window, &message))
             {
                 TranslateMessage(&message);
@@ -473,6 +555,8 @@ namespace
 
         if (get_message_result == 0)
         {
+            // The nested loop consumed WM_QUIT, so repost it for the application's
+            // outer message loop after this function returns.
             PostQuitMessage(static_cast<int>(message.wParam));
         }
     }
