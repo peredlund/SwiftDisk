@@ -9,6 +9,10 @@ SwiftDisk is a disk space analyzer for Windows that helps you find what is using
 
 SwiftDisk supports Windows 10, Windows 11, and Windows Server 2016 and later.
 
+## Screenhot
+
+![SwiftDisk screenshot](assets/screenshot_70_percent.png)
+
 ## Install
 
 To install SwiftDisk, unzip the downloaded file to a folder where you want to keep the app. To start the app, run `SwiftDisk.exe` from the unzipped folder. Windows will show a User Account Control prompt when SwiftDisk starts since it needs administrator permission to read the NTFS Master File Table.
