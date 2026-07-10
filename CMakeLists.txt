@@ -1,6 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
 project(SwiftDisk VERSION 0.1.0 LANGUAGES CXX)
 
+if (NOT WIN32)
+    message(FATAL_ERROR
+        "SwiftDisk only supports Windows."
+    )
+endif()
+
+if (NOT MSVC)
+    message(FATAL_ERROR
+        "SwiftDisk requires a Microsoft Visual C++ compiler (MSVC)."
+    )
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -28,11 +40,11 @@ target_include_directories(swift_disk_core PUBLIC
     src
 )
 
-if (MSVC)
-    target_compile_options(swift_disk_core PRIVATE /W4 /permissive- /EHsc)
-else()
-    target_compile_options(swift_disk_core PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+target_compile_options(swift_disk_core PRIVATE
+    /W4
+    /permissive-
+    /EHsc
+)
 
 target_compile_definitions(swift_disk_core PRIVATE
     WIN32_LEAN_AND_MEAN
@@ -84,17 +96,15 @@ target_include_directories(swift_disk_gui PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
-if (MSVC)
-    target_link_options(swift_disk_gui PRIVATE
-        "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
-    )
-endif()
+target_link_options(swift_disk_gui PRIVATE
+    "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
+)
 
-if (MSVC)
-    target_compile_options(swift_disk_gui PRIVATE /W4 /permissive- /EHsc)
-else()
-    target_compile_options(swift_disk_gui PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+target_compile_options(swift_disk_gui PRIVATE
+    /W4
+    /permissive-
+    /EHsc
+)
 
 target_compile_definitions(swift_disk_gui PRIVATE
     WIN32_LEAN_AND_MEAN

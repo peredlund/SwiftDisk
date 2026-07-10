@@ -39,7 +39,7 @@ To install SwiftDisk, unzip the downloaded file to a folder where you want to ke
 
 ## Build from source
 
-SwiftDisk is a native Windows C++ application built with CMake. The build has been verified to work with Visual Studio 2026 as the CMake Generator.
+SwiftDisk is a native Windows C++ application built with CMake. It requires a Microsoft Visual C++ compiler (MSVC). The build has been verified to work with Visual Studio 2026 as the CMake Generator.
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 18 2026" -A x64
