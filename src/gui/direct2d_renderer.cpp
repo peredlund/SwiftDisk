@@ -153,7 +153,7 @@ namespace swift_disk::gui
 
     using Microsoft::WRL::ComPtr;
 
-    //Use unnamed namespace to aviod external linkage for local helper functions.
+    // Keep renderer-only conversion and formatting helpers out of the external symbol table.
     namespace
     {
 
@@ -167,6 +167,12 @@ namespace swift_disk::gui
         return D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom);
     }
 
+    /**
+    Creates render-target properties that keep Direct2D coordinates in physical
+    pixels. SwiftDisk applies its own DPI scale to all layout measurements.
+
+    Returns: Properties configured for a 96-DPI render target.
+    **/
     D2D1_RENDER_TARGET_PROPERTIES CreatePixelRenderTargetProperties()
     {
         return D2D1::RenderTargetProperties(
@@ -285,6 +291,17 @@ namespace swift_disk::gui
 
     }
 
+    /**
+    Creates the factories and device-dependent resources used to render the main
+    window. Existing factories are reused. Device loss recreates the render target,
+    brushes, and text formats; a DPI change recreates only the text formats.
+
+    Parameters:
+      hwnd: Main window whose client size and DPI determine the resources.
+      palette: Colors derived from the current Windows theme.
+
+    Returns: S_OK when all resources are available, otherwise the failing HRESULT.
+    **/
     HRESULT Direct2DRenderer::CreateDeviceResources(HWND hwnd, const RenderVisualPalette& palette)
     {
         if (!m_d2d_factory)
@@ -311,6 +328,8 @@ namespace swift_disk::gui
         const float window_scale = GetWindowDpiScale(hwnd);
         if (std::fabs(window_scale - m_ui_scale) > 0.001f)
         {
+            // Font sizes are baked into DirectWrite formats, so a DPI change
+            // invalidates the formats even when the render target remains valid.
             m_ui_scale = window_scale;
             m_title_format.Reset();
             m_body_format.Reset();
@@ -670,6 +689,20 @@ namespace swift_disk::gui
             D2D1_DRAW_TEXT_OPTIONS_CLIP);
     }
 
+    /**
+    Draws tile text with a one-pixel offset shadow so labels remain readable over
+    the many fill colors used by the treemap.
+
+    Parameters:
+      text: Text to draw.
+      format: Font style used for the layout.
+      bounds: Rectangle that constrains and clips the text.
+      text_brush: Brush used for the foreground text.
+      outline_brush: Brush used for the offset shadow.
+      text_alignment: Horizontal alignment within the layout.
+      paragraph_alignment: Vertical alignment within the layout.
+      word_wrapping: DirectWrite wrapping mode.
+    **/
     void Direct2DRenderer::DrawTileTextLayout(
         const std::wstring& text,
         RenderTextFormat format,
@@ -697,6 +730,8 @@ namespace swift_disk::gui
         layout->SetParagraphAlignment(paragraph_alignment);
         ApplyTrimming(layout.Get(), word_wrapping);
 
+        // Drawing the same layout first at an offset produces a lightweight
+        // shadow without creating separate glyph geometry.
         const D2D1_POINT_2F shadow_origin = D2D1::Point2F(bounds.left + 1.0f, bounds.top + 1.0f);
         const D2D1_POINT_2F origin = D2D1::Point2F(bounds.left, bounds.top);
         m_render_target->DrawTextLayout(shadow_origin, layout.Get(), shadow_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
@@ -752,6 +787,18 @@ namespace swift_disk::gui
         return metrics.widthIncludingTrailingWhitespace;
     }
 
+    /**
+    Measures text with the same DirectWrite layout rules used for drawing it.
+
+    Parameters:
+      text: Text to measure.
+      format: Font style used for the layout.
+      max_width: Maximum layout width in pixels.
+      max_height: Maximum layout height in pixels.
+      word_wrapping: DirectWrite wrapping mode.
+
+    Returns: Measured width and height, or zeroed metrics if layout fails.
+    **/
     RenderTextMetrics Direct2DRenderer::MeasureTextLayout(
         const std::wstring& text,
         RenderTextFormat format,
@@ -818,6 +865,13 @@ namespace swift_disk::gui
         return m_render_target->CreateSolidColorBrush(color, brush.GetAddressOf());
     }
 
+    /**
+    Creates the DPI-scaled DirectWrite formats and the shared ellipsis trimming
+    sign. The title font falls back to Segoe UI on systems without the variable
+    display family.
+
+    Returns: S_OK when every format is available, otherwise the failing HRESULT.
+    **/
     HRESULT Direct2DRenderer::CreateTextFormats()
     {
         HRESULT hr = m_dwrite_factory->CreateTextFormat(
@@ -894,6 +948,17 @@ namespace swift_disk::gui
         layout->SetTrimming(&trimming, m_ellipsis_trimming_sign.Get());
     }
 
+    /**
+    Creates a bounded text layout with consistent wrapping and trimming behavior.
+
+    Parameters:
+      text: Text to lay out.
+      format: Font style used for the layout.
+      bounds: Rectangle whose dimensions constrain the layout.
+      word_wrapping: DirectWrite wrapping mode.
+
+    Returns: The completed layout, or an empty COM pointer if creation fails.
+    **/
     ComPtr<IDWriteTextLayout> Direct2DRenderer::CreateTextLayout(
         const std::wstring& text,
         RenderTextFormat format,
@@ -983,6 +1048,15 @@ namespace swift_disk::gui
         return m_renderer->GetHoverTooltipBounds(hwnd, state);
     }
 
+    /**
+    Renders one frame of the main window, restricted to the invalidated paint
+    rectangle when Windows requests a partial repaint. Device-dependent resources
+    are discarded when Direct2D reports that the render target must be recreated.
+
+    Parameters:
+      hwnd: Main window associated with the render target.
+      state: Complete visual and interaction state for the frame.
+    **/
     void Direct2DRenderer::Paint(HWND hwnd, const MainWindowDrawingState& state)
     {
         HRESULT hr = CreateDeviceResources(hwnd, state.palette);
@@ -996,6 +1070,8 @@ namespace swift_disk::gui
         const bool has_clip = !IsRenderRectEmpty(state.paint_rect);
         if (has_clip)
         {
+            // Partial paints cover the clipped dirty region with the background
+            // brush before redrawing intersecting content.
             PushClip(state.paint_rect);
             FillRectangle(state.paint_rect, m_window_background_brush.Get());
         }
@@ -1023,6 +1099,16 @@ namespace swift_disk::gui
         }
     }
 
+    /**
+    Calculates the full invalidation bounds of the current tooltip, including its
+    shadow and a small antialiasing margin.
+
+    Parameters:
+      hwnd: Main window used to ensure DPI-dependent resources are available.
+      state: Current hover and drawing state.
+
+    Returns: Tooltip bounds, or an empty rectangle when no tooltip can be shown.
+    **/
     RenderRect Direct2DRenderer::GetHoverTooltipBounds(HWND hwnd, const MainWindowDrawingState& state)
     {
         HRESULT hr = CreateDeviceResources(hwnd, state.palette);
@@ -1045,6 +1131,17 @@ namespace swift_disk::gui
         return InflateRenderRect(bounds, Scale(3.0f));
     }
 
+    /**
+    Builds a directory-header label that preserves the size when both parts fit.
+    The directory name is shortened only when at least a useful prefix can remain.
+
+    Parameters:
+      label: Directory name.
+      size: Directory size in bytes.
+      available_width: Width available for the combined label in pixels.
+
+    Returns: The full label, a shortened label with size, or the original name.
+    **/
     std::wstring Direct2DRenderer::BuildDirectoryHeaderText(
         const std::wstring& label,
         uint64_t size,
@@ -1067,6 +1164,8 @@ namespace swift_disk::gui
         size_t low = 0;
         size_t high = label.size();
         size_t best = 0;
+        // Text width is monotonic with prefix length, so binary search avoids
+        // measuring every possible truncation of long paths.
         while (low <= high)
         {
             const size_t mid = low + ((high - low) / 2);
@@ -1104,6 +1203,14 @@ void Direct2DRenderer::DrawPanelRect(
     DrawRectangle(rect, border_brush, stroke_width);
 }
 
+/**
+Draws a custom group-box border with a gap in its top edge for the label. This
+matches the dark Direct2D header instead of relying on a themed Win32 group box.
+
+Parameters:
+  rect: Outer group-box rectangle.
+  label: Caption drawn across the top border.
+**/
 void Direct2DRenderer::DrawHeaderGroupBox(const RenderRect& rect, const std::wstring& label)
 {
     if (IsRenderRectEmpty(rect) || label.empty())
@@ -1118,6 +1225,8 @@ void Direct2DRenderer::DrawHeaderGroupBox(const RenderRect& rect, const std::wst
         rect.right - Scale(8.0f),
         label_left + measured_label_width + (label_padding_x * 2.0f));
     const float label_baseline_gap = Scale(4.0f);
+    // Half-pixel centerlines keep the one-pixel case crisp at 100% scaling;
+    // Direct2D antialiases the scaled stroke widths used at higher DPI settings.
     const float top_y = std::floor(rect.top) + 0.5f;
     const float bottom_y = std::floor(rect.bottom) + 0.5f;
     const float left_x = std::floor(rect.left) + 0.5f;
@@ -1160,6 +1269,14 @@ void Direct2DRenderer::DrawHeaderGroupBox(const RenderRect& rect, const std::wst
         m_muted_brush.Get());
 }
 
+/**
+Draws the canvas state, breadcrumb frames, and all visible treemap tiles. The
+method also selects progressively simpler label layouts as tiles become smaller
+and skips geometry outside a partial-paint rectangle.
+
+Parameters:
+  state: Tree data, computed treemap geometry, hover state, and paint bounds.
+**/
 void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
 {
     if (!IsRenderRectEmpty(state.paint_rect) && !RenderRectsIntersect(state.canvas_rect, state.paint_rect))
@@ -1266,6 +1383,8 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
         true);
     if (breadcrumbs.empty())
     {
+        // When no breadcrumb geometry is available, reuse the focus-up rectangle
+        // as a visible frame to keep the current level identifiable.
         const RenderRect shadow_rect = MakeRenderRect(
             state.focus_up_rect.left + Scale(8.0f),
             state.focus_up_rect.top + Scale(8.0f),
@@ -1395,6 +1514,8 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
             state.treemap_content_rect.top + static_cast<float>(rect.y),
             state.treemap_content_rect.left + static_cast<float>(rect.x + rect.width),
             state.treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
+        // Include stroke and antialiasing spill when deciding whether a tile can
+        // be skipped during a partial repaint.
         if (!IsRenderRectEmpty(state.paint_rect) &&
             !RenderRectsIntersect(InflateRenderRect(draw_rect, content_invalidation_padding), state.paint_rect))
         {
@@ -1593,6 +1714,13 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
     }
 }
 
+/**
+Draws the custom header surface, option-group frames, focused path, and scan
+summary derived from the current tree state.
+
+Parameters:
+  state: Header layout rectangles and the current scan and navigation state.
+**/
 void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
 {
     const RenderRect header_rect = MakeRenderRect(
@@ -1703,6 +1831,17 @@ RenderRect Direct2DRenderer::GetHoveredRectBounds(const MainWindowDrawingState& 
         state.treemap_content_rect.top + static_cast<float>(rect.y + rect.height));
 }
 
+/**
+Resolves the shared display text used by both the hover tooltip and status bar.
+Breadcrumbs take precedence over treemap tiles when both indices are present.
+
+Parameters:
+  state: Current tree, geometry, and hover indices.
+  name_text: Receives the full path or fallback label.
+  size_text: Receives the formatted size label.
+
+Returns: True when a valid hovered item was resolved.
+**/
 bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& state, 
     std::wstring* name_text,
     std::wstring* size_text,
@@ -1763,6 +1902,17 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
     return false;
 }
 
+/**
+Positions a tooltip near the pointer while keeping it inside the canvas.
+
+Parameters:
+  state: Canvas bounds and DPI-dependent drawing state.
+  anchor: Preferred tooltip anchor point.
+  tooltip_width: Calculated tooltip width.
+  tooltip_height: Calculated tooltip height.
+
+Returns: Clamped top-left position for the tooltip.
+**/
 RenderPoint Direct2DRenderer::ResolveTooltipPosition(const MainWindowDrawingState& state,
     const RenderPoint& anchor,
     const RenderRect& hovered_rect,
@@ -1809,6 +1959,17 @@ RenderPoint Direct2DRenderer::ResolveTooltipPosition(const MainWindowDrawingStat
     return MakeRenderPoint(tooltip_left, tooltip_top);
 }
 
+/**
+Builds the two text layouts and all geometry needed to draw a hover tooltip. The
+result is shared with invalidation-bound calculation so painting and erasing use
+identical measurements.
+
+Parameters:
+  state: Current hover state, canvas bounds, and preferred tooltip position.
+  layout: Receives text layouts, panel bounds, and text origins.
+
+Returns: True when a visible tooltip layout was built successfully.
+**/
 bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& state, HoverTooltipLayout* layout) const
 {
     if (!layout)
@@ -1916,6 +2077,13 @@ bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& sta
     return true;
 }
 
+/**
+Draws the current tooltip from the same layout used to calculate its invalidation
+bounds, skipping it when the tooltip does not intersect a partial paint.
+
+Parameters:
+  state: Current hover state and paint bounds.
+**/
 void Direct2DRenderer::DrawHoverTooltip(const MainWindowDrawingState& state)
 {
     HoverTooltipLayout layout;
@@ -1967,6 +2135,13 @@ void Direct2DRenderer::DrawHoverTooltip(const MainWindowDrawingState& state)
     }
 }
 
+/**
+Draws the optional status bar and reuses the tooltip's hover-resolution logic to
+show the hovered path and size.
+
+Parameters:
+  state: Current status-bar geometry, tree data, and hover state.
+**/
 void Direct2DRenderer::DrawStatusBar(const MainWindowDrawingState& state)
 {
     if (!state.show_status_bar)
