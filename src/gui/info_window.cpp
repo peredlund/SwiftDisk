@@ -1,0 +1,491 @@
+// SPDX-FileCopyrightText: 2026 Per Edlund
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "gui/info_window.h"
+
+#include "gui/version.h"
+
+#include <algorithm>
+#include <iterator>
+#include <sstream>
+#include <string>
+
+#define SWIFT_DISK_WIDE_STRING_IMPL(value) L##value
+#define SWIFT_DISK_WIDE_STRING(value) SWIFT_DISK_WIDE_STRING_IMPL(value)
+
+namespace swift_disk::gui
+{
+namespace
+{
+    constexpr int IDC_INFO_TEXT = 1101;
+    constexpr int IDC_INFO_CLOSE_BUTTON = 1102;
+    constexpr BYTE kHeaderPanelRed = 35;
+    constexpr BYTE kHeaderPanelGreen = 40;
+    constexpr BYTE kHeaderPanelBlue = 47;
+    constexpr BYTE kControlPanelRed = 27;
+    constexpr BYTE kControlPanelGreen = 32;
+    constexpr BYTE kControlPanelBlue = 38;
+    constexpr BYTE kControlBackplateRed = 43;
+    constexpr BYTE kControlBackplateGreen = 49;
+    constexpr BYTE kControlBackplateBlue = 58;
+    constexpr BYTE kControlSurfaceRed = 52;
+    constexpr BYTE kControlSurfaceGreen = 60;
+    constexpr BYTE kControlSurfaceBlue = 70;
+    constexpr BYTE kControlTextRed = 240;
+    constexpr BYTE kControlTextGreen = 243;
+    constexpr BYTE kControlTextBlue = 247;
+    constexpr BYTE kControlBorderRed = 84;
+    constexpr BYTE kControlBorderGreen = 92;
+    constexpr BYTE kControlBorderBlue = 103;
+    constexpr BYTE kControlActiveRed = 104;
+    constexpr BYTE kControlActiveGreen = 132;
+    constexpr BYTE kControlActiveBlue = 176;
+    constexpr BYTE kControlHoverRed = 66;
+    constexpr BYTE kControlHoverGreen = 76;
+    constexpr BYTE kControlHoverBlue = 90;
+
+    struct InfoWindowState
+    {
+        HBRUSH m_background_brush = nullptr;
+        HBRUSH m_text_background_brush = nullptr;
+    };
+
+    const wchar_t* InfoWindowClassName()
+    {
+        return L"SwiftDiskInfoWindow";
+    }
+
+    std::wstring BuildHelpText()
+    {
+        return
+            L"About SwiftDisk\r\n"
+            L"SwiftDisk helps you find what is using disk space by scanning a drive or folder and showing the result as an interactive treemap. It does this very quickly by bypassing the operating system and instead reading the information directly from the drive's Master File Table file.\r\n"
+            L"\r\n"
+            L"Choose and scan\r\n"
+            L"- Use the path field to choose a drive, or type or paste a folder path.\r\n"
+            L"- Browse... opens a folder picker and puts the selected folder in the path field.\r\n"
+            L"- Scan starts scanning the selected path. You can also press Enter while the path field has focus.\r\n"
+            L"- The last scanned path is remembered for the next time you open the app.\r\n"
+            L"\r\n"
+            L"Why the scan is fast\r\n"
+            L"- On NTFS drives, SwiftDisk is very fast because it reads the MFT.\r\n"
+            L"- NTFS is the default file system for Windows operating systems and the MFT, or Master File Table, is NTFS's own index of files and folders.\r\n"
+            L"- Reading the MFT is much faster than scanning each folder one by one.\r\n"
+            L"\r\n"
+            L"Treemap basics\r\n"
+            L"- Each rectangle represents a file or folder. Larger rectangles use more disk space.\r\n"
+            L"- Folder tiles can contain smaller child rectangles.\r\n"
+            L"- The parent folder bars at the top of the treemap show the folder path you have drilled into.\r\n"
+            L"\r\n"
+            L"Navigating the treemap\r\n"
+            L"- Left-click a folder tile to drill into that folder.\r\n"
+            L"- Left-click a file tile to drill into its containing folder.\r\n"
+            L"- Left-click a parent folder bar to go back up to that folder.\r\n"
+            L"- Press the Backspace or Escape key to go up one folder level.\r\n"
+            L"- Press the Home key or Home button to return to the root of the current scan.\r\n"
+            L"\r\n"
+            L"Right-click actions\r\n"
+            L"- Right-click a tile or parent folder bar to open the context menu for that file or folder.\r\n"
+            L"- Files can be opened directly by their default application or with Open with....\r\n"
+            L"- Files and folders can be opened in File Explorer, copied as a full path, or opened in a Properties window.\r\n"
+            L"\r\n"
+            L"Treemap depth and expanded tiles\r\n"
+            L"- The Depth value limits how many treemap levels SwiftDisk expands automatically.\r\n"
+            L"- If you drill into a folder that is deeper than the current depth limit, SwiftDisk remembers that path as intentionally expanded and shows it even if is deeper than the depth limit\r\n"
+            L"- Changing Depth, starting a fresh scan, or using Clear removes those remembered expanded folders\r\n"
+            L"\r\n"
+            L"Display options\r\n"
+            L"- Tooltip shows the full path and size for the tile or parent folder bar under the mouse cursor.\r\n"
+            L"- Status bar shows scan and selection details at the bottom of the window.\r\n"
+            L"- Depth controls how many folder levels are visible at once. Lower values keep the view simpler; higher values show more nested folders.\r\n"
+            L"- Home returns to the root of the current scan without clearing remembered expanded folders.\r\n"
+            L"- Clear removes remembered expanded folders without changing the current scan.";
+    }
+
+    std::wstring BuildAboutText()
+    {
+        std::wstringstream stream;
+        stream
+            << L"SwiftDisk\r\n"
+            << L"Version: " << SWIFT_DISK_VERSION << L"\r\n"
+            << L"Build date: " << SWIFT_DISK_WIDE_STRING(__DATE__) << L"\r\n"
+            << L"\r\n"
+            << L"License\r\n"
+            << L"GNU General Public License version 3\r\n"
+            << L"\r\n"
+            << L"Copyright (C) 2026 Per Edlund\r\n"
+            << L"\r\n"
+            << L"This program is free software: you can redistribute it and/or modify\r\n"
+            << L"it under the terms of the GNU General Public License as published by\r\n"
+            << L"the Free Software Foundation, either version 3 of the License, or\r\n"
+            << L"(at your option) any later version.\r\n"
+            << L"\r\n"
+            << L"This program is distributed in the hope that it will be useful,\r\n"
+            << L"but WITHOUT ANY WARRANTY; without even the implied warranty of\r\n"
+            << L"MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the\r\n"
+            << L"GNU General Public License for more details.\r\n"
+            << L"\r\n"
+            << L"You should have received a copy of the GNU General Public License\r\n"
+            << L"along with this program. If not, see < https://www.gnu.org/licenses/>.";
+        return stream.str();
+    }
+
+    COLORREF ColorRefFromRgb(BYTE red, BYTE green, BYTE blue)
+    {
+        return RGB(red, green, blue);
+    }
+
+    void LayoutInfoWindowControls(HWND hwnd)
+    {
+        RECT client = {};
+        GetClientRect(hwnd, &client);
+        const int width = std::max<LONG>(client.right - client.left, 1);
+        const int height = std::max<LONG>(client.bottom - client.top, 1);
+        const int padding = 14;
+        const int button_width = 92;
+        const int button_height = 28;
+        const int button_top = std::max(padding, height - padding - button_height);
+        const int edit_bottom = std::max(padding, button_top - padding);
+
+        HWND info_text = GetDlgItem(hwnd, IDC_INFO_TEXT);
+        if (info_text)
+        {
+            MoveWindow(
+                info_text,
+                padding,
+                padding,
+                std::max(1, width - (padding * 2)),
+                std::max(1, edit_bottom - padding),
+                TRUE);
+        }
+
+        HWND close_button = GetDlgItem(hwnd, IDC_INFO_CLOSE_BUTTON);
+        if (close_button)
+        {
+            MoveWindow(
+                close_button,
+                std::max(padding, width - padding - button_width),
+                button_top,
+                button_width,
+                button_height,
+                TRUE);
+        }
+    }
+
+    InfoWindowState* GetInfoWindowState(HWND hwnd)
+    {
+        return reinterpret_cast<InfoWindowState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    }
+
+    void FillInfoWindowRect(HDC hdc, const RECT& rect, COLORREF color)
+    {
+        HBRUSH brush = CreateSolidBrush(color);
+        if (!brush)
+        {
+            return;
+        }
+
+        FillRect(hdc, &rect, brush);
+        DeleteObject(brush);
+    }
+
+    void DrawInfoWindowFrame(HDC hdc, const RECT& rect, COLORREF color)
+    {
+        HPEN pen = CreatePen(PS_SOLID, 1, color);
+        if (!pen)
+        {
+            return;
+        }
+
+        const HGDIOBJ old_pen = SelectObject(hdc, pen);
+        const HGDIOBJ old_brush = SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
+        Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
+        SelectObject(hdc, old_brush);
+        SelectObject(hdc, old_pen);
+        DeleteObject(pen);
+    }
+
+    void DrawInfoWindowButton(const DRAWITEMSTRUCT& draw_item)
+    {
+        if (!draw_item.hDC || !draw_item.hwndItem)
+        {
+            return;
+        }
+
+        const bool disabled = (draw_item.itemState & ODS_DISABLED) != 0;
+        const bool pressed = (draw_item.itemState & ODS_SELECTED) != 0;
+        const bool focused = (draw_item.itemState & ODS_FOCUS) != 0;
+        const bool hovered = (draw_item.itemState & ODS_HOTLIGHT) != 0;
+        RECT rect = draw_item.rcItem;
+
+        COLORREF fill_color = ColorRefFromRgb(kControlSurfaceRed, kControlSurfaceGreen, kControlSurfaceBlue);
+        if (pressed)
+        {
+            fill_color = ColorRefFromRgb(kControlBackplateRed, kControlBackplateGreen, kControlBackplateBlue);
+        }
+        else if (hovered)
+        {
+            fill_color = ColorRefFromRgb(kControlHoverRed, kControlHoverGreen, kControlHoverBlue);
+        }
+        FillInfoWindowRect(draw_item.hDC, rect, fill_color);
+        DrawInfoWindowFrame(
+            draw_item.hDC,
+            rect,
+            focused
+                ? ColorRefFromRgb(kControlActiveRed, kControlActiveGreen, kControlActiveBlue)
+                : ColorRefFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue));
+
+        wchar_t text[64] = {};
+        GetWindowTextW(draw_item.hwndItem, text, static_cast<int>(std::size(text)));
+        const HFONT font = reinterpret_cast<HFONT>(SendMessageW(draw_item.hwndItem, WM_GETFONT, 0, 0));
+        const HGDIOBJ old_font = font ? SelectObject(draw_item.hDC, font) : nullptr;
+        SetBkMode(draw_item.hDC, TRANSPARENT);
+        SetTextColor(
+            draw_item.hDC,
+            disabled
+                ? ColorRefFromRgb(112, 125, 151)
+                : ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
+        if (pressed)
+        {
+            OffsetRect(&rect, 1, 1);
+        }
+        DrawTextW(
+            draw_item.hDC,
+            text,
+            -1,
+            &rect,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        if (old_font)
+        {
+            SelectObject(draw_item.hDC, old_font);
+        }
+    }
+
+    LRESULT CALLBACK InfoWindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
+    {
+        switch (message)
+        {
+        case WM_CREATE:
+        {
+            const CREATESTRUCTW* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
+            const wchar_t* info_text_value = create
+                ? static_cast<const wchar_t*>(create->lpCreateParams)
+                : L"";
+            HFONT gui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+            auto* state = new InfoWindowState();
+            state->m_background_brush = CreateSolidBrush(
+                ColorRefFromRgb(kHeaderPanelRed, kHeaderPanelGreen, kHeaderPanelBlue));
+            state->m_text_background_brush = CreateSolidBrush(
+                ColorRefFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue));
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+
+            HWND info_text = CreateWindowExW(
+                0,
+                L"EDIT",
+                info_text_value,
+                WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_BORDER | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+                0,
+                0,
+                0,
+                0,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_INFO_TEXT)),
+                nullptr,
+                nullptr);
+            if (info_text)
+            {
+                SendMessageW(info_text, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+                SendMessageW(info_text, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(8, 8));
+                SendMessageW(info_text, EM_SETSEL, 0, 0);
+            }
+
+            HWND close_button = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Close",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON | BS_OWNERDRAW,
+                0,
+                0,
+                0,
+                0,
+                hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_INFO_CLOSE_BUTTON)),
+                nullptr,
+                nullptr);
+            if (close_button)
+            {
+                SendMessageW(close_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+            }
+
+            LayoutInfoWindowControls(hwnd);
+            return 0;
+        }
+        case WM_ERASEBKGND:
+        {
+            InfoWindowState* state = GetInfoWindowState(hwnd);
+            RECT client = {};
+            GetClientRect(hwnd, &client);
+            FillRect(
+                reinterpret_cast<HDC>(w_param),
+                &client,
+                state && state->m_background_brush
+                    ? state->m_background_brush
+                    : reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+            return 1;
+        }
+        case WM_SIZE:
+            LayoutInfoWindowControls(hwnd);
+            return 0;
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLOREDIT:
+        {
+            HDC hdc = reinterpret_cast<HDC>(w_param);
+            HWND control = reinterpret_cast<HWND>(l_param);
+            if (control == GetDlgItem(hwnd, IDC_INFO_TEXT))
+            {
+                InfoWindowState* state = GetInfoWindowState(hwnd);
+                SetTextColor(hdc, ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue));
+                SetBkColor(hdc, ColorRefFromRgb(kControlPanelRed, kControlPanelGreen, kControlPanelBlue));
+                SetBkMode(hdc, OPAQUE);
+                return reinterpret_cast<LRESULT>(
+                    state && state->m_text_background_brush
+                        ? state->m_text_background_brush
+                        : GetStockObject(BLACK_BRUSH));
+            }
+            break;
+        }
+        case WM_DRAWITEM:
+        {
+            const auto* draw_item = reinterpret_cast<const DRAWITEMSTRUCT*>(l_param);
+            if (draw_item && draw_item->CtlID == IDC_INFO_CLOSE_BUTTON)
+            {
+                DrawInfoWindowButton(*draw_item);
+                return TRUE;
+            }
+            break;
+        }
+        case WM_COMMAND:
+            if (LOWORD(w_param) == IDC_INFO_CLOSE_BUTTON ||
+                LOWORD(w_param) == IDOK ||
+                LOWORD(w_param) == IDCANCEL)
+            {
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            break;
+        case WM_CLOSE:
+            DestroyWindow(hwnd);
+            return 0;
+        case WM_DESTROY:
+        {
+            InfoWindowState* state = GetInfoWindowState(hwnd);
+            if (state)
+            {
+                if (state->m_background_brush)
+                {
+                    DeleteObject(state->m_background_brush);
+                }
+                if (state->m_text_background_brush)
+                {
+                    DeleteObject(state->m_text_background_brush);
+                }
+                delete state;
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            }
+            return 0;
+        }
+        default:
+            break;
+        }
+
+        return DefWindowProcW(hwnd, message, w_param, l_param);
+    }
+
+    bool RegisterInfoWindowClass(HINSTANCE instance)
+    {
+        WNDCLASSW window_class = {};
+        window_class.lpfnWndProc = InfoWindowProc;
+        window_class.hInstance = instance;
+        window_class.lpszClassName = InfoWindowClassName();
+        window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        window_class.hbrBackground = nullptr;
+
+        if (RegisterClassW(&window_class))
+        {
+            return true;
+        }
+
+        return GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+    }
+
+    void ShowInfoWindow(
+        HWND owner,
+        const wchar_t* title,
+        const std::wstring& text,
+        int width,
+        int height)
+    {
+        HINSTANCE instance = GetModuleHandleW(nullptr);
+        if (!RegisterInfoWindowClass(instance))
+        {
+            return;
+        }
+
+        HWND info_window = CreateWindowExW(
+            WS_EX_DLGMODALFRAME,
+            InfoWindowClassName(),
+            title,
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            width,
+            height,
+            owner,
+            nullptr,
+            instance,
+            const_cast<wchar_t*>(text.c_str()));
+        if (!info_window)
+        {
+            return;
+        }
+
+        EnableWindow(owner, FALSE);
+        ShowWindow(info_window, SW_SHOW);
+        UpdateWindow(info_window);
+
+        MSG message = {};
+        BOOL get_message_result = 0;
+        while (IsWindow(info_window) && (get_message_result = GetMessageW(&message, nullptr, 0, 0)) > 0)
+        {
+            if (!IsDialogMessageW(info_window, &message))
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+
+        if (IsWindow(owner))
+        {
+            EnableWindow(owner, TRUE);
+            SetActiveWindow(owner);
+        }
+
+        if (get_message_result == 0)
+        {
+            PostQuitMessage(static_cast<int>(message.wParam));
+        }
+    }
+} // namespace
+
+    void ShowHelpWindow(HWND owner)
+    {
+        ShowInfoWindow(owner, L"SwiftDisk Help", BuildHelpText(), 680, 730);
+    }
+
+    void ShowAboutWindow(HWND owner)
+    {
+        ShowInfoWindow(owner, L"About SwiftDisk", BuildAboutText(), 460, 390);
+    }
+
+} // namespace swift_disk::gui

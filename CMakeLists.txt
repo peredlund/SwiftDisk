@@ -61,6 +61,8 @@ add_executable(swift_disk_gui WIN32
     src/gui/direct2d_renderer.cpp
     src/gui/direct2d_renderer.h
     src/gui/drawing_state.h
+    src/gui/info_window.cpp
+    src/gui/info_window.h
     src/gui/main.cpp
     src/gui/resource.h
     ${SWIFT_DISK_GUI_RESOURCES}
