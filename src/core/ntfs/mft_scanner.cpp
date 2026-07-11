@@ -18,6 +18,16 @@ namespace swift_disk::ntfs
 namespace
 {
 
+/**
+ Normalizes an NTFS scan path for case-insensitive component traversal and volume
+ root comparison.
+
+ Parameters:
+   path: Drive-qualified path to normalize.
+
+ Returns: Path with backslash separators, one trailing backslash removed when
+ present, and an uppercase drive prefix.
+ **/
 std::wstring NormalizeScanPath(std::wstring path)
 {
     std::replace(path.begin(), path.end(), L'/', L'\\');
@@ -41,6 +51,15 @@ bool PathsEqualIgnoreCase(const std::wstring& left, const std::wstring& right)
     return _wcsicmp(left.c_str(), right.c_str()) == 0;
 }
 
+/**
+ Splits a relative Windows path into non-empty directory components while
+ tolerating repeated separators.
+
+ Parameters:
+   path: Relative path to split.
+
+ Returns: Path components in traversal order.
+ **/
 std::vector<std::wstring> SplitRelativePathComponents(const std::wstring& path)
 {
     std::vector<std::wstring> components;
@@ -69,6 +88,16 @@ std::vector<std::wstring> SplitRelativePathComponents(const std::wstring& path)
     return components;
 }
 
+/**
+ Finds the first indexed child whose name matches case-insensitively.
+
+ Parameters:
+   tree: Tree containing the parent and child nodes.
+   parent_id: Parent whose children should be searched.
+   name: Child name to match.
+
+ Returns: Matching child node, or null when no match exists.
+ **/
 const Node* FindChildByName(const FileTree& tree, uint64_t parent_id, const std::wstring& name)
 {
     const std::vector<uint64_t>* child_ids = tree.GetChildIds(parent_id);
@@ -88,6 +117,15 @@ const Node* FindChildByName(const FileTree& tree, uint64_t parent_id, const std:
     return nullptr;
 }
 
+/**
+ Extracts and uppercases the leading character from a drive-qualified path.
+
+ Parameters:
+   path: Path expected to begin with an X: prefix.
+   drive_letter: Receives the normalized leading character.
+
+ Returns: True when drive_letter is non-null and the second path character is ':'.
+ **/
 bool TryGetDriveLetterFromPath(const std::wstring& path, wchar_t* drive_letter)
 {
     if (!drive_letter || path.size() < 2 || path[1] != L':')
@@ -364,6 +402,8 @@ bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* er
         Node copy = *node;
         if (copy.id == subtree_root->id)
         {
+            // Detach the projected subtree from its volume parent and retain the
+            // exact requested path as the new root's display name.
             copy.parent_id = 0;
             copy.name = normalized_root;
         }

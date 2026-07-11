@@ -66,6 +66,8 @@ bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_
         uint64_t parent_id;
     };
 
+    // Use an explicit stack so deeply nested directory trees do not consume the
+    // process call stack during traversal.
     std::vector<StackEntry> stack;
     stack.push_back({normalized_root, root_id});
 
@@ -104,6 +106,7 @@ bool ScanDirectory(const std::wstring& root_path, FileTree* tree, uint64_t* out_
             }
 
             bool is_dir = (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            // WIN32_FIND_DATAW exposes the file size as two 32-bit halves.
             uint64_t size = (static_cast<uint64_t>(find_data.nFileSizeHigh) << 32) |
                             static_cast<uint64_t>(find_data.nFileSizeLow);
 

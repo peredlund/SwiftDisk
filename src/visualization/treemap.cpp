@@ -70,6 +70,16 @@ struct ChildCandidate
 
 struct ChildCandidateLess
 {
+    /**
+     Orders the global candidate heap by descending size with deterministic
+     parent-id and child-index tie breakers.
+
+     Parameters:
+       left: First candidate.
+       right: Second candidate.
+
+     Returns: True when left has lower heap priority than right.
+     **/
     bool operator()(const ChildCandidate& left, const ChildCandidate& right) const
     {
         if (left.size != right.size)
@@ -84,6 +94,14 @@ struct ChildCandidateLess
     }
 };
 
+/**
+ Formats a byte count using binary units and two fractional digits.
+
+ Parameters:
+   bytes: Byte count to format.
+
+ Returns: Human-readable size from bytes through pebibytes.
+ **/
 std::wstring HumanizeBytes(uint64_t bytes)
 {
     static constexpr std::wstring_view kUnits[] = {L"B", L"KiB", L"MiB", L"GiB", L"TiB", L"PiB"};
@@ -100,6 +118,16 @@ std::wstring HumanizeBytes(uint64_t bytes)
     return buffer;
 }
 
+/**
+ Sums item sizes over a half-open range used by binary treemap partitioning.
+
+ Parameters:
+   items: Layout items containing the sizes.
+   begin: First index to include.
+   end: First index to exclude.
+
+ Returns: Combined size of the selected items.
+ **/
 uint64_t SumSizes(const std::vector<LayoutItem>& items, size_t begin, size_t end)
 {
     uint64_t total = 0;
@@ -110,6 +138,14 @@ uint64_t SumSizes(const std::vector<LayoutItem>& items, size_t begin, size_t end
     return total;
 }
 
+/**
+ Computes a stable FNV-1a hash over UTF-16 code units for fallback color selection.
+
+ Parameters:
+   value: Text to hash.
+
+ Returns: Stable 64-bit hash.
+ **/
 uint64_t HashText(std::wstring_view value)
 {
     uint64_t hash = 1469598103934665603ull;
@@ -121,6 +157,14 @@ uint64_t HashText(std::wstring_view value)
     return hash;
 }
 
+/**
+ Formats the low 24 bits of an RGB value as a lowercase CSS-style color string.
+
+ Parameters:
+   rgb: Packed red, green, and blue channels.
+
+ Returns: Color in #rrggbb form.
+ **/
 std::string HexColor(uint32_t rgb)
 {
     std::ostringstream stream;
@@ -130,6 +174,15 @@ std::string HexColor(uint32_t rgb)
     return stream.str();
 }
 
+/**
+ Decodes a CSS-style six-digit color for luminance calculations. Values with the
+ wrong shape use the renderer's fallback blue.
+
+ Parameters:
+   value: Color text expected in #rrggbb form.
+
+ Returns: Packed red, green, and blue channels.
+ **/
 uint32_t ParseHexColor(std::string_view value)
 {
     if (value.size() != 7 || value[0] != '#')
@@ -159,6 +212,15 @@ uint32_t ParseHexColor(std::string_view value)
            (hex(value[5]) << 4) | hex(value[6]);
 }
 
+/**
+ Converts one 8-bit sRGB channel to linear-light intensity using the standard
+ piecewise transfer function.
+
+ Parameters:
+   channel: sRGB channel value from 0 through 255.
+
+ Returns: Linear-light channel value.
+ **/
 double SrgbToLinear(double channel)
 {
     const double normalized = channel / 255.0;
@@ -169,6 +231,15 @@ double SrgbToLinear(double channel)
     return std::pow((normalized + 0.055) / 1.055, 2.4);
 }
 
+/**
+ Calculates relative luminance from packed sRGB channels using perceptual channel
+ weights.
+
+ Parameters:
+   rgb: Packed red, green, and blue channels.
+
+ Returns: Relative luminance value.
+ **/
 double RelativeLuminance(uint32_t rgb)
 {
     const double red = SrgbToLinear(static_cast<double>((rgb >> 16) & 0xFFu));
@@ -177,6 +248,15 @@ double RelativeLuminance(uint32_t rgb)
     return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
 }
 
+/**
+ Calculates the luminance contrast ratio between two packed RGB colors.
+
+ Parameters:
+   left_rgb: First color.
+   right_rgb: Second color.
+
+ Returns: Contrast ratio with the lighter color in the numerator.
+ **/
 double ContrastRatio(uint32_t left_rgb, uint32_t right_rgb)
 {
     const double left = RelativeLuminance(left_rgb);
@@ -194,6 +274,15 @@ struct TextPalette
     std::string plate;
 };
 
+/**
+ Chooses the light or dark text palette that provides greater contrast against a
+ tile fill color.
+
+ Parameters:
+   fill_color: Tile fill in #rrggbb form.
+
+ Returns: Text, outline, and plate colors for the tile.
+ **/
 TextPalette TextColorsForFill(std::string_view fill_color)
 {
     const uint32_t rgb = ParseHexColor(fill_color);
@@ -209,6 +298,16 @@ TextPalette TextColorsForFill(std::string_view fill_color)
     return {"#102033", "#102033", "#f8fbff", "#f8fbff"};
 }
 
+/**
+ Maps a stable hash to a bounded medium-bright fill color, with separate
+ brightness adjustments for directories and files.
+
+ Parameters:
+   hash: Stable path or label hash.
+   is_dir: Whether the styled node is a directory.
+
+ Returns: Fill color in #rrggbb form.
+ **/
 std::string ColorForHash(uint64_t hash, bool is_dir)
 {
     const uint32_t base = static_cast<uint32_t>(hash & 0x00FFFFFFu);
@@ -233,6 +332,16 @@ std::string ColorForHash(uint64_t hash, bool is_dir)
     return HexColor((red << 16) | (green << 8) | blue);
 }
 
+/**
+ Builds a complete tile style from a stable color hash and matching contrast
+ palette.
+
+ Parameters:
+   color_hash: Hash used to derive the fill color.
+   is_dir: Whether the styled node is a directory.
+
+ Returns: Fill and text colors for a treemap node.
+ **/
 TreemapVisualStyle BuildTreemapVisualStyleFromHash(uint64_t color_hash, bool is_dir)
 {
     TreemapVisualStyle style;
@@ -331,6 +440,15 @@ size_t ChooseSplitIndex(const std::vector<LayoutItem>& items, size_t begin, size
     return split;
 }
 
+/**
+ Reserves directory-header and tile-padding space inside a parent rectangle.
+
+ Parameters:
+   bounds: Outer directory bounds.
+   options: Layout spacing configuration.
+
+ Returns: Non-negative area available for child rectangles.
+ **/
 Bounds InsetBounds(const Bounds& bounds, const TreemapLayoutOptions& options)
 {
     Bounds inner;
@@ -341,6 +459,16 @@ Bounds InsetBounds(const Bounds& bounds, const TreemapLayoutOptions& options)
     return inner;
 }
 
+/**
+ Converts one internal layout item and its assigned bounds into a public treemap
+ rectangle. Hidden placeholders intentionally produce no output.
+
+ Parameters:
+   item: Internal item to emit.
+   depth: Visible depth assigned to the rectangle.
+   bounds: Rectangle geometry.
+   rects: Destination rectangle list.
+ **/
 void EmitNodeRect(
     const LayoutItem& item,
     size_t depth,
@@ -437,6 +565,17 @@ void CollectItemBounds(
     CollectItemBounds(items, split, end, depth, second, positioned);
 }
 
+/**
+ Returns a directory's cached, size-sorted child collection, populating the cache
+ on first access.
+
+ Parameters:
+   tree: Source file tree.
+   parent_id: Directory whose children should be collected.
+   cache: Per-layout child collection cache.
+
+ Returns: Cached child collection for the parent id.
+ **/
 const ChildCollection& GetOrCreateChildren(
     const FileTree& tree,
     uint64_t parent_id,
@@ -730,6 +869,17 @@ void EmitVisibleChildren(
 
 } // namespace
 
+/**
+ Builds a stable visual style from a node path, falling back to its label when no
+ path is available.
+
+ Parameters:
+   label: Display label for the node.
+   path: Full node path used as the preferred color key.
+   is_dir: Whether the node is a directory.
+
+ Returns: Fill and text colors for the node.
+ **/
 TreemapVisualStyle BuildTreemapVisualStyle(
     const std::wstring& label,
     const std::wstring& path,

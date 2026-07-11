@@ -15,6 +15,15 @@ namespace
 constexpr uint64_t kFnvOffsetBasis = 1469598103934665603ull;
 constexpr uint64_t kFnvPrime = 1099511628211ull;
 
+/**
+ Advances an FNV-1a path hash by one UTF-16 code unit.
+
+ Parameters:
+   hash: Current hash value.
+   ch: Character to append.
+
+ Returns: Updated hash value.
+ **/
 uint64_t AppendPathHashCharacter(uint64_t hash, wchar_t ch)
 {
     hash ^= static_cast<uint64_t>(static_cast<uint16_t>(ch));
@@ -22,6 +31,15 @@ uint64_t AppendPathHashCharacter(uint64_t hash, wchar_t ch)
     return hash;
 }
 
+/**
+ Extends an existing path hash with every UTF-16 code unit in a string.
+
+ Parameters:
+   hash: Current hash value.
+   value: Text to append.
+
+ Returns: Updated hash value.
+ **/
 uint64_t AppendPathHashString(uint64_t hash, const std::wstring& value)
 {
     for (wchar_t ch : value)
@@ -59,6 +77,14 @@ uint64_t FileTree::AddNode(Node node)
     return node_id;
 }
 
+/**
+ Looks up a node without allowing it to be modified.
+
+ Parameters:
+   id: Node id to find.
+
+ Returns: Non-owning node pointer, or null when the id is absent.
+ **/
 const Node* FileTree::GetNode(uint64_t id) const
 {
     auto it = m_nodes.find(id);
@@ -69,6 +95,14 @@ const Node* FileTree::GetNode(uint64_t id) const
     return &it->second;
 }
 
+/**
+ Looks up a node that the caller intends to modify.
+
+ Parameters:
+   id: Node id to find.
+
+ Returns: Non-owning mutable node pointer, or null when the id is absent.
+ **/
 Node* FileTree::GetNodeMutable(uint64_t id)
 {
     auto it = m_nodes.find(id);
@@ -200,6 +234,14 @@ void FileTree::RefreshPathHashes()
     RefreshPathHashesFromOrderedIds(ids, false);
 }
 
+/**
+ Recomputes path hashes in parent-before-child order using an already depth-sorted
+ id list. Lists supplied deepest-first are traversed in reverse.
+
+ Parameters:
+   ids: Node ids sorted by depth.
+   deepest_first: True when ids run from deepest nodes to shallowest nodes.
+ **/
 void FileTree::RefreshPathHashesFromOrderedIds(const std::vector<uint64_t>& ids, bool deepest_first)
 {
     auto refresh_node = [&](uint64_t id)
@@ -227,6 +269,8 @@ void FileTree::RefreshPathHashesFromOrderedIds(const std::vector<uint64_t>& ids,
         uint64_t hash = parent_it->second.path_hash;
         if (!node.name.empty())
         {
+            // The offset basis represents an empty path, which must not acquire
+            // a leading separator before its first real component.
             if (hash != kFnvOffsetBasis)
             {
                 hash = AppendPathHashCharacter(hash, L'\\');
@@ -238,6 +282,8 @@ void FileTree::RefreshPathHashesFromOrderedIds(const std::vector<uint64_t>& ids,
 
     if (deepest_first)
     {
+        // Finalize supplies deepest-first ids for size aggregation; reversing
+        // them ensures every parent hash exists before its children are hashed.
         for (auto it = ids.rbegin(); it != ids.rend(); ++it)
         {
             refresh_node(*it);
@@ -333,6 +379,11 @@ FileTree::TreeStats FileTree::ComputeStats() const
     return stats;
 }
 
+/**
+ Collects non-owning pointers to every node in unspecified map iteration order.
+
+ Returns: Pointers to all nodes currently stored by the tree.
+ **/
 std::vector<const Node*> FileTree::GetAllNodes() const
 {
     std::vector<const Node*> nodes;
@@ -344,6 +395,14 @@ std::vector<const Node*> FileTree::GetAllNodes() const
     return nodes;
 }
 
+/**
+ Looks up the child-id index associated with a parent node.
+
+ Parameters:
+   id: Parent node id.
+
+ Returns: Non-owning child-id list, or null when no children are indexed.
+ **/
 const std::vector<uint64_t>* FileTree::GetChildIds(uint64_t id) const
 {
     auto it = m_children.find(id);

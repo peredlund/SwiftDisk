@@ -59,6 +59,12 @@ NtfsVolume::~NtfsVolume()
     Close();
 }
 
+/**
+ Transfers ownership of an open raw-volume handle and its cached metadata.
+
+ Parameters:
+   other: Volume object to move from. It is left closed.
+ **/
 NtfsVolume::NtfsVolume(NtfsVolume&& other) noexcept
 {
     m_handle = other.m_handle;
@@ -69,6 +75,15 @@ NtfsVolume::NtfsVolume(NtfsVolume&& other) noexcept
     other.m_is_ntfs = false;
 }
 
+/**
+ Closes the current handle before taking ownership of another volume's handle and
+ metadata.
+
+ Parameters:
+   other: Volume object to move from. It is left closed.
+
+ Returns: This volume after the transfer.
+ **/
 NtfsVolume& NtfsVolume::operator=(NtfsVolume&& other) noexcept
 {
     if (this == &other)
@@ -160,6 +175,10 @@ bool NtfsVolume::Open(wchar_t drive_letter)
     return true;
 }
 
+/**
+ Closes the raw-volume handle and resets all metadata and access state. The method
+ is safe to call on an already closed volume.
+ **/
 void NtfsVolume::Close()
 {
     if (m_handle)
