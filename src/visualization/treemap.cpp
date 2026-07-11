@@ -366,6 +366,13 @@ bool IsExpandedNode(const std::unordered_set<uint64_t>& expanded_nodes, uint64_t
  The returned order is important for the budgeted treemap strategy: each
  directory exposes its children to the global selection heap one at a time,
  largest first.
+
+ Parameters:
+   tree: Source tree containing the parent and child nodes.
+   parent: Directory node whose indexed children should be collected.
+
+ Returns: Unique non-empty child items sorted by descending size, together with
+ their combined size.
  **/
 ChildCollection CollectChildren(
     const FileTree& tree,
@@ -422,6 +429,13 @@ ChildCollection CollectChildren(
  This is the core partition step for the binary treemap layout. The function
  assumes items are already sorted by size, then walks forward until the running
  total reaches roughly half of the partition's total size.
+
+ Parameters:
+   items: Size-sorted layout items to partition.
+   begin: First item index in the partition.
+   end: First item index after the partition.
+
+ Returns: Index that begins the second size-balanced partition.
  **/
 size_t ChooseSplitIndex(const std::vector<LayoutItem>& items, size_t begin, size_t end)
 {
@@ -505,6 +519,14 @@ void EmitNodeRect(
  This helper is geometry-only: it does not decide which nodes are visible under
  the rectangle budget. It simply turns a chosen item list into rectangles by
  repeatedly splitting the current bounds along the longer axis.
+
+ Parameters:
+   items: Layout items whose bounds should be assigned.
+   begin: First item index in the current partition.
+   end: First item index after the current partition.
+   depth: Treemap depth assigned to positioned items.
+   bounds: Area available to the current partition.
+   positioned: Destination list for items and their calculated bounds.
  **/
 void CollectItemBounds(
     const std::vector<LayoutItem>& items,
@@ -605,6 +627,14 @@ const ChildCollection& GetOrCreateChildren(
  largest remaining child that passes the minimum ratio filter and any optional
  per-directory child cap. When that candidate is selected, the caller advances
  the directory state and asks this helper for the next one.
+
+ Parameters:
+   tree: Source file tree.
+   parent_id: Directory whose next child should be considered.
+   options: Depth, ratio, and per-directory selection limits.
+   states: Mutable per-directory selection state.
+   children_cache: Cache of size-sorted child collections.
+   candidates: Global candidate heap to receive the eligible child.
  **/
 void PushNextCandidate(
     const FileTree& tree,
@@ -663,6 +693,19 @@ void PushNextCandidate(
  leading children for that directory. Any unselected remainder is represented
  by a hidden placeholder that occupies space during layout but is never drawn,
  causing omitted descendants to stay absorbed into the nearest real directory.
+
+ Parameters:
+   tree: Source file tree.
+   root_id: Root node of the current treemap layout.
+   node_id: Subtree node to emit.
+   depth: Visible depth assigned to the subtree node.
+   expansion_bonus: Extra visible levels granted by expanded ancestors.
+   bounds: Area assigned to the subtree.
+   options: Treemap geometry and visibility limits.
+   expanded_nodes: Nodes that extend visibility along their paths.
+   visible_child_counts: Number of selected children for each directory.
+   children_cache: Cached size-sorted child collections.
+   rects: Destination treemap rectangle list.
  **/
 void EmitVisibleSubtree(
     const FileTree& tree,
@@ -792,6 +835,17 @@ void EmitVisibleSubtree(
  For the root's visible children, however, the child's own remembered expansion
  must apply immediately so that navigating back to an intermediate ancestor
  still shows the deepest level previously revealed along that path.
+
+ Parameters:
+   tree: Source file tree.
+   root_id: Root node whose children should fill the treemap bounds.
+   depth: Visible depth assigned to the root's children.
+   bounds: Full area available to the root's children.
+   options: Treemap geometry and visibility limits.
+   expanded_nodes: Nodes that extend visibility along their paths.
+   visible_child_counts: Number of selected children for each directory.
+   children_cache: Cached size-sorted child collections.
+   rects: Destination treemap rectangle list.
  **/
 void EmitVisibleChildren(
     const FileTree& tree,
@@ -920,6 +974,14 @@ TreemapVisualStyle BuildTreemapVisualStyle(
  This yields a best-first expansion of the tree: large directories/files near the
  top tend to appear first, and smaller descendants only become visible if there is
  enough remaining budget to justify expanding deeper.
+
+ Parameters:
+   tree: Source file tree.
+   root_id: Node whose children form the top level of the treemap.
+   options: Treemap dimensions, spacing, depth, and selection limits.
+
+ Returns: Visible treemap rectangles within the configured budget, or an empty
+ list when the root is unavailable or no rectangles are allowed.
  **/
 std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_id, const TreemapLayoutOptions& options)
 {
