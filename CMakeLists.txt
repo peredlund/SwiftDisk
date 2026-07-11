@@ -78,6 +78,10 @@ add_executable(swift_disk_gui WIN32
     ${SWIFT_DISK_GUI_RESOURCES}
 )
 
+set_property(DIRECTORY PROPERTY
+    VS_STARTUP_PROJECT swift_disk_gui
+)
+
 set_target_properties(swift_disk_gui PROPERTIES
     OUTPUT_NAME SwiftDisk
 )
