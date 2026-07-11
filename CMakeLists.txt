@@ -28,8 +28,6 @@ add_library(swift_disk_core
     src/core/ntfs/mft_parser.h
     src/core/ntfs/mft_scanner.cpp
     src/core/ntfs/mft_scanner.h
-    src/core/ntfs/validation.cpp
-    src/core/ntfs/validation.h
     src/core/ntfs/ntfs_volume.cpp
     src/core/ntfs/ntfs_volume.h
     src/visualization/treemap.cpp
