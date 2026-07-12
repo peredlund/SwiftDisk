@@ -17,6 +17,8 @@ SwiftDisk supports Windows 10, Windows 11, and Windows Server 2016 and later.
 
 To install SwiftDisk, unzip the downloaded file to a folder where you want to keep the app. To start the app, run `SwiftDisk.exe` from the unzipped folder. Windows will show a User Account Control prompt when SwiftDisk starts since it needs administrator permission to read the NTFS Master File Table.
 
+The first time you start SwiftDisk, Microsoft Defender SmartScreen may display a "Windows protected your PC" message because the app is not digitally signed and its publisher is therefore shown as unknown. If this happens, click `More info`, and then click `Run anyway`. The exact message text and button names may differ depending on your Windows display language.
+
 ## Use SwiftDisk
 
 1. Start `SwiftDisk.exe`.
