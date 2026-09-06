@@ -18,6 +18,7 @@ namespace swift_disk::gui
         constexpr const wchar_t* kSettingsSubkey = L"Software\\SwiftDisk";
         constexpr const wchar_t* kShowTooltipValueName = L"ShowTooltip";
         constexpr const wchar_t* kShowStatusBarValueName = L"ShowStatusBar";
+        constexpr const wchar_t* kColorByFileTypeValueName = L"ColorByFileType";
         constexpr const wchar_t* kMaxDepthValueName = L"MaxDepth";
         constexpr const wchar_t* kLastScanPathValueName = L"LastScanPath";
         constexpr int kMinimumMaxDepth = 1;
@@ -181,6 +182,27 @@ namespace swift_disk::gui
     }
 
     /**
+    Returns whether file tiles should be colored by extension.
+
+    Returns: True when file tiles should be colored by extension.
+    **/
+    bool AppSettings::GetColorByFileType() const
+    {
+        return m_color_by_file_type;
+    }
+
+    /**
+    Updates whether file tiles should be colored by extension.
+
+    Parameters:
+      color_by_file_type: True when file tiles should be colored by extension.
+    **/
+    void AppSettings::SetColorByFileType(bool color_by_file_type)
+    {
+        m_color_by_file_type = color_by_file_type;
+    }
+
+    /**
     Returns the configured treemap depth limit.
 
     Returns: Treemap depth limit clamped to the supported range.
@@ -254,6 +276,10 @@ namespace swift_disk::gui
         {
             settings.SetShowStatusBar(value != 0);
         }
+        if (TryReadDwordValue(key, kColorByFileTypeValueName, &value))
+        {
+            settings.SetColorByFileType(value != 0);
+        }
         if (TryReadDwordValue(key, kMaxDepthValueName, &value))
         {
             settings.SetMaxDepth(static_cast<int>(value));
@@ -294,6 +320,7 @@ namespace swift_disk::gui
 
         WriteDwordValue(key, kShowTooltipValueName, settings.GetShowTooltip() ? 1 : 0);
         WriteDwordValue(key, kShowStatusBarValueName, settings.GetShowStatusBar() ? 1 : 0);
+        WriteDwordValue(key, kColorByFileTypeValueName, settings.GetColorByFileType() ? 1 : 0);
         WriteDwordValue(key, kMaxDepthValueName, static_cast<DWORD>(settings.GetMaxDepth()));
         WriteStringValue(key, kLastScanPathValueName, settings.GetLastScanPath());
         RegCloseKey(key);

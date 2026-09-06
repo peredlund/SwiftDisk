@@ -123,6 +123,7 @@ namespace swift_disk::gui
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_panel_brush;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_canvas_brush;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_border_brush;
+        Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_file_type_border_brush;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_separator_brush;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_tile_brush;
         Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> m_tile_text_brush;
@@ -405,6 +406,11 @@ namespace swift_disk::gui
             {
                 return hr;
             }
+            hr = CreateBrush(m_file_type_border_brush, MakeD2DColor(70, 70, 70));
+            if (FAILED(hr))
+            {
+                return hr;
+            }
             hr = CreateBrush(m_separator_brush, MakeD2DColor(142, 154, 171, 0.92f));
             if (FAILED(hr))
             {
@@ -514,6 +520,7 @@ namespace swift_disk::gui
         m_panel_brush.Reset();
         m_canvas_brush.Reset();
         m_border_brush.Reset();
+        m_file_type_border_brush.Reset();
         m_separator_brush.Reset();
         m_tile_brush.Reset();
         m_tile_text_brush.Reset();
@@ -1545,7 +1552,27 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
             }
         }
 
-        DrawRectangle(draw_rect, border_brush, stroke_width);
+        if (state.layout_options.color_by_file_type)
+        {
+            // Keep the full outline inside the tile so adjacent fills cannot
+            // paint over it. Scale down on tiny tiles to preserve their fill.
+            const float tile_border_width = std::min(Scale(1.5f), std::min(tile_width, tile_height) * 0.25f);
+            const float inset = tile_border_width * 0.5f;
+            const RenderRect border_rect = MakeRenderRect(
+                draw_rect.left + inset,
+                draw_rect.top + inset,
+                draw_rect.right - inset,
+                draw_rect.bottom - inset);
+            DrawRectangle(border_rect, m_file_type_border_brush.Get(), tile_border_width);
+            if (is_hovered)
+            {
+                DrawRectangle(draw_rect, border_brush, stroke_width);
+            }
+        }
+        else
+        {
+            DrawRectangle(draw_rect, border_brush, stroke_width);
+        }
 
         if (tile_width >= Scale(56.0f) && tile_height >= Scale(18.0f))
         {

@@ -23,6 +23,10 @@ namespace swift_disk::gui
 
         void SetShowStatusBar(bool show_status_bar);
 
+        bool GetColorByFileType() const;
+
+        void SetColorByFileType(bool color_by_file_type);
+
         int GetMaxDepth() const;
 
         void SetMaxDepth(int max_depth);
@@ -34,6 +38,7 @@ namespace swift_disk::gui
     private:
         bool m_show_tooltip = true;
         bool m_show_status_bar = false;
+        bool m_color_by_file_type = false;
         int m_max_depth = 3;
         std::wstring m_last_scan_path;
     };

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cwchar>
+#include <cwctype>
 #include <iomanip>
 #include <numeric>
 #include <queue>
@@ -155,6 +156,25 @@ uint64_t HashText(std::wstring_view value)
         hash *= 1099511628211ull;
     }
     return hash;
+}
+
+/**
+ Returns the case-insensitive final extension, or an empty key for extensionless
+ names, trailing dots, and dotfiles without a further extension.
+ **/
+std::wstring FileTypeKey(const std::wstring& name)
+{
+    const size_t position = name.find_last_of(L'.');
+    if (position == std::wstring::npos || position == 0)
+    {
+        return {};
+    }
+    std::wstring extension = name.substr(position + 1);
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t character)
+    {
+        return static_cast<wchar_t>(std::towlower(character));
+    });
+    return extension;
 }
 
 /**
@@ -481,12 +501,14 @@ Bounds InsetBounds(const Bounds& bounds, const TreemapLayoutOptions& options)
    item: Internal item to emit.
    depth: Visible depth assigned to the rectangle.
    bounds: Rectangle geometry.
+   options: Coloring preferences and the scan-wide extension palette.
    rects: Destination rectangle list.
  **/
 void EmitNodeRect(
     const LayoutItem& item,
     size_t depth,
     const Bounds& bounds,
+    const TreemapLayoutOptions& options,
     std::vector<TreemapRect>* rects)
 {
     if (item.is_hidden)
@@ -504,7 +526,15 @@ void EmitNodeRect(
     rect.height = bounds.height;
     rect.is_dir = item.is_dir;
     rect.label = item.label;
-    const TreemapVisualStyle style = BuildTreemapVisualStyleFromHash(item.color_hash, item.is_dir);
+    TreemapVisualStyle style = BuildTreemapVisualStyleFromHash(item.color_hash, item.is_dir);
+    if (options.color_by_file_type && !item.is_dir && options.file_type_palette)
+    {
+        const auto color = options.file_type_palette->find(FileTypeKey(item.label));
+        if (color != options.file_type_palette->end())
+        {
+            style = color->second;
+        }
+    }
     rect.fill_color = style.fill_color;
     rect.label_text_color = style.label_text_color;
     rect.secondary_text_color = style.secondary_text_color;
@@ -732,7 +762,7 @@ void EmitVisibleSubtree(
     item.is_dir = node->is_dir;
     item.label = node->name.empty() ? (node->id == root_id ? L"(root)" : L"(unnamed)") : node->name;
     item.color_hash = node->path_hash == 0 ? HashText(item.label) : node->path_hash;
-    EmitNodeRect(item, depth, bounds, rects);
+    EmitNodeRect(item, depth, bounds, options, rects);
 
     if (!node->is_dir)
     {
@@ -949,6 +979,115 @@ TreemapVisualStyle BuildTreemapVisualStyle(
 }
 
 /**
+ Assigns colors across the entire scan, prioritizing extensions by total bytes.
+ Each choice maximizes its minimum Oklab distance from earlier choices, so the
+ largest file types receive the most easily distinguished colors. Candidates
+ use the original file colors' medium RGB range and limit chroma to avoid
+ overly vivid colors. Lexical tie breaking makes the result independent of
+ node iteration order and navigation.
+
+ The finite candidate set is reused only after every candidate has been used.
+ With many extensions, perceptually similar colors are unavoidable.
+ **/
+FileTypePalette BuildFileTypePalette(const FileTree& tree)
+{
+    std::unordered_map<std::wstring, uint64_t> sizes;
+    for (const Node* node : tree.GetAllNodes())
+    {
+        if (!node->is_dir && node->size > 0)
+        {
+            sizes[FileTypeKey(node->name)] += node->size;
+        }
+    }
+    std::vector<std::pair<std::wstring, uint64_t>> extensions(sizes.begin(), sizes.end());
+    std::sort(extensions.begin(), extensions.end(), [](const auto& left, const auto& right)
+    {
+        return left.second != right.second ? left.second > right.second : left.first < right.first;
+    });
+
+    struct Candidate
+    {
+        uint32_t m_rgb;
+        double m_lightness;
+        double m_a;
+        double m_b;
+        double m_min_distance = 1.0;
+    };
+    constexpr uint32_t kMinimumChannel = 72;
+    constexpr uint32_t kMaximumChannel = 198;
+    constexpr uint32_t kChannelStep = 9;
+    constexpr double kMinimumChroma = 0.025;
+    constexpr double kMaximumChroma = 0.12;
+    std::vector<Candidate> candidates;
+    for (uint32_t red = kMinimumChannel; red <= kMaximumChannel; red += kChannelStep)
+    {
+        for (uint32_t green = kMinimumChannel; green <= kMaximumChannel; green += kChannelStep)
+        {
+            for (uint32_t blue = kMinimumChannel; blue <= kMaximumChannel; blue += kChannelStep)
+            {
+                const double r = SrgbToLinear(red);
+                const double g = SrgbToLinear(green);
+                const double b = SrgbToLinear(blue);
+                const double l = std::cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+                const double m = std::cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+                const double t = std::cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+                Candidate candidate;
+                candidate.m_rgb = (red << 16) | (green << 8) | blue;
+                candidate.m_lightness = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * t;
+                candidate.m_a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * t;
+                candidate.m_b = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * t;
+                const double chroma_squared = candidate.m_a * candidate.m_a + candidate.m_b * candidate.m_b;
+                if (candidate.m_lightness >= 0.48 && candidate.m_lightness <= 0.80 &&
+                    chroma_squared >= kMinimumChroma * kMinimumChroma &&
+                    chroma_squared <= kMaximumChroma * kMaximumChroma)
+                {
+                    candidates.push_back(candidate);
+                }
+            }
+        }
+    }
+
+    FileTypePalette palette;
+    palette.reserve(extensions.size());
+    std::vector<uint32_t> assigned_colors;
+    for (const auto& extension : extensions)
+    {
+        uint32_t rgb;
+        if (assigned_colors.size() < candidates.size())
+        {
+            const auto best = std::max_element(candidates.begin(), candidates.end(), [](const Candidate& left, const Candidate& right)
+            {
+                return left.m_min_distance < right.m_min_distance;
+            });
+            rgb = best->m_rgb;
+            const Candidate selected = *best;
+            best->m_min_distance = -1.0;
+            assigned_colors.push_back(rgb);
+            for (Candidate& candidate : candidates)
+            {
+                const double dl = candidate.m_lightness - selected.m_lightness;
+                const double da = candidate.m_a - selected.m_a;
+                const double db = candidate.m_b - selected.m_b;
+                candidate.m_min_distance = std::min(candidate.m_min_distance, dl * dl + da * da + db * db);
+            }
+        }
+        else
+        {
+            rgb = assigned_colors[HashText(extension.first) % assigned_colors.size()];
+        }
+        TreemapVisualStyle style;
+        style.fill_color = HexColor(rgb);
+        const TextPalette text = TextColorsForFill(style.fill_color);
+        style.label_text_color = text.primary;
+        style.secondary_text_color = text.secondary;
+        style.text_outline_color = text.outline;
+        style.text_plate_color = text.plate;
+        palette.emplace(extension.first, std::move(style));
+    }
+    return palette;
+}
+
+/**
  Builds a treemap layout for the requested root using a global rectangle budget.
 
  Strategy:
@@ -978,13 +1117,14 @@ TreemapVisualStyle BuildTreemapVisualStyle(
  Parameters:
    tree: Source file tree.
    root_id: Node whose children form the top level of the treemap.
-   options: Treemap dimensions, spacing, depth, and selection limits.
+   requested_options: Treemap dimensions, spacing, depth, selection, and coloring.
 
  Returns: Visible treemap rectangles within the configured budget, or an empty
  list when the root is unavailable or no rectangles are allowed.
  **/
-std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_id, const TreemapLayoutOptions& options)
+std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_id, const TreemapLayoutOptions& requested_options)
 {
+    TreemapLayoutOptions options = requested_options;
     std::vector<TreemapRect> rects;
     if (options.max_rectangles == 0)
     {
@@ -995,6 +1135,11 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
     if (!root)
     {
         return rects;
+    }
+
+    if (options.color_by_file_type && !options.file_type_palette)
+    {
+        options.file_type_palette = std::make_shared<const FileTypePalette>(BuildFileTypePalette(tree));
     }
 
     Bounds root_bounds;
@@ -1092,7 +1237,7 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
         item.is_dir = root->is_dir;
         item.label = root->name.empty() ? L"(root)" : root->name;
         item.color_hash = root->path_hash == 0 ? HashText(item.label) : root->path_hash;
-        EmitNodeRect(item, 0, root_bounds, &rects);
+        EmitNodeRect(item, 0, root_bounds, options, &rects);
         return rects;
     }
 

@@ -104,7 +104,8 @@ namespace
             L"- Status bar shows scan and selection details at the bottom of the window.\r\n"
             L"- Depth controls how many folder levels are visible at once. Lower values keep the view simpler; higher values show more nested folders.\r\n"
             L"- Home returns to the root of the current scan without clearing remembered expanded folders.\r\n"
-            L"- Clear removes remembered expanded folders without changing the current scan.";
+            L"- Clear removes remembered expanded folders without changing the current scan.\r\n"
+            L"- Color by file type gives files with the same filename extension the same tile color and adds clearer tile outlines.";
     }
 
     /**
@@ -570,7 +571,7 @@ namespace
     **/
     void ShowHelpWindow(HWND owner)
     {
-        ShowInfoWindow(owner, L"SwiftDisk Help", BuildHelpText(), 680, 730);
+        ShowInfoWindow(owner, L"SwiftDisk Help", BuildHelpText(), 680, 740);
     }
 
     /**

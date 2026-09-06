@@ -52,6 +52,7 @@ namespace swift_disk::gui
     constexpr int IDC_HELP_BUTTON = 1011;
     constexpr int IDC_CLEAR_BUTTON = 1012;
     constexpr int IDC_ABOUT_BUTTON = 1013;
+    constexpr int IDC_COLOR_BY_FILE_TYPE_CHECK = 1014;
     constexpr int IDM_TREEMAP_OPEN_IN_EXPLORER = 2001;
     constexpr int IDM_TREEMAP_COPY_FULL_PATH = 2002;
     constexpr int IDM_TREEMAP_PROPERTIES = 2003;
@@ -567,6 +568,7 @@ namespace swift_disk::gui
             m_max_depth = settings.GetMaxDepth();
             m_show_tooltip = settings.GetShowTooltip();
             m_show_status_bar = settings.GetShowStatusBar();
+            m_color_by_file_type = settings.GetColorByFileType();
             m_last_scan_path = NormalizeScanPath(settings.GetLastScanPath());
         }
 
@@ -1169,6 +1171,10 @@ namespace swift_disk::gui
             {
                 checked = m_show_status_bar;
             }
+            else if (draw_item.hwndItem == m_color_by_file_type_check)
+            {
+                checked = m_color_by_file_type;
+            }
 
             FillGdiRect(
                 draw_item.hDC,
@@ -1290,6 +1296,7 @@ namespace swift_disk::gui
                 DrawCustomButton(*draw_item);
                 return TRUE;
             case IDC_SHOW_TOOLTIP_CHECK:
+            case IDC_COLOR_BY_FILE_TYPE_CHECK:
             case IDC_SHOW_STATUS_BAR_CHECK:
                 DrawCustomCheckbox(*draw_item);
                 return TRUE;
@@ -1349,7 +1356,8 @@ namespace swift_disk::gui
                 control == m_depth_up_button ||
                 control == m_depth_down_button ||
                 control == m_show_tooltip_check ||
-                control == m_show_status_bar_check;
+                control == m_show_status_bar_check ||
+                control == m_color_by_file_type_check;
         }
 
         bool IsEditControl(HWND control) const
@@ -1657,6 +1665,7 @@ namespace swift_disk::gui
             AddControlHoverTracking(m_depth_down_button);
             AddControlHoverTracking(m_show_tooltip_check);
             AddControlHoverTracking(m_show_status_bar_check);
+            AddControlHoverTracking(m_color_by_file_type_check);
         }
 
         /**
@@ -2019,6 +2028,19 @@ namespace swift_disk::gui
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_SHOW_STATUS_BAR_CHECK)),
                 nullptr,
                 nullptr);
+            m_color_by_file_type_check = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Color by file type",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
+                0,
+                0,
+                0,
+                0,
+                m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COLOR_BY_FILE_TYPE_CHECK)),
+                nullptr,
+                nullptr);
 
             if (m_path_edit)
             {
@@ -2086,6 +2108,15 @@ namespace swift_disk::gui
                     TRUE);
                 SetCheckboxState(m_show_status_bar_check, m_show_status_bar);
             }
+            if (m_color_by_file_type_check)
+            {
+                SendMessageW(
+                    m_color_by_file_type_check,
+                    WM_SETFONT,
+                    reinterpret_cast<WPARAM>(gui_font),
+                    TRUE);
+                SetCheckboxState(m_color_by_file_type_check, m_color_by_file_type);
+            }
 
             CreateControlHoverTracking();
             UpdateHeaderControlsLayout();
@@ -2139,9 +2170,11 @@ namespace swift_disk::gui
             const int depth_label_gap = ScaleIntForDpi(2.0f, dpi_scale);
             const int depth_group_width =
                 depth_label_width + depth_label_gap + depth_edit_width + depth_button_gap + depth_button_width;
+            const int color_by_file_type_width = GetCheckboxControlWidth(m_color_by_file_type_check, 0, dpi_scale);
             const int treemap_control_gap = group_box_horizontal_padding;
             const int treemap_group_width = (group_box_horizontal_padding * 2) +
-                depth_group_width + treemap_control_gap + action_button_width + button_gap + action_button_width;
+                depth_group_width + treemap_control_gap + action_button_width + button_gap + action_button_width +
+                treemap_control_gap + color_by_file_type_width - checkbox_trailing_padding;
             const int lower_row_width =
                 ScaleIntForDpi(2.0f, dpi_scale) +
                 display_group_width +
@@ -2282,9 +2315,11 @@ namespace swift_disk::gui
             const int depth_label_gap = ScaleIntForDpi(2.0f, dpi_scale);
             const int depth_group_width =
                 depth_label_width + depth_label_gap + depth_edit_width + depth_button_gap + depth_button_width;
+            const int color_by_file_type_width = GetCheckboxControlWidth(m_color_by_file_type_check, 0, dpi_scale);
             const int treemap_control_gap = group_box_horizontal_padding;
             const int desired_treemap_group_width = (group_box_horizontal_padding * 2) +
-                depth_group_width + treemap_control_gap + home_width + button_gap + clear_width;
+                depth_group_width + treemap_control_gap + home_width + button_gap + clear_width +
+                treemap_control_gap + color_by_file_type_width - checkbox_trailing_padding;
             const int required_control_area_width = GetRequiredHeaderControlAreaWidth(dpi_scale);
             const int control_area_width = std::clamp(
                 std::max(nominal_control_area_width, required_control_area_width),
@@ -2443,6 +2478,16 @@ namespace swift_disk::gui
                     show_status_bar_left,
                     show_status_bar_top,
                     show_status_bar_width,
+                    ScaleIntForDpi(18.0f, dpi_scale),
+                    TRUE);
+            }
+            if (m_color_by_file_type_check)
+            {
+                MoveWindow(
+                    m_color_by_file_type_check,
+                    clear_left + clear_width + treemap_control_gap,
+                    show_tooltip_top,
+                    color_by_file_type_width,
                     ScaleIntForDpi(18.0f, dpi_scale),
                     TRUE);
             }
@@ -2661,6 +2706,10 @@ namespace swift_disk::gui
             {
                 EnableWindow(m_show_status_bar_check, enabled);
             }
+            if (m_color_by_file_type_check)
+            {
+                EnableWindow(m_color_by_file_type_check, enabled);
+            }
             if (m_hovered_control && !IsWindowEnabled(m_hovered_control))
             {
                 SetHoveredControl(nullptr);
@@ -2722,6 +2771,7 @@ namespace swift_disk::gui
             settings.SetMaxDepth(m_max_depth);
             settings.SetShowTooltip(m_show_tooltip);
             settings.SetShowStatusBar(m_show_status_bar);
+            settings.SetColorByFileType(m_color_by_file_type);
             settings.SetLastScanPath(m_last_scan_path);
             SaveAppSettings(settings);
         }
@@ -3101,6 +3151,15 @@ namespace swift_disk::gui
                     StartTooltipAnimation();
                 }
                 InvalidateRect(m_hwnd, nullptr, FALSE);
+                return;
+            }
+
+            if (control_id == IDC_COLOR_BY_FILE_TYPE_CHECK && control == m_color_by_file_type_check && notification_code == BN_CLICKED)
+            {
+                m_color_by_file_type = !m_color_by_file_type;
+                SetCheckboxState(m_color_by_file_type_check, m_color_by_file_type);
+                SaveCurrentAppSettings();
+                RebuildAndRedraw();
                 return;
             }
 
@@ -3623,6 +3682,12 @@ namespace swift_disk::gui
             m_layout_options.max_children_per_directory = 0;
             m_layout_options.minimum_child_ratio = 0.0;
             m_layout_options.expanded_node_ids.assign(m_expanded_reveal_nodes.begin(), m_expanded_reveal_nodes.end());
+            m_layout_options.color_by_file_type = m_color_by_file_type;
+            if (m_color_by_file_type && !m_layout_options.file_type_palette)
+            {
+                m_layout_options.file_type_palette = std::make_shared<const visualization::FileTypePalette>(
+                    visualization::BuildFileTypePalette(*m_tree));
+            }
             m_rects = visualization::BuildTreemapLayout(*m_tree, m_view_root_id, m_layout_options);
         }
 
@@ -4481,6 +4546,7 @@ namespace swift_disk::gui
         HWND m_depth_down_button = nullptr;
         HWND m_show_tooltip_check = nullptr;
         HWND m_show_status_bar_check = nullptr;
+        HWND m_color_by_file_type_check = nullptr;
         HBRUSH m_header_background_brush = nullptr;
         HBRUSH m_control_panel_brush = nullptr;
         HBRUSH m_control_surface_brush = nullptr;
@@ -4508,6 +4574,7 @@ namespace swift_disk::gui
         std::vector<BreadcrumbStrip> m_breadcrumbs;
         bool m_show_tooltip = true;
         bool m_show_status_bar = false;
+        bool m_color_by_file_type = false;
         std::wstring m_last_scan_path;
         bool m_updating_depth_edit = false;
         bool m_tooltip_animation_active = false;

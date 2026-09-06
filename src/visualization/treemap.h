@@ -5,6 +5,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -12,6 +14,9 @@
 
 namespace swift_disk::visualization
 {
+
+struct TreemapVisualStyle;
+using FileTypePalette = std::unordered_map<std::wstring, TreemapVisualStyle>;
 
 struct TreemapLayoutOptions
 {
@@ -26,6 +31,8 @@ struct TreemapLayoutOptions
     size_t max_depth = 6;
     size_t max_children_per_directory = 0;
     size_t max_rectangles = 4000;
+    bool color_by_file_type = false;
+    std::shared_ptr<const FileTypePalette> file_type_palette;
     std::vector<uint64_t> expanded_node_ids;
 };
 
@@ -55,6 +62,8 @@ struct TreemapVisualStyle
     std::string text_outline_color;
     std::string text_plate_color;
 };
+
+FileTypePalette BuildFileTypePalette(const FileTree& tree);
 
 std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, const TreemapLayoutOptions& options);
 std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_id, const TreemapLayoutOptions& options);
