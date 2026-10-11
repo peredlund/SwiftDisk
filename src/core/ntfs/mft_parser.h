@@ -5,16 +5,9 @@
 
 #include <cstdint>
 #include <string>
-#include <vector>
 
 namespace swift_disk::ntfs
 {
-
-struct DataRun
-{
-    int64_t lcn = 0;
-    uint64_t length = 0;
-};
 
 struct ParsedRecord
 {
@@ -29,6 +22,5 @@ struct ParsedRecord
 };
 
 bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sector, uint64_t frn, ParsedRecord* out);
-bool ExtractMftDataRuns(uint8_t* record, size_t record_size, uint32_t bytes_per_sector, std::vector<DataRun>* runs, uint64_t* data_size);
 
 } // namespace swift_disk::ntfs

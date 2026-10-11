@@ -11,7 +11,7 @@
 namespace swift_disk::ntfs
 {
 
-struct DataRun;
+struct MftExtent;
 
 struct VolumeInfo
 {
@@ -48,8 +48,7 @@ class NtfsVolume
     bool EnumerateMftRecords(const RecordCallback& callback, uint64_t* out_records);
 
   private:
-    bool ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record);
-    bool GetMftDataRuns(std::vector<DataRun>* runs, uint64_t* data_size);
+    bool GetMftExtents(std::vector<MftExtent>* extents);
 
     void* m_handle = nullptr;
     VolumeInfo m_info;

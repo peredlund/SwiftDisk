@@ -3,7 +3,7 @@
 
 #include "core/ntfs/ntfs_volume.h"
 
-#include "core/ntfs/mft_parser.h"
+#include "core/ntfs/mft_extents.h"
 
 #include <windows.h>
 #include <winioctl.h>
@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iterator>
+#include <memory>
 
 namespace swift_disk::ntfs
 {
@@ -142,7 +143,9 @@ bool NtfsVolume::Open(wchar_t drive_letter)
             &volume_data,
             sizeof(volume_data),
             &bytes_returned,
-            nullptr))
+            nullptr) || bytes_returned < sizeof(volume_data) || volume_data.BytesPerSector == 0 ||
+        volume_data.BytesPerCluster == 0 || volume_data.BytesPerFileRecordSegment == 0 ||
+        volume_data.MftValidDataLength.QuadPart <= 0)
     {
         Close();
         return false;
@@ -213,88 +216,75 @@ const VolumeInfo& NtfsVolume::Info() const
 }
 
 /**
- Requests the first in-use FILE record at or below an FRN using
- FSCTL_GET_NTFS_FILE_RECORD.
- 
- Parameters:
-   frn: Maximum file record number to return.
-   out_record: Destination buffer.
- 
- Returns: true when a non-empty record is returned.
- **/
-bool NtfsVolume::ReadFileRecord(uint64_t frn, std::vector<uint8_t>* out_record)
+Loads the MFT extent map through the Windows filesystem driver. The metadata
+handle is synchronous and requests attributes only; raw data uses m_handle.
+
+Parameters:
+  extents: Receives all extents in logical order after a complete query.
+
+Returns: True when the map covers the cached valid MFT data length.
+**/
+bool NtfsVolume::GetMftExtents(std::vector<MftExtent>* extents)
 {
-    if (!m_handle || !out_record)
+    if (!m_handle || !extents)
     {
         return false;
     }
 
-    // The control code returns the first in-use record at or below this FRN.
-    NTFS_FILE_RECORD_INPUT_BUFFER input = {};
-    input.FileReferenceNumber.QuadPart = static_cast<LONGLONG>(frn);
-
-    std::vector<uint8_t> buffer(sizeof(NTFS_FILE_RECORD_OUTPUT_BUFFER) + m_info.bytes_per_file_record);
-    DWORD bytes_returned = 0;
-    if (!DeviceIoControl(
-            m_handle,
-            FSCTL_GET_NTFS_FILE_RECORD,
-            &input,
-            sizeof(input),
-            buffer.data(),
-            static_cast<DWORD>(buffer.size()),
-            &bytes_returned,
-            nullptr))
+    const std::wstring stream_path = m_volume_path + L"\\$MFT::$DATA";
+    HANDLE stream_handle = CreateFileW(stream_path.c_str(), FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (stream_handle == INVALID_HANDLE_VALUE)
     {
         return false;
     }
+    const std::unique_ptr<void, decltype(&CloseHandle)> stream(stream_handle, &CloseHandle);
 
-    auto* output = reinterpret_cast<NTFS_FILE_RECORD_OUTPUT_BUFFER*>(buffer.data());
-    if (output->FileRecordLength == 0)
+    // A bounded page avoids repeatedly reallocating a potentially large map.
+    std::vector<uint8_t> buffer(offsetof(RETRIEVAL_POINTERS_BUFFER, Extents) +
+        64 * sizeof(RETRIEVAL_POINTERS_BUFFER::Extents[0]));
+    std::vector<MftExtent> discovered;
+    STARTING_VCN_INPUT_BUFFER input;
+    input.StartingVcn.QuadPart = 0;
+    uint64_t next_vcn = 0;
+    bool more_data;
+    do
+    {
+        DWORD bytes_returned = 0;
+        const BOOL complete = DeviceIoControl(stream.get(), FSCTL_GET_RETRIEVAL_POINTERS,
+            &input, sizeof(input), buffer.data(), static_cast<DWORD>(buffer.size()), &bytes_returned, nullptr);
+        more_data = !complete && GetLastError() == ERROR_MORE_DATA;
+        if ((!complete && !more_data) || bytes_returned > buffer.size() ||
+            !detail::AppendMftExtentPage(buffer.data(), bytes_returned, next_vcn,
+                m_info.bytes_per_cluster, &discovered, &next_vcn))
+        {
+            return false;
+        }
+        input.StartingVcn.QuadPart = static_cast<LONGLONG>(next_vcn);
+    }
+    while (more_data);
+
+    const uint64_t required_clusters = (m_info.mft_valid_data_length - 1) / m_info.bytes_per_cluster + 1;
+    if (next_vcn < required_clusters)
     {
         return false;
     }
-
-    out_record->assign(output->FileRecordBuffer, output->FileRecordBuffer + output->FileRecordLength);
+    *extents = std::move(discovered);
     return true;
 }
 
 /**
- Loads MFT data runs by parsing MFT record 0.
- 
- Parameters:
-   runs: Destination data-run list.
-   data_size: Optional MFT logical size output.
- 
- Returns: true on successful run extraction.
- **/
-bool NtfsVolume::GetMftDataRuns(std::vector<DataRun>* runs, uint64_t* data_size)
-{
-    if (!runs)
-    {
-        return false;
-    }
-
-    std::vector<uint8_t> record;
-    if (!ReadFileRecord(0, &record))
-    {
-        return false;
-    }
-
-    return ExtractMftDataRuns(record.data(), record.size(), m_info.bytes_per_sector, runs, data_size);
-}
-
-/**
- Streams MFT bytes via run list and emits fixed-size raw record slots.
+ Streams MFT bytes via the queried extent map and emits fixed-size raw record slots.
  Reads run extents sequentially and preserves partial record tails
  between chunk reads.
  
  Parameters:
    callback: Record callback invoked for each full raw record slot read.
-   out_records: Optional output for the final logical record index, including
-     slots skipped for sparse or invalid runs.
+   out_records: Optional output for the number of full raw record slots read.
  
  Returns: false on setup, seek, or read failure; otherwise true after the
- available run data has been processed.
+ entire valid MFT length has been processed without an incomplete record tail.
  **/
 bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* out_records)
 {
@@ -303,15 +293,14 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
         return false;
     }
 
-    std::vector<DataRun> runs;
-    uint64_t mft_data_size = 0;
-    if (!GetMftDataRuns(&runs, &mft_data_size))
+    std::vector<MftExtent> extents;
+    if (!GetMftExtents(&extents))
     {
         return false;
     }
 
     const uint32_t record_size = m_info.bytes_per_file_record;
-    if (record_size == 0)
+    if (record_size == 0 || m_info.mft_valid_data_length % record_size != 0)
     {
         return false;
     }
@@ -329,37 +318,11 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
     size_t carry = 0;
     uint64_t record_index = 0;
 
-    uint64_t mft_limit = m_info.mft_valid_data_length;
-    if (mft_limit == 0 && mft_data_size > 0)
+    uint64_t remaining_mft_bytes = m_info.mft_valid_data_length;
+    for (const auto& extent : extents)
     {
-        mft_limit = mft_data_size;
-    }
-    uint64_t remaining_mft_bytes = mft_limit;
-    for (const auto& run : runs)
-    {
-        if (run.length == 0 || run.lcn <= 0)
-        {
-            // Sparse/invalid run: skip physical read but keep logical record index aligned.
-            uint64_t run_bytes = run.length * static_cast<uint64_t>(m_info.bytes_per_cluster);
-            record_index += run_bytes / record_size;
-            if (remaining_mft_bytes > 0)
-            {
-                if (run_bytes >= remaining_mft_bytes)
-                {
-                    remaining_mft_bytes = 0;
-                    break;
-                }
-                remaining_mft_bytes -= run_bytes;
-            }
-            continue;
-        }
-
-        uint64_t run_bytes = run.length * static_cast<uint64_t>(m_info.bytes_per_cluster);
-        if (remaining_mft_bytes > 0)
-        {
-            run_bytes = std::min(run_bytes, remaining_mft_bytes);
-        }
-        uint64_t run_offset = static_cast<uint64_t>(run.lcn) * m_info.bytes_per_cluster;
+        uint64_t run_bytes = std::min(extent.m_cluster_count * m_info.bytes_per_cluster, remaining_mft_bytes);
+        uint64_t run_offset = extent.m_start_lcn * m_info.bytes_per_cluster;
         uint64_t remaining = run_bytes;
 
         while (remaining > 0)
@@ -374,7 +337,8 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
             }
 
             DWORD bytes_read = 0;
-            if (!ReadFile(static_cast<HANDLE>(m_handle), buffer.data() + carry, static_cast<DWORD>(to_read), &bytes_read, nullptr))
+            if (!ReadFile(static_cast<HANDLE>(m_handle), buffer.data() + carry, static_cast<DWORD>(to_read), &bytes_read, nullptr) ||
+                bytes_read == 0 || bytes_read > to_read)
             {
                 return false;
             }
@@ -395,18 +359,7 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
             }
 
             remaining -= bytes_read;
-            if (remaining_mft_bytes > 0)
-            {
-                remaining_mft_bytes -= bytes_read;
-                if (remaining_mft_bytes == 0)
-                {
-                    remaining = 0;
-                }
-            }
-            if (bytes_read == 0)
-            {
-                break;
-            }
+            remaining_mft_bytes -= bytes_read;
         }
         if (remaining_mft_bytes == 0)
         {
@@ -414,6 +367,10 @@ bool NtfsVolume::EnumerateMftRecords(const RecordCallback& callback, uint64_t* o
         }
     }
 
+    if (remaining_mft_bytes != 0 || carry != 0)
+    {
+        return false;
+    }
     if (out_records)
     {
         *out_records = record_index;

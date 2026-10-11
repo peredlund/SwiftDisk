@@ -26,6 +26,8 @@ add_library(swift_disk_core
     src/core/dir_scanner.h
     src/core/ntfs/mft_parser.cpp
     src/core/ntfs/mft_parser.h
+    src/core/ntfs/mft_extents.cpp
+    src/core/ntfs/mft_extents.h
     src/core/ntfs/mft_scanner.cpp
     src/core/ntfs/mft_scanner.h
     src/core/ntfs/ntfs_volume.cpp
@@ -114,3 +116,13 @@ target_compile_definitions(swift_disk_gui PRIVATE
     UNICODE
     _UNICODE
 )
+
+option(BUILD_TESTING "Build SwiftDisk regression tests" ON)
+if (BUILD_TESTING)
+    enable_testing()
+    add_executable(ntfs_extent_tests tests/ntfs_extent_tests.cpp)
+    target_link_libraries(ntfs_extent_tests PRIVATE swift_disk_core)
+    target_compile_options(ntfs_extent_tests PRIVATE /W4 /permissive- /EHsc)
+    target_compile_definitions(ntfs_extent_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+    add_test(NAME ntfs_extent_tests COMMAND ntfs_extent_tests)
+endif()
