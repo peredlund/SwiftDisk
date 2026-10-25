@@ -390,13 +390,15 @@ bool IsExpandedNode(const std::unordered_set<uint64_t>& expanded_nodes, uint64_t
  Parameters:
    tree: Source tree containing the parent and child nodes.
    parent: Directory node whose indexed children should be collected.
+   size_metric: Logical length or allocated storage used for layout.
 
  Returns: Unique non-empty child items sorted by descending size, together with
  their combined size.
  **/
 ChildCollection CollectChildren(
     const FileTree& tree,
-    const Node& parent)
+    const Node& parent,
+    SizeMetric size_metric)
 {
     ChildCollection collection;
     const std::vector<uint64_t>* child_ids = tree.GetChildIds(parent.id);
@@ -416,14 +418,14 @@ ChildCollection CollectChildren(
         }
 
         const Node* child = tree.GetNode(child_id);
-        if (!child || child->size == 0)
+        if (!child || child->GetSize(size_metric) == 0)
         {
             continue;
         }
 
         LayoutItem item;
         item.node_id = child->id;
-        item.size = child->size;
+        item.size = child->GetSize(size_metric);
         item.is_dir = child->is_dir;
         item.label = child->name.empty() ? L"(unnamed)" : child->name;
         item.color_hash = child->path_hash == 0 ? HashText(item.label) : child->path_hash;
@@ -624,6 +626,7 @@ void CollectItemBounds(
  Parameters:
    tree: Source file tree.
    parent_id: Directory whose children should be collected.
+   size_metric: Logical length or allocated storage used for layout.
    cache: Per-layout child collection cache.
 
  Returns: Cached child collection for the parent id.
@@ -631,6 +634,7 @@ void CollectItemBounds(
 const ChildCollection& GetOrCreateChildren(
     const FileTree& tree,
     uint64_t parent_id,
+    SizeMetric size_metric,
     std::unordered_map<uint64_t, ChildCollection>* cache)
 {
     auto it = cache->find(parent_id);
@@ -643,7 +647,7 @@ const ChildCollection& GetOrCreateChildren(
     const Node* parent = tree.GetNode(parent_id);
     if (parent)
     {
-        children = CollectChildren(tree, *parent);
+        children = CollectChildren(tree, *parent, size_metric);
     }
 
     auto inserted = cache->emplace(parent_id, std::move(children)).first;
@@ -693,7 +697,7 @@ void PushNextCandidate(
         return;
     }
 
-    const ChildCollection& children = GetOrCreateChildren(tree, parent_id, children_cache);
+    const ChildCollection& children = GetOrCreateChildren(tree, parent_id, options.m_size_metric, children_cache);
     const double parent_size = static_cast<double>(std::max<uint64_t>(state.parent_size, 1));
 
     while (state.next_child_index < children.items.size())
@@ -758,7 +762,7 @@ void EmitVisibleSubtree(
 
     LayoutItem item;
     item.node_id = node->id;
-    item.size = node->size;
+    item.size = node->GetSize(options.m_size_metric);
     item.is_dir = node->is_dir;
     item.label = node->name.empty() ? (node->id == root_id ? L"(root)" : L"(unnamed)") : node->name;
     item.color_hash = node->path_hash == 0 ? HashText(item.label) : node->path_hash;
@@ -1160,10 +1164,10 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
 
     std::priority_queue<ChildCandidate, std::vector<ChildCandidate>, ChildCandidateLess> candidates;
 
-    if (root->is_dir && root->size > 0)
+    if (root->is_dir && root->GetSize(options.m_size_metric) > 0)
     {
         SelectionState root_state;
-        root_state.parent_size = root->size;
+        root_state.parent_size = root->GetSize(options.m_size_metric);
         root_state.child_depth = 0;
         root_state.expansion_bonus = 0;
         selection_states.emplace(root_id, root_state);
@@ -1189,7 +1193,7 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
                 continue;
             }
 
-            const ChildCollection& children = GetOrCreateChildren(tree, candidate.parent_id, &children_cache);
+            const ChildCollection& children = GetOrCreateChildren(tree, candidate.parent_id, options.m_size_metric, &children_cache);
             if (candidate.child_index >= children.items.size())
             {
                 continue;
@@ -1229,11 +1233,11 @@ std::vector<TreemapRect> BuildTreemapLayout(const FileTree& tree, uint64_t root_
         }
     }
 
-    if (!root->is_dir || root->size == 0)
+    if (!root->is_dir || root->GetSize(options.m_size_metric) == 0)
     {
         LayoutItem item;
         item.node_id = root->id;
-        item.size = root->size;
+        item.size = root->GetSize(options.m_size_metric);
         item.is_dir = root->is_dir;
         item.label = root->name.empty() ? L"(root)" : root->name;
         item.color_hash = root->path_hash == 0 ? HashText(item.label) : root->path_hash;

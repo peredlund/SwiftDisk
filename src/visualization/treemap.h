@@ -20,6 +20,7 @@ using FileTypePalette = std::unordered_map<std::wstring, TreemapVisualStyle>;
 
 struct TreemapLayoutOptions
 {
+    SizeMetric m_size_metric = SizeMetric::Logical;
     double width = 1600.0;
     double height = 900.0;
     double tile_padding = 2.0;

@@ -53,6 +53,7 @@ namespace swift_disk::gui
     constexpr int IDC_CLEAR_BUTTON = 1012;
     constexpr int IDC_ABOUT_BUTTON = 1013;
     constexpr int IDC_COLOR_BY_FILE_TYPE_CHECK = 1014;
+    constexpr int IDC_SIZE_ON_DISK_CHECK = 1015;
     constexpr int IDM_TREEMAP_OPEN_IN_EXPLORER = 2001;
     constexpr int IDM_TREEMAP_COPY_FULL_PATH = 2002;
     constexpr int IDM_TREEMAP_PROPERTIES = 2003;
@@ -569,6 +570,7 @@ namespace swift_disk::gui
             m_show_tooltip = settings.GetShowTooltip();
             m_show_status_bar = settings.GetShowStatusBar();
             m_color_by_file_type = settings.GetColorByFileType();
+            m_layout_options.m_size_metric = settings.GetUseSizeOnDisk() ? SizeMetric::OnDisk : SizeMetric::Logical;
             m_last_scan_path = NormalizeScanPath(settings.GetLastScanPath());
         }
 
@@ -1175,6 +1177,10 @@ namespace swift_disk::gui
             {
                 checked = m_color_by_file_type;
             }
+            else if (draw_item.hwndItem == m_size_on_disk_check)
+            {
+                checked = m_layout_options.m_size_metric == SizeMetric::OnDisk;
+            }
 
             FillGdiRect(
                 draw_item.hDC,
@@ -1298,6 +1304,7 @@ namespace swift_disk::gui
             case IDC_SHOW_TOOLTIP_CHECK:
             case IDC_COLOR_BY_FILE_TYPE_CHECK:
             case IDC_SHOW_STATUS_BAR_CHECK:
+            case IDC_SIZE_ON_DISK_CHECK:
                 DrawCustomCheckbox(*draw_item);
                 return TRUE;
             default:
@@ -1357,6 +1364,7 @@ namespace swift_disk::gui
                 control == m_depth_down_button ||
                 control == m_show_tooltip_check ||
                 control == m_show_status_bar_check ||
+                control == m_size_on_disk_check ||
                 control == m_color_by_file_type_check;
         }
 
@@ -1653,6 +1661,7 @@ namespace swift_disk::gui
         void CreateControlHoverTracking()
         {
             AddControlHoverTracking(m_path_edit);
+            AddControlHoverTracking(m_size_on_disk_check);
             AddControlHoverTracking(m_path_combo_edit);
             AddControlHoverTracking(m_scan_button);
             AddControlHoverTracking(m_browse_button);
@@ -1858,6 +1867,22 @@ namespace swift_disk::gui
                 m_path_combo_edit = FindWindowExW(m_path_edit, nullptr, L"Edit", nullptr);
                 SetWindowTextW(m_path_edit, initial_path.c_str());
                 RefreshNtfsDriveDropdown();
+            }
+
+            m_size_on_disk_check = CreateWindowExW(
+                0,
+                L"BUTTON",
+                L"Size on disk",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
+                0, 0, 0, 0,
+                m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_SIZE_ON_DISK_CHECK)),
+                nullptr,
+                nullptr);
+            if (m_size_on_disk_check)
+            {
+                SendMessageW(m_size_on_disk_check, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+                SetCheckboxState(m_size_on_disk_check, m_layout_options.m_size_metric == SizeMetric::OnDisk);
             }
 
             m_scan_button = CreateWindowExW(
@@ -2161,6 +2186,8 @@ namespace swift_disk::gui
                 show_tooltip_width + display_checkbox_gap + show_status_bar_width;
             const int display_group_width =
                 group_box_horizontal_padding + checkbox_group_width + show_group_right_padding;
+            const int size_group_width = group_box_horizontal_padding +
+                GetCheckboxControlWidth(m_size_on_disk_check, 0, dpi_scale) + show_group_right_padding;
 
             const int depth_label_width =
                 std::max(MeasureControlTextWidth(m_depth_label), ScaleIntForDpi(32.0f, dpi_scale));
@@ -2178,6 +2205,8 @@ namespace swift_disk::gui
             const int lower_row_width =
                 ScaleIntForDpi(2.0f, dpi_scale) +
                 display_group_width +
+                group_box_horizontal_padding +
+                size_group_width +
                 group_box_horizontal_padding +
                 treemap_group_width +
                 group_box_horizontal_padding +
@@ -2330,12 +2359,16 @@ namespace swift_disk::gui
             const int scan_group_top_inner = group_top + ScaleIntForDpi(10.0f, dpi_scale);
             const int browse_left = control_left + control_area_width - browse_width;
             const int scan_left = browse_left - button_gap - scan_width;
+            const int size_on_disk_width = GetCheckboxControlWidth(m_size_on_disk_check, 0, dpi_scale);
+            const int size_group_width = group_box_horizontal_padding + size_on_disk_width + show_group_right_padding;
             const int edit_width = std::max(
                 ScaleIntForDpi(180.0f, dpi_scale),
                 scan_left - button_gap - scan_group_left);
             const int lower_row_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
             const int display_group_left = lower_row_left;
             const int treemap_group_left = display_group_left + display_group_width + lower_group_gap;
+            const int size_group_left = treemap_group_left + desired_treemap_group_width + lower_group_gap;
+            const int size_on_disk_left = size_group_left + group_box_horizontal_padding;
             const int about_left = browse_left;
             const int help_left = about_left - button_gap - help_width;
             const int treemap_group_width = desired_treemap_group_width;
@@ -2366,6 +2399,11 @@ namespace swift_disk::gui
                 static_cast<float>(lower_group_top - group_box_top_padding),
                 static_cast<float>(display_group_left + display_group_width),
                 static_cast<float>(lower_group_top + lower_group_height + group_box_bottom_padding));
+            m_size_group_rect = MakeRenderRect(
+                static_cast<float>(size_group_left),
+                static_cast<float>(lower_group_top - group_box_top_padding),
+                static_cast<float>(size_group_left + size_group_width),
+                static_cast<float>(lower_group_top + lower_group_height + group_box_bottom_padding));
 
             const int depth_controls_top = lower_group_top + ScaleIntForDpi(1.0f, dpi_scale);
             const int depth_label_left = depth_controls_left;
@@ -2390,6 +2428,11 @@ namespace swift_disk::gui
                     ScaleIntForDpi(6.0f, dpi_scale),
                     ScaleIntForDpi(8.0f, dpi_scale),
                     ScaleIntForDpi(4.0f, dpi_scale));
+            }
+            if (m_size_on_disk_check)
+            {
+                MoveWindow(m_size_on_disk_check, size_on_disk_left, show_tooltip_top,
+                    size_on_disk_width, ScaleIntForDpi(18.0f, dpi_scale), TRUE);
             }
             if (m_scan_button)
             {
@@ -2665,6 +2708,10 @@ namespace swift_disk::gui
         **/
         void SetScanControlsEnabled(bool enabled)
         {
+            if (m_size_on_disk_check)
+            {
+                EnableWindow(m_size_on_disk_check, enabled);
+            }
             if (m_path_edit)
             {
                 EnableWindow(m_path_edit, enabled);
@@ -2772,6 +2819,7 @@ namespace swift_disk::gui
             settings.SetShowTooltip(m_show_tooltip);
             settings.SetShowStatusBar(m_show_status_bar);
             settings.SetColorByFileType(m_color_by_file_type);
+            settings.SetUseSizeOnDisk(m_layout_options.m_size_metric == SizeMetric::OnDisk);
             settings.SetLastScanPath(m_last_scan_path);
             SaveAppSettings(settings);
         }
@@ -2858,7 +2906,9 @@ namespace swift_disk::gui
 
             m_view_root_id = m_tree->RootId();
             m_expanded_reveal_nodes.clear();
+            const SizeMetric size_metric = m_layout_options.m_size_metric;
             m_layout_options = visualization::TreemapLayoutOptions();
+            m_layout_options.m_size_metric = size_metric;
             m_rects.clear();
             m_breadcrumbs.clear();
             ClearHoverState();
@@ -3088,6 +3138,17 @@ namespace swift_disk::gui
         **/
         void OnCommand(int control_id, int notification_code, HWND control)
         {
+            if (control_id == IDC_SIZE_ON_DISK_CHECK && control == m_size_on_disk_check && notification_code == BN_CLICKED)
+            {
+                m_layout_options.m_size_metric = m_layout_options.m_size_metric == SizeMetric::OnDisk
+                    ? SizeMetric::Logical : SizeMetric::OnDisk;
+                SetCheckboxState(m_size_on_disk_check, m_layout_options.m_size_metric == SizeMetric::OnDisk);
+                SaveCurrentAppSettings();
+                ClearHoverState();
+                RebuildAndRedraw();
+                return;
+            }
+
             if (control_id == IDC_PATH_EDIT && control == m_path_edit)
             {
                 if (notification_code == CBN_DROPDOWN)
@@ -3638,7 +3699,7 @@ namespace swift_disk::gui
                 {
                     text = L"...\\" + text;
             }
-            strip.text = text + L" - " + HumanizeBytes(node->size);
+            strip.text = text + L" - " + HumanizeBytes(node->GetSize(m_layout_options.m_size_metric));
 
             const std::wstring path = m_tree->BuildPath(node_id);
             strip.style = visualization::BuildTreemapVisualStyle(
@@ -4474,6 +4535,7 @@ namespace swift_disk::gui
             state.scan_group_rect = m_scan_group_rect;
             state.treemap_group_rect = m_treemap_group_rect;
             state.display_group_rect = m_display_group_rect;
+            state.m_size_group_rect = m_size_group_rect;
             return state;
         }
 
@@ -4533,6 +4595,7 @@ namespace swift_disk::gui
         GuiOptions m_options;
         HWND m_hwnd = nullptr;
         HWND m_path_edit = nullptr;
+        HWND m_size_on_disk_check = nullptr;
         HWND m_path_combo_edit = nullptr;
         HWND m_scan_button = nullptr;
         HWND m_browse_button = nullptr;
@@ -4591,6 +4654,7 @@ namespace swift_disk::gui
         RenderRect m_scan_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect m_treemap_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect m_display_group_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_size_group_rect = MakeRenderRect(0, 0, 0, 0);
         std::vector<std::pair<HWND, WNDPROC>> m_subclassed_controls;
     };
 

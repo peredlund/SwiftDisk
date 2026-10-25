@@ -255,6 +255,19 @@ namespace swift_disk::gui
         return buffer;
     }
 
+    /**
+    Formats both file-size metrics for tile and breadcrumb hover tooltips.
+    **/
+    std::wstring FormatSizeDetails(const Node* node)
+    {
+        if (!node)
+        {
+            return L"Size: -\nSize on disk: -";
+        }
+        return L"Size: " + HumanizeBytes(node->size) + L"\nSize on disk: " +
+            (node->m_size_on_disk_estimated ? L"approximately " : L"") + HumanizeBytes(node->m_size_on_disk);
+    }
+
     D2D1_COLOR_F ParseHexColor(const std::string& value, float alpha = 1.0f)
     {
         if (value.size() != 7 || value[0] != '#')
@@ -1377,7 +1390,7 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
     const std::wstring focused_name = focused_node
         ? (focused_node->name.empty() ? focused_path : focused_node->name)
         : (state.selected_path.empty() ? L"(no path selected)" : state.selected_path);
-    const std::wstring focused_size = focused_node ? HumanizeBytes(focused_node->size) : L"-";
+    const std::wstring focused_size = focused_node ? HumanizeBytes(focused_node->GetSize(state.layout_options.m_size_metric)) : L"-";
 
     const visualization::TreemapVisualStyle frame_style = visualization::BuildTreemapVisualStyle(
         focused_name,
@@ -1775,6 +1788,7 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
 
     DrawHeaderGroupBox(state.display_group_rect, L"Show");
     DrawHeaderGroupBox(state.treemap_group_rect, L"Treemap");
+    DrawHeaderGroupBox(state.m_size_group_rect, L"Size");
 
     DrawTextLine(
         L"SwiftDisk",
@@ -1793,13 +1807,13 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
         ? state.tree->BuildPath(state.view_root_id)
         : (state.selected_path.empty() ? L"(no path selected)" : state.selected_path);
     const std::wstring focused_size = focused_node
-        ? HumanizeBytes(focused_node->size)
+        ? HumanizeBytes(focused_node->GetSize(state.layout_options.m_size_metric))
         : L"-";
     const Node* scanned_root_node = state.tree
         ? state.tree->GetNode(state.tree->RootId())
         : nullptr;
     const std::wstring scanned_size = scanned_root_node
-        ? HumanizeBytes(scanned_root_node->size)
+        ? HumanizeBytes(scanned_root_node->GetSize(state.layout_options.m_size_metric))
         : L"-";
 
     DrawTextLine(
@@ -1819,7 +1833,7 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
     }
     else if (state.tree)
     {
-        summary << L"Size: " << scanned_size
+        summary << (state.layout_options.m_size_metric == SizeMetric::OnDisk ? L"Size on disk: " : L"Size: ") << scanned_size
             << L"  |  Current: " << focused_size
             << L"  |  Nodes: " << state.tree->NodeCount()
             << L"  |  Scan: " << FormatSeconds(state.elapsed_seconds);
@@ -1880,12 +1894,12 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
             const Node* node = state.tree->GetNode(strip.node_id);
             const std::wstring path = state.tree->BuildPath(strip.node_id);
             *name_text = path.empty() ? strip.text : path;
-            *size_text = L"Size: " + (node ? HumanizeBytes(node->size) : L"-");
+            *size_text = FormatSizeDetails(node);
         }
         else
         {
             *name_text = strip.text;
-            *size_text = L"Size: -";
+            *size_text = FormatSizeDetails(nullptr);
         }
         return true;
     }
@@ -1902,7 +1916,7 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
         {
             *name_text = rect.label;
         }
-        *size_text = L"Size: " + HumanizeBytes(rect.size);
+        *size_text = FormatSizeDetails(state.tree->GetNode(rect.node_id));
         return true;
     }
 
@@ -1997,8 +2011,8 @@ bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& sta
     ComPtr<IDWriteTextLayout> size_layout = CreateTextLayout(
         size_text,
         RenderTextFormat::Small,
-        MakeRenderRect(0.0f, 0.0f, max_tooltip_width, Scale(22.0f)),
-        DWRITE_WORD_WRAPPING_NO_WRAP);
+        MakeRenderRect(0.0f, 0.0f, max_tooltip_width, Scale(64.0f)),
+        DWRITE_WORD_WRAPPING_WRAP);
     if (!name_layout || !size_layout)
     {
         return false;
@@ -2148,7 +2162,12 @@ void Direct2DRenderer::DrawStatusBar(const MainWindowDrawingState& state)
         return;
     }
 
-    const std::wstring status_text = name_text + L" - " + size_text.substr(6);
+    const size_t line_break = size_text.find(L'\n');
+    if (line_break != std::wstring::npos)
+    {
+        size_text.replace(line_break, 1, L"  |  ");
+    }
+    const std::wstring status_text = name_text + L" - " + size_text;
     const RenderRect text_rect = MakeRenderRect(
         state.status_bar_rect.left + Scale(12.0f),
         state.status_bar_rect.top + Scale(kStatusBarTextVerticalPadding),

@@ -8,12 +8,16 @@
 #include <winioctl.h>
 
 #include <cstring>
+#include <cwchar>
 #include <initializer_list>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+void RunSizeTests();
+int VerifyFileSizes(const wchar_t* path, bool use_mft);
 
 namespace
 {
@@ -202,22 +206,28 @@ int ScanVolume(char drive_letter)
 /**
 Runs extent-map regression checks, or an explicitly requested live-volume scan.
 **/
-int main(int argument_count, char** arguments)
+int wmain(int argument_count, wchar_t** arguments)
 {
     try
     {
-        if (argument_count == 3 && std::strcmp(arguments[1], "--scan") == 0 && std::strlen(arguments[2]) == 1)
+        if (argument_count == 3 && std::wcscmp(arguments[1], L"--scan") == 0 && std::wcslen(arguments[2]) == 1)
         {
-            return ScanVolume(arguments[2][0]);
+            return ScanVolume(static_cast<char>(arguments[2][0]));
+        }
+        if (argument_count == 3 && (std::wcscmp(arguments[1], L"--sizes") == 0 ||
+            std::wcscmp(arguments[1], L"--directory-sizes") == 0))
+        {
+            return VerifyFileSizes(arguments[2], std::wcscmp(arguments[1], L"--sizes") == 0);
         }
         if (argument_count != 1)
         {
-            std::cerr << "Usage: ntfs_extent_tests [--scan DRIVE_LETTER]\n";
+            std::cerr << "Usage: ntfs_extent_tests [--scan DRIVE_LETTER | --sizes FOLDER | --directory-sizes FOLDER]\n";
             return 2;
         }
         TestFragmentedPages();
         TestRejectedPages();
-        std::cout << "Extent-map regression checks passed.\n";
+        RunSizeTests();
+        std::cout << "Extent-map and file-size regression checks passed.\n";
         return 0;
     }
     catch (const std::exception& error)

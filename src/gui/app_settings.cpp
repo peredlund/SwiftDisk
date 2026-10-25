@@ -19,6 +19,7 @@ namespace swift_disk::gui
         constexpr const wchar_t* kShowTooltipValueName = L"ShowTooltip";
         constexpr const wchar_t* kShowStatusBarValueName = L"ShowStatusBar";
         constexpr const wchar_t* kColorByFileTypeValueName = L"ColorByFileType";
+        constexpr const wchar_t* kUseSizeOnDiskValueName = L"UseSizeOnDisk";
         constexpr const wchar_t* kMaxDepthValueName = L"MaxDepth";
         constexpr const wchar_t* kLastScanPathValueName = L"LastScanPath";
         constexpr int kMinimumMaxDepth = 1;
@@ -225,6 +226,22 @@ namespace swift_disk::gui
     }
 
     /**
+    Returns whether allocated storage is the selected display metric.
+    **/
+    bool AppSettings::GetUseSizeOnDisk() const
+    {
+        return m_use_size_on_disk;
+    }
+
+    /**
+    Updates the persisted size display preference.
+    **/
+    void AppSettings::SetUseSizeOnDisk(bool use_size_on_disk)
+    {
+        m_use_size_on_disk = use_size_on_disk;
+    }
+
+    /**
     Returns the last path the user scanned.
 
     Returns: Last scanned path, or an empty string when no path is stored.
@@ -280,6 +297,10 @@ namespace swift_disk::gui
         {
             settings.SetColorByFileType(value != 0);
         }
+        if (TryReadDwordValue(key, kUseSizeOnDiskValueName, &value))
+        {
+            settings.SetUseSizeOnDisk(value != 0);
+        }
         if (TryReadDwordValue(key, kMaxDepthValueName, &value))
         {
             settings.SetMaxDepth(static_cast<int>(value));
@@ -321,6 +342,7 @@ namespace swift_disk::gui
         WriteDwordValue(key, kShowTooltipValueName, settings.GetShowTooltip() ? 1 : 0);
         WriteDwordValue(key, kShowStatusBarValueName, settings.GetShowStatusBar() ? 1 : 0);
         WriteDwordValue(key, kColorByFileTypeValueName, settings.GetColorByFileType() ? 1 : 0);
+        WriteDwordValue(key, kUseSizeOnDiskValueName, settings.GetUseSizeOnDisk() ? 1 : 0);
         WriteDwordValue(key, kMaxDepthValueName, static_cast<DWORD>(settings.GetMaxDepth()));
         WriteStringValue(key, kLastScanPathValueName, settings.GetLastScanPath());
         RegCloseKey(key);

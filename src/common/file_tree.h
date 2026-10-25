@@ -11,14 +11,24 @@
 namespace swift_disk
 {
 
+enum class SizeMetric
+{
+    Logical,
+    OnDisk
+};
+
 struct Node
 {
     uint64_t id = 0;
     uint64_t parent_id = 0;
     std::wstring name;
     bool is_dir = false;
+    bool m_size_on_disk_estimated = false;
     uint64_t size = 0;
+    uint64_t m_size_on_disk = 0;
     uint64_t path_hash = 0;
+
+    uint64_t GetSize(SizeMetric size_metric) const;
 };
 
 /**

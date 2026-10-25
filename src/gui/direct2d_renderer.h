@@ -72,6 +72,7 @@ namespace swift_disk::gui
         RenderRect scan_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect treemap_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect display_group_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_size_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect paint_rect = MakeRenderRect(0, 0, 0, 0);
     };
 

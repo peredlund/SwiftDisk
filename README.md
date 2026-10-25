@@ -28,7 +28,8 @@ The first time you start SwiftDisk, Microsoft Defender SmartScreen may display a
 3. Click `Scan`, or press Enter to start the scan.
 4. Use the treemap to find large folders and files:
    - Larger rectangles use more disk space.
-   - Hover over a rectangle to see its name and size.
+   - Check Size on disk to show allocated storage, or uncheck it to show Size, without rescanning.
+   - Hover over a rectangle to see its path and both size values.
    - Click a folder rectangle to drill into it.
    - Use the parent folder bars at the top of the treemap to go back up.
    - Right-click a rectangle to open it, show it in File Explorer, copy its path, or view properties.

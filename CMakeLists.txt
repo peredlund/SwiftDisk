@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(SwiftDisk VERSION 1.1.0 LANGUAGES CXX)
+project(SwiftDisk VERSION 1.2.0 LANGUAGES CXX)
 
 if (NOT WIN32)
     message(FATAL_ERROR
@@ -120,7 +120,7 @@ target_compile_definitions(swift_disk_gui PRIVATE
 option(BUILD_TESTING "Build SwiftDisk regression tests" ON)
 if (BUILD_TESTING)
     enable_testing()
-    add_executable(ntfs_extent_tests tests/ntfs_extent_tests.cpp)
+    add_executable(ntfs_extent_tests tests/ntfs_extent_tests.cpp tests/size_tests.cpp)
     target_link_libraries(ntfs_extent_tests PRIVATE swift_disk_core)
     target_compile_options(ntfs_extent_tests PRIVATE /W4 /permissive- /EHsc)
     target_compile_definitions(ntfs_extent_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)

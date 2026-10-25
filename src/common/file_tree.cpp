@@ -57,6 +57,15 @@ uint64_t HashPathComponent(const std::wstring& value)
 } // namespace
 
 /**
+Returns the logical content length or allocated storage for this node.
+Directory values are the corresponding sums of their descendant files.
+**/
+uint64_t Node::GetSize(SizeMetric size_metric) const
+{
+    return size_metric == SizeMetric::OnDisk ? m_size_on_disk : size;
+}
+
+/**
  Inserts or replaces a node. For non-root nodes, appends the node id to the
  supplied parent's child index; existing child-index entries are not rewritten.
  
@@ -208,6 +217,8 @@ void FileTree::Finalize()
             continue;
         }
         parent_it->second.size += node.size;
+        parent_it->second.m_size_on_disk += node.m_size_on_disk;
+        parent_it->second.m_size_on_disk_estimated |= node.m_size_on_disk_estimated;
     }
 
     RefreshPathHashesFromOrderedIds(ids, true);

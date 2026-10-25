@@ -4,6 +4,7 @@
 #include "core/ntfs/mft_parser.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 
 namespace swift_disk::ntfs
@@ -218,6 +219,8 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
     out->is_dir = is_dir;
     out->in_use = in_use;
     out->size = 0;
+    out->m_size_on_disk = 0;
+    out->has_data_attribute = false;
     if (!in_use)
     {
         return true;
@@ -228,6 +231,7 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
     std::wstring best_name;
     uint64_t parent_frn = 0;
     uint64_t data_size = 0;
+    uint64_t size_on_disk = 0;
     uint64_t name_real_size = 0;
 
     while (attr_offset + sizeof(AttrHeaderCommon) <= record_size)
@@ -277,13 +281,42 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
                 // Only unnamed $DATA is counted as file primary content size.
                 if (attr->non_resident == 0)
                 {
+                    if (attr->length < sizeof(AttrHeaderResident))
+                    {
+                        break;
+                    }
                     auto* resident = reinterpret_cast<AttrHeaderResident*>(attr);
+                    out->has_data_attribute = true;
                     data_size = std::max<uint64_t>(data_size, resident->value_length);
+                    // Resident content shares its MFT record; no data clusters are allocated.
                 }
                 else
                 {
+                    if (attr->length < offsetof(AttrHeaderNonResident, compressed_size))
+                    {
+                        break;
+                    }
                     auto* non_res = reinterpret_cast<AttrHeaderNonResident*>(attr);
+                    // Stream-wide sizes are valid only in the first segment.
+                    if (non_res->start_vcn != 0)
+                    {
+                        attr_offset = static_cast<uint16_t>(attr_offset + attr->length);
+                        continue;
+                    }
+                    out->has_data_attribute = true;
                     data_size = std::max<uint64_t>(data_size, non_res->data_size);
+                    uint64_t allocated = non_res->allocated_size;
+                    if ((attr->flags & 0x80FF) != 0)
+                    {
+                        // Sparse/compressed allocation excludes holes and compression savings.
+                        if (attr->length < sizeof(AttrHeaderNonResident) ||
+                            non_res->data_run_offset < sizeof(AttrHeaderNonResident))
+                        {
+                            break;
+                        }
+                        allocated = non_res->compressed_size;
+                    }
+                    size_on_disk = std::max(size_on_disk, allocated);
                 }
             }
         }
@@ -299,11 +332,12 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
     }
     else
     {
-        if (data_size == 0 && name_real_size > 0)
+        if (!out->has_data_attribute && data_size == 0 && name_real_size > 0)
         {
             data_size = name_real_size;
         }
         out->size = data_size;
+        out->m_size_on_disk = size_on_disk;
     }
     return true;
 }

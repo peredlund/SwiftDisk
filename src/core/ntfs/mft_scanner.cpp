@@ -213,7 +213,7 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
     tree->SetRootId(kRootFrn);
 
     const uint32_t bytes_per_sector = volume.Info().bytes_per_sector;
-    std::unordered_map<uint64_t, uint64_t> pending_sizes;
+    std::unordered_map<uint64_t, std::pair<uint64_t, uint64_t>> pending_sizes;
     bool ok = volume.EnumerateMftRecords(
         [&](uint8_t* record, size_t record_size, uint64_t frn)
         {
@@ -233,7 +233,7 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
             if (parsed.name.empty())
             {
                 stats.records_no_name++;
-                if (!parsed.is_dir && parsed.size > 0)
+                if (!parsed.is_dir && (parsed.size > 0 || parsed.m_size_on_disk > 0))
                 {
                     if (parsed.base_frn != 0 && parsed.base_frn != parsed.frn)
                     {
@@ -242,12 +242,14 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
                         if (Node* existing = tree->GetNodeMutable(parsed.base_frn))
                         {
                             existing->size = std::max(existing->size, parsed.size);
+                            existing->m_size_on_disk = std::max(existing->m_size_on_disk, parsed.m_size_on_disk);
                         }
                         else
                         {
                             // Base record may appear later in scan order; store pending merge.
                             auto& pending = pending_sizes[parsed.base_frn];
-                            pending = std::max(pending, parsed.size);
+                            pending.first = std::max(pending.first, parsed.size);
+                            pending.second = std::max(pending.second, parsed.m_size_on_disk);
                         }
                         stats.extension_size_records++;
                         stats.extension_size_total += parsed.size;
@@ -277,6 +279,7 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
             node.name = std::move(parsed.name);
             node.is_dir = parsed.is_dir;
             node.size = parsed.size;
+            node.m_size_on_disk = parsed.m_size_on_disk;
             tree->AddNode(std::move(node));
             stats.records_added++;
 
@@ -286,7 +289,8 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
                 Node* existing = tree->GetNodeMutable(node.id);
                 if (existing)
                 {
-                    existing->size = std::max(existing->size, pending->second);
+                    existing->size = std::max(existing->size, pending->second.first);
+                    existing->m_size_on_disk = std::max(existing->m_size_on_disk, pending->second.second);
                 }
                 pending_sizes.erase(pending);
             }
@@ -307,7 +311,7 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
         for (const auto& entry : pending_sizes)
         {
             stats.extension_missing_base_records++;
-            stats.extension_missing_base_total += entry.second;
+            stats.extension_missing_base_total += entry.second.first;
         }
     }
 
