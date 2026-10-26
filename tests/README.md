@@ -39,10 +39,19 @@ with `compact /c`, and a sparse file with a large unwritten region. Creating
 these fixtures is a separate, deliberate file-writing step; neither verification
 command creates them. Avoid links and alternate streams in this basic test set.
 
-In the GUI, scan the test folder and toggle the Size on disk checkbox. Unchecked
+In the GUI, hover over each header control (including the drive field, depth controls,
+buttons, and checkboxes) and check its description. Check that descriptions also appear
+over disabled controls, and still work after resizing or moving the app between displays.
+Control tooltips should use the treemap tooltip's Segoe UI font, white background,
+and dark text, with smaller padding (4 pixels horizontally and 3 vertically at
+100% scaling). Text and padding should scale for the display DPI.
+Turn Tooltips off and confirm that control descriptions remain available while treemap
+tooltips are hidden.
+
+Scan the test folder and toggle the Size on disk checkbox in the Options group. Unchecked
 uses Size; checked uses Size on disk. Check
-that totals, breadcrumb sizes, tile sizes and ordering update immediately; both
-values appear in tile and breadcrumb tooltips; resident and fully sparse files
+that totals, breadcrumb sizes, tile sizes and ordering update immediately; tile
+and breadcrumb tooltips show only the selected size; resident and fully sparse files
 consume no area in disk mode; and the choice survives a rescan and app restart.
 Compare file Properties in Explorer, then decompress the compressed file and
 rescan: logical size should stay constant while allocation increases.

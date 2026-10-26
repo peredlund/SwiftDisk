@@ -3,9 +3,12 @@
 
 #include <windows.h>
 #include <windowsx.h>
+#include <commctrl.h>
+#include <uxtheme.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <oleacc.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -51,9 +54,10 @@ namespace swift_disk::gui
     constexpr int IDC_HOME_BUTTON = 1010;
     constexpr int IDC_HELP_BUTTON = 1011;
     constexpr int IDC_CLEAR_BUTTON = 1012;
-    constexpr int IDC_ABOUT_BUTTON = 1013;
     constexpr int IDC_COLOR_BY_FILE_TYPE_CHECK = 1014;
     constexpr int IDC_SIZE_ON_DISK_CHECK = 1015;
+    constexpr int IDM_HELP_HELP = 2201;
+    constexpr int IDM_HELP_ABOUT = 2202;
     constexpr int IDM_TREEMAP_OPEN_IN_EXPLORER = 2001;
     constexpr int IDM_TREEMAP_COPY_FULL_PATH = 2002;
     constexpr int IDM_TREEMAP_PROPERTIES = 2003;
@@ -639,6 +643,28 @@ namespace swift_disk::gui
         }
 
     private:
+        struct HeaderControlMetrics
+        {
+            int m_action_width = 0;
+            int m_depth_label_width = 0;
+            int m_treemap_width = 0;
+            int m_color_width = 0;
+            int m_size_width = 0;
+            int m_tooltip_width = 0;
+            int m_status_bar_width = 0;
+            int m_options_width = 0;
+            int m_path_width = 0;
+            int m_control_width = 0;
+        };
+
+        struct HeaderMenuItem
+        {
+            MSAAMENUINFO m_accessibility = {};
+            std::wstring m_text;
+            std::wstring m_accessible_text;
+            bool m_separator = false;
+        };
+
         static constexpr float kOuterPadding = 18.0f;
         static constexpr float kHeaderHeight = 116.0f;
         static constexpr float kTreemapTopSliceHeight = 22.0f;
@@ -650,8 +676,8 @@ namespace swift_disk::gui
         static constexpr float kStatusBarTextVerticalPadding = 4.0f;
         static constexpr float kTooltipOffsetX = 16.0f;
         static constexpr float kTooltipOffsetY = 22.0f;
-        static constexpr float kTooltipPaddingX = 10.0f;
-        static constexpr float kTooltipPaddingY = 8.0f;
+        static constexpr float kHeaderTooltipPaddingX = 4.0f;
+        static constexpr float kHeaderTooltipPaddingY = 3.0f;
         static constexpr float kTooltipLineGap = 4.0f;
         static constexpr float kTooltipCornerRadius = 4.0f;
         static constexpr float kTooltipInnerMargin = 6.0f;
@@ -759,11 +785,25 @@ namespace swift_disk::gui
             case WM_KEYDOWN:
                 OnKeyDown(static_cast<UINT>(w_param));
                 return 0;
+            case WM_SYSCHAR:
+                if (TryHandleHeaderAccessKey(w_param))
+                {
+                    return 0;
+                }
+                break;
             case WM_COMMAND:
                 OnCommand(LOWORD(w_param), HIWORD(w_param), reinterpret_cast<HWND>(l_param));
                 return 0;
             case WM_DRAWITEM:
                 return HandleDrawItem(reinterpret_cast<const DRAWITEMSTRUCT*>(l_param));
+            case WM_MEASUREITEM:
+                return MeasureHeaderMenuItem(reinterpret_cast<MEASUREITEMSTRUCT*>(l_param));
+            case WM_MENUCHAR:
+                if (reinterpret_cast<HMENU>(l_param) == m_header_popup_menu)
+                {
+                    return HandleHeaderMenuCharacter(static_cast<wchar_t>(LOWORD(w_param)));
+                }
+                break;
             case WM_CTLCOLORSTATIC:
             case WM_CTLCOLOREDIT:
             case WM_CTLCOLORBTN:
@@ -806,6 +846,16 @@ namespace swift_disk::gui
             case WM_DESTROY:
                 SaveCurrentAppSettings();
                 StopTooltipAnimation();
+                if (m_header_tooltip)
+                {
+                    DestroyWindow(m_header_tooltip);
+                    m_header_tooltip = nullptr;
+                }
+                if (m_header_tooltip_font)
+                {
+                    DeleteObject(m_header_tooltip_font);
+                    m_header_tooltip_font = nullptr;
+                }
                 DestroyControlHoverTracking();
                 DestroyControlThemeResources();
                 DiscardDeviceResources();
@@ -1146,6 +1196,8 @@ namespace swift_disk::gui
             }
         }
 
+
+
         /**
         Draws an owner-drawn checkbox whose checked value is backed by the
         corresponding MainWindow setting instead of native button state alone.
@@ -1274,45 +1326,6 @@ namespace swift_disk::gui
         }
 
         /**
-        Routes WM_DRAWITEM requests to the custom button or checkbox renderer for
-        controls owned by MainWindow.
-
-        Parameters:
-          draw_item: Owner-draw request from Windows.
-
-        Returns: TRUE when the control was drawn, otherwise FALSE.
-        **/
-        LRESULT HandleDrawItem(const DRAWITEMSTRUCT* draw_item) const
-        {
-            if (!draw_item)
-            {
-                return FALSE;
-            }
-
-            switch (draw_item->CtlID)
-            {
-            case IDC_SCAN_BUTTON:
-            case IDC_BROWSE_BUTTON:
-            case IDC_HOME_BUTTON:
-            case IDC_HELP_BUTTON:
-            case IDC_CLEAR_BUTTON:
-            case IDC_ABOUT_BUTTON:
-            case IDC_DEPTH_UP_BUTTON:
-            case IDC_DEPTH_DOWN_BUTTON:
-                DrawCustomButton(*draw_item);
-                return TRUE;
-            case IDC_SHOW_TOOLTIP_CHECK:
-            case IDC_COLOR_BY_FILE_TYPE_CHECK:
-            case IDC_SHOW_STATUS_BAR_CHECK:
-            case IDC_SIZE_ON_DISK_CHECK:
-                DrawCustomCheckbox(*draw_item);
-                return TRUE;
-            default:
-                return FALSE;
-            }
-        }
-
-        /**
         Synchronizes a checkbox's native accessibility state with the setting
         stored by MainWindow and schedules it for repainting.
 
@@ -1333,6 +1346,214 @@ namespace swift_disk::gui
                 checked ? BST_CHECKED : BST_UNCHECKED,
                 0);
             InvalidateRect(checkbox, nullptr, TRUE);
+        }
+
+        /**
+        Calculates a checkbox width from its box, label, DPI-scaled spacing, and
+        caller-provided minimum.
+
+        Parameters:
+          checkbox: Checkbox whose label should be measured.
+          minimum_width: Lower width bound in physical pixels.
+          dpi_scale: Current window DPI scale.
+
+        Returns: Required checkbox width in physical pixels.
+        **/
+        int GetCheckboxControlWidth(HWND checkbox, int minimum_width, float dpi_scale) const
+        {
+            const int checkbox_left_padding = ScaleIntForDpi(2.0f, dpi_scale);
+            const int checkbox_box_size = ScaleIntForDpi(14.0f, dpi_scale);
+            const int checkbox_text_gap = ScaleIntForDpi(8.0f, dpi_scale);
+            const int checkbox_trailing_padding = ScaleIntForDpi(8.0f, dpi_scale);
+            const int measured_width =
+                checkbox_left_padding +
+                checkbox_box_size +
+                checkbox_text_gap +
+                MeasureControlTextWidth(checkbox) +
+                checkbox_trailing_padding;
+            return std::max(minimum_width, measured_width);
+        }
+
+        /**
+        Routes WM_DRAWITEM requests to the header button and menu renderers.
+
+        Parameters:
+          draw_item: Owner-draw request from Windows.
+
+        Returns: TRUE when the control was drawn, otherwise FALSE.
+        **/
+        LRESULT HandleDrawItem(const DRAWITEMSTRUCT* draw_item) const
+        {
+            if (!draw_item)
+            {
+                return FALSE;
+            }
+
+            if (draw_item->CtlType == ODT_MENU && reinterpret_cast<HMENU>(draw_item->hwndItem) == m_header_popup_menu)
+            {
+                DrawHeaderMenuItem(*draw_item);
+                return TRUE;
+            }
+
+            switch (draw_item->CtlID)
+            {
+            case IDC_SCAN_BUTTON:
+            case IDC_BROWSE_BUTTON:
+            case IDC_HOME_BUTTON:
+            case IDC_HELP_BUTTON:
+            case IDC_CLEAR_BUTTON:
+            case IDC_DEPTH_UP_BUTTON:
+            case IDC_DEPTH_DOWN_BUTTON:
+                DrawCustomButton(*draw_item);
+                return TRUE;
+            case IDC_SHOW_TOOLTIP_CHECK:
+            case IDC_SHOW_STATUS_BAR_CHECK:
+            case IDC_COLOR_BY_FILE_TYPE_CHECK:
+            case IDC_SIZE_ON_DISK_CHECK:
+                DrawCustomCheckbox(*draw_item);
+                return TRUE;
+            default:
+                return FALSE;
+            }
+        }
+
+
+
+        /**
+        Measures menu rows with the drive combo box's font and DPI-scaled room
+        for checkmarks. Menu data remains owned by ShowHeaderMenu while visible.
+        **/
+        LRESULT MeasureHeaderMenuItem(MEASUREITEMSTRUCT* measure) const
+        {
+            if (!measure || measure->CtlType != ODT_MENU || !m_header_popup_menu || !measure->itemData)
+            {
+                return FALSE;
+            }
+            const auto& item = *reinterpret_cast<const HeaderMenuItem*>(measure->itemData);
+            const float dpi_scale = GetWindowDpiScale(m_hwnd);
+            if (item.m_separator)
+            {
+                measure->itemWidth = 1;
+                measure->itemHeight = ScaleIntForDpi(9.0f, dpi_scale);
+                return TRUE;
+            }
+            RECT text_rect = {};
+            HDC hdc = GetDC(m_hwnd);
+            if (hdc)
+            {
+                const HFONT font = reinterpret_cast<HFONT>(SendMessageW(m_path_edit, WM_GETFONT, 0, 0));
+                const HGDIOBJ old_font = font ? SelectObject(hdc, font) : nullptr;
+                DrawTextW(hdc, item.m_text.c_str(), -1, &text_rect, DT_CALCRECT | DT_SINGLELINE);
+                if (old_font)
+                {
+                    SelectObject(hdc, old_font);
+                }
+                ReleaseDC(m_hwnd, hdc);
+            }
+            measure->itemWidth = std::max(text_rect.right - text_rect.left, 1L) + ScaleIntForDpi(48.0f, dpi_scale);
+            measure->itemHeight = std::max(ScaleIntForDpi(26.0f, dpi_scale),
+                static_cast<int>(text_rect.bottom - text_rect.top) + ScaleIntForDpi(10.0f, dpi_scale));
+            return TRUE;
+        }
+
+        /**
+        Draws header-menu backgrounds, labels, separators, and checkmarks using
+        the same dark surface, hover color, and light text as the drive selector.
+        **/
+        void DrawHeaderMenuItem(const DRAWITEMSTRUCT& draw_item) const
+        {
+            if (!draw_item.hDC || !draw_item.itemData)
+            {
+                return;
+            }
+            const auto& item = *reinterpret_cast<const HeaderMenuItem*>(draw_item.itemData);
+            const float dpi_scale = GetWindowDpiScale(m_hwnd);
+            const bool selected = (draw_item.itemState & ODS_SELECTED) != 0;
+            const bool disabled = (draw_item.itemState & (ODS_DISABLED | ODS_GRAYED)) != 0;
+            FillRect(draw_item.hDC, &draw_item.rcItem,
+                selected && !disabled && !item.m_separator ? m_control_hover_brush : m_control_surface_brush);
+            const int saved_dc = SaveDC(draw_item.hDC);
+            const int middle_y = (draw_item.rcItem.top + draw_item.rcItem.bottom) / 2;
+            const COLORREF text_color = disabled
+                ? ColorRefFromRgb(kControlMutedRed, kControlMutedGreen, kControlMutedBlue)
+                : ColorRefFromRgb(kControlTextRed, kControlTextGreen, kControlTextBlue);
+            if (item.m_separator)
+            {
+                HPEN pen = CreatePen(PS_SOLID, 1,
+                    ColorRefFromRgb(kControlBorderRed, kControlBorderGreen, kControlBorderBlue));
+                if (pen)
+                {
+                    const HGDIOBJ old_pen = SelectObject(draw_item.hDC, pen);
+                    MoveToEx(draw_item.hDC, draw_item.rcItem.left + ScaleIntForDpi(8.0f, dpi_scale), middle_y, nullptr);
+                    LineTo(draw_item.hDC, draw_item.rcItem.right - ScaleIntForDpi(8.0f, dpi_scale), middle_y);
+                    SelectObject(draw_item.hDC, old_pen);
+                    DeleteObject(pen);
+                }
+            }
+            else
+            {
+                const HFONT font = reinterpret_cast<HFONT>(SendMessageW(m_path_edit, WM_GETFONT, 0, 0));
+                if (font)
+                {
+                    SelectObject(draw_item.hDC, font);
+                }
+                SetBkMode(draw_item.hDC, TRANSPARENT);
+                SetTextColor(draw_item.hDC, text_color);
+                RECT text_rect = draw_item.rcItem;
+                text_rect.left += ScaleIntForDpi(32.0f, dpi_scale);
+                text_rect.right -= ScaleIntForDpi(12.0f, dpi_scale);
+                UINT flags = DT_LEFT | DT_VCENTER | DT_SINGLELINE;
+                if ((draw_item.itemState & ODS_NOACCEL) != 0)
+                {
+                    flags |= DT_HIDEPREFIX;
+                }
+                DrawTextW(draw_item.hDC, item.m_text.c_str(), -1, &text_rect, flags);
+                if ((draw_item.itemState & ODS_CHECKED) != 0)
+                {
+                    HPEN pen = CreatePen(PS_SOLID, std::max(1, ScaleIntForDpi(2.0f, dpi_scale)), text_color);
+                    if (pen)
+                    {
+                        const HGDIOBJ old_pen = SelectObject(draw_item.hDC, pen);
+                        const int left = draw_item.rcItem.left + ScaleIntForDpi(9.0f, dpi_scale);
+                        MoveToEx(draw_item.hDC, left, middle_y, nullptr);
+                        LineTo(draw_item.hDC, left + ScaleIntForDpi(4.0f, dpi_scale), middle_y + ScaleIntForDpi(4.0f, dpi_scale));
+                        LineTo(draw_item.hDC, left + ScaleIntForDpi(11.0f, dpi_scale), middle_y - ScaleIntForDpi(5.0f, dpi_scale));
+                        SelectObject(draw_item.hDC, old_pen);
+                        DeleteObject(pen);
+                    }
+                }
+            }
+            if (saved_dc)
+            {
+                RestoreDC(draw_item.hDC, saved_dc);
+            }
+        }
+
+        /**
+        Preserves normal access-key command execution for the styled Help menu.
+        **/
+        LRESULT HandleHeaderMenuCharacter(wchar_t character)
+        {
+            const wchar_t key = static_cast<wchar_t>(towupper(character));
+            const int count = GetMenuItemCount(m_header_popup_menu);
+            for (int index = 0; index < count; ++index)
+            {
+                MENUITEMINFOW menu_item = {};
+                menu_item.cbSize = sizeof(menu_item);
+                menu_item.fMask = MIIM_DATA | MIIM_ID;
+                if (!GetMenuItemInfoW(m_header_popup_menu, index, TRUE, &menu_item) || !menu_item.dwItemData)
+                {
+                    continue;
+                }
+                const auto& item = *reinterpret_cast<const HeaderMenuItem*>(menu_item.dwItemData);
+                const size_t marker = item.m_text.find(L'&');
+                if (marker != std::wstring::npos && marker + 1 < item.m_text.size() &&
+                    towupper(item.m_text[marker + 1]) == key)
+                {
+                    return MAKELRESULT(index, MNC_EXECUTE);
+                }
+            }
+            return MAKELRESULT(0, MNC_IGNORE);
         }
 
         bool IsControlHovered(HWND control) const
@@ -1358,14 +1579,13 @@ namespace swift_disk::gui
                 control == m_home_button ||
                 control == m_help_button ||
                 control == m_clear_button ||
-                control == m_about_button ||
-                control == m_depth_edit ||
-                control == m_depth_up_button ||
-                control == m_depth_down_button ||
                 control == m_show_tooltip_check ||
                 control == m_show_status_bar_check ||
+                control == m_color_by_file_type_check ||
                 control == m_size_on_disk_check ||
-                control == m_color_by_file_type_check;
+                control == m_depth_edit ||
+                control == m_depth_up_button ||
+                control == m_depth_down_button;
         }
 
         bool IsEditControl(HWND control) const
@@ -1605,6 +1825,17 @@ namespace swift_disk::gui
                     BeginScanFromPathShortcut();
                     return 0;
                 }
+                if (w_param == VK_DOWN && control == m_help_button)
+                {
+                    ShowHelpMenu();
+                    return 0;
+                }
+                break;
+            case WM_SYSCHAR:
+                if (TryHandleHeaderAccessKey(w_param))
+                {
+                    return 0;
+                }
                 break;
             case WM_MOUSELEAVE:
                 OnControlMouseLeave(control);
@@ -1661,20 +1892,19 @@ namespace swift_disk::gui
         void CreateControlHoverTracking()
         {
             AddControlHoverTracking(m_path_edit);
-            AddControlHoverTracking(m_size_on_disk_check);
             AddControlHoverTracking(m_path_combo_edit);
             AddControlHoverTracking(m_scan_button);
             AddControlHoverTracking(m_browse_button);
             AddControlHoverTracking(m_home_button);
             AddControlHoverTracking(m_help_button);
             AddControlHoverTracking(m_clear_button);
-            AddControlHoverTracking(m_about_button);
-            AddControlHoverTracking(m_depth_edit);
-            AddControlHoverTracking(m_depth_up_button);
-            AddControlHoverTracking(m_depth_down_button);
             AddControlHoverTracking(m_show_tooltip_check);
             AddControlHoverTracking(m_show_status_bar_check);
             AddControlHoverTracking(m_color_by_file_type_check);
+            AddControlHoverTracking(m_size_on_disk_check);
+            AddControlHoverTracking(m_depth_edit);
+            AddControlHoverTracking(m_depth_up_button);
+            AddControlHoverTracking(m_depth_down_button);
         }
 
         /**
@@ -1786,31 +2016,7 @@ namespace swift_disk::gui
             return std::max(size.cx, 0L);
         }
 
-        /**
-        Calculates a checkbox width from its box, label, DPI-scaled spacing, and
-        caller-provided minimum.
 
-        Parameters:
-          checkbox: Checkbox whose label should be measured.
-          minimum_width: Lower width bound in physical pixels.
-          dpi_scale: Current window DPI scale.
-
-        Returns: Required checkbox width in physical pixels.
-        **/
-        int GetCheckboxControlWidth(HWND checkbox, int minimum_width, float dpi_scale) const
-        {
-            const int checkbox_left_padding = ScaleIntForDpi(2.0f, dpi_scale);
-            const int checkbox_box_size = ScaleIntForDpi(14.0f, dpi_scale);
-            const int checkbox_text_gap = ScaleIntForDpi(8.0f, dpi_scale);
-            const int checkbox_trailing_padding = ScaleIntForDpi(8.0f, dpi_scale);
-            const int measured_width =
-                checkbox_left_padding +
-                checkbox_box_size +
-                checkbox_text_gap +
-                MeasureControlTextWidth(checkbox) +
-                checkbox_trailing_padding;
-            return std::max(minimum_width, measured_width);
-        }
 
         int GetButtonControlWidth(HWND button, int minimum_width, int horizontal_padding) const
         {
@@ -1840,28 +2046,128 @@ namespace swift_disk::gui
         }
 
         /**
-        Creates the complete native header control set, applies the shared font
-        and persisted state, installs child-control subclassing, and performs the
-        initial layout.
+        Applies the treemap tooltip's font and colors with compact padding to
+        control tooltips, recreating the owned font when the window DPI changes.
+
+        Parameters:
+          dpi_scale: Current window DPI scale.
+        **/
+        void UpdateHeaderTooltipStyle(float dpi_scale)
+        {
+            if (!m_header_tooltip)
+            {
+                return;
+            }
+            if (!m_header_tooltip_font || m_header_tooltip_font_scale != dpi_scale)
+            {
+                HFONT font = CreateFontW(
+                    -ScaleIntForDpi(kTooltipFontSize, dpi_scale), 0, 0, 0, FW_NORMAL,
+                    FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                    CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                    kTooltipFontFamily);
+                if (font)
+                {
+                    SendMessageW(m_header_tooltip, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+                    if (m_header_tooltip_font)
+                    {
+                        DeleteObject(m_header_tooltip_font);
+                    }
+                    m_header_tooltip_font = font;
+                    m_header_tooltip_font_scale = dpi_scale;
+                }
+            }
+            SendMessageW(m_header_tooltip, TTM_SETTIPBKCOLOR, kTooltipBackgroundColor, 0);
+            SendMessageW(m_header_tooltip, TTM_SETTIPTEXTCOLOR, kTooltipTextColor, 0);
+            const int padding_x = ScaleIntForDpi(kHeaderTooltipPaddingX, dpi_scale);
+            const int padding_y = ScaleIntForDpi(kHeaderTooltipPaddingY, dpi_scale);
+            const RECT margins = {padding_x, padding_y, padding_x, padding_y};
+            SendMessageW(m_header_tooltip, TTM_SETMARGIN, 0, reinterpret_cast<LPARAM>(&margins));
+            SendMessageW(m_header_tooltip, TTM_SETMAXTIPWIDTH, 0, ScaleIntForDpi(360.0f, dpi_scale));
+        }
+
+        /**
+        Creates native help tooltips for the header controls. Descriptions stay
+        available independently of the setting for file and folder tooltips.
+        **/
+        void CreateHeaderControlTooltips()
+        {
+            INITCOMMONCONTROLSEX common_controls = {};
+            common_controls.dwSize = sizeof(common_controls);
+            common_controls.dwICC = ICC_WIN95_CLASSES;
+            if (!InitCommonControlsEx(&common_controls))
+            {
+                return;
+            }
+
+            m_header_tooltip = CreateWindowExW(
+                WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+                CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                m_hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+            if (!m_header_tooltip)
+            {
+                return;
+            }
+            SetWindowPos(m_header_tooltip, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            // Native visual styles otherwise override the tooltip colors and margins.
+            SetWindowTheme(m_header_tooltip, L"", L"");
+            SendMessageW(m_header_tooltip, TTM_SETDELAYTIME, TTDT_AUTOPOP, MAKELPARAM(15000, 0));
+
+            const auto add_tooltip = [&](HWND control, const wchar_t* text)
+            {
+                if (!control)
+                {
+                    return;
+                }
+                TOOLINFOW tool = {};
+                // The app also runs with Common Controls 5, which rejects the V3 size.
+                tool.cbSize = TTTOOLINFOW_V2_SIZE;
+                tool.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+                tool.hwnd = m_hwnd;
+                tool.uId = reinterpret_cast<UINT_PTR>(control);
+                tool.lpszText = const_cast<wchar_t*>(text);
+                SendMessageW(m_header_tooltip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
+
+                // Disabled controls send mouse input to their parent instead.
+                if (GetParent(control) == m_hwnd)
+                {
+                    tool.uFlags = TTF_SUBCLASS;
+                    tool.uId = static_cast<UINT_PTR>(GetDlgCtrlID(control));
+                    SendMessageW(m_header_tooltip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
+                }
+            };
+
+            const wchar_t* path_help = L"Select an NTFS drive or enter a folder path.";
+            add_tooltip(m_path_edit, path_help);
+            add_tooltip(m_path_combo_edit, path_help);
+            add_tooltip(m_scan_button, L"Scan the selected drive or folder.");
+            add_tooltip(m_browse_button, L"Choose a folder to scan.");
+            add_tooltip(m_depth_label, L"Set how many folder levels are visible in the treemap.");
+            add_tooltip(m_depth_edit, L"Set how many folder levels are visible in the treemap.");
+            add_tooltip(m_depth_up_button, L"Increase the depth to show more folder levels.");
+            add_tooltip(m_depth_down_button, L"Decrease the depth to show fewer folder levels.");
+            add_tooltip(m_home_button, L"Return to the root of the current scan.");
+            add_tooltip(m_clear_button, L"Remove remembered expanded folders.");
+            add_tooltip(m_help_button, L"Open the Help menu for instructions and information about SwiftDisk.");
+            add_tooltip(m_color_by_file_type_check, L"Give files with the same filename extension the same tile color.");
+            add_tooltip(m_size_on_disk_check, L"Use disk storage size including compression and sparse-file savings.");
+            add_tooltip(m_show_tooltip_check, L"Show the full path and size when hovering over a file or folder in the treemap.");
+            add_tooltip(m_show_status_bar_check, L"Show scan and selection details in a status bar at the bottom of the window.");
+        }
+
+        /**
+        Creates scan and treemap controls, four Options checkboxes, and the Help
+        menu button, then restores their saved settings and shared header style.
         **/
         void CreateHeaderControls()
         {
             HFONT gui_font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
             const std::wstring initial_path = GetInitialPathFieldValue();
-
             m_path_edit = CreateWindowExW(
-                0,
-                L"COMBOBOX",
-                initial_path.c_str(),
+                0, L"COMBOBOX", initial_path.c_str(),
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_PATH_EDIT)),
-                nullptr,
-                nullptr);
+                0, 0, 0, 0, m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_PATH_EDIT)), nullptr, nullptr);
             if (m_path_edit)
             {
                 m_path_combo_edit = FindWindowExW(m_path_edit, nullptr, L"Edit", nullptr);
@@ -1869,352 +2175,105 @@ namespace swift_disk::gui
                 RefreshNtfsDriveDropdown();
             }
 
-            m_size_on_disk_check = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"Size on disk",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
-                0, 0, 0, 0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_SIZE_ON_DISK_CHECK)),
-                nullptr,
-                nullptr);
-            if (m_size_on_disk_check)
+            const auto create_button = [&](const wchar_t* label, int control_id)
             {
-                SendMessageW(m_size_on_disk_check, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-                SetCheckboxState(m_size_on_disk_check, m_layout_options.m_size_metric == SizeMetric::OnDisk);
-            }
-
-            m_scan_button = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"Scan",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_SCAN_BUTTON)),
-                nullptr,
-                nullptr);
-
-            m_browse_button = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"Browse...",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_BROWSE_BUTTON)),
-                nullptr,
-                nullptr);
-
-            m_home_button = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"Home",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_HOME_BUTTON)),
-                nullptr,
-                nullptr);
-
-            m_clear_button = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"Clear",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_CLEAR_BUTTON)),
-                nullptr,
-                nullptr);
-
-            m_help_button = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"Help",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_HELP_BUTTON)),
-                nullptr,
-                nullptr);
-
-            m_about_button = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"About",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_ABOUT_BUTTON)),
-                nullptr,
-                nullptr);
-
+                return CreateWindowExW(
+                    0, L"BUTTON", label, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                    0, 0, 0, 0, m_hwnd,
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(control_id)), nullptr, nullptr);
+            };
+            m_scan_button = create_button(L"Scan", IDC_SCAN_BUTTON);
+            m_browse_button = create_button(L"Browse...", IDC_BROWSE_BUTTON);
             m_depth_label = CreateWindowExW(
-                0,
-                L"STATIC",
-                L"Depth",
-                WS_CHILD | WS_VISIBLE,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_DEPTH_LABEL)),
-                nullptr,
-                nullptr);
-
+                0, L"STATIC", L"Depth", WS_CHILD | WS_VISIBLE,
+                0, 0, 0, 0, m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_DEPTH_LABEL)), nullptr, nullptr);
             const std::wstring depth_text = std::to_wstring(m_max_depth);
             m_depth_edit = CreateWindowExW(
-                0,
-                L"EDIT",
-                depth_text.c_str(),
+                0, L"EDIT", depth_text.c_str(),
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_MULTILINE | ES_AUTOHSCROLL | ES_CENTER,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_DEPTH_EDIT)),
-                nullptr,
-                nullptr);
+                0, 0, 0, 0, m_hwnd,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_DEPTH_EDIT)), nullptr, nullptr);
+            m_depth_up_button = create_button(L"\x25B2", IDC_DEPTH_UP_BUTTON);
+            m_depth_down_button = create_button(L"\x25BC", IDC_DEPTH_DOWN_BUTTON);
+            m_home_button = create_button(L"Home", IDC_HOME_BUTTON);
+            m_clear_button = create_button(L"Clear", IDC_CLEAR_BUTTON);
+            m_help_button = create_button(L"&Help \x25BE", IDC_HELP_BUTTON);
+            const auto create_checkbox = [&](const wchar_t* label, int control_id)
+            {
+                return CreateWindowExW(
+                    0, L"BUTTON", label, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
+                    0, 0, 0, 0, m_hwnd,
+                    reinterpret_cast<HMENU>(static_cast<INT_PTR>(control_id)), nullptr, nullptr);
+            };
+            m_color_by_file_type_check = create_checkbox(L"Color by file type", IDC_COLOR_BY_FILE_TYPE_CHECK);
+            m_size_on_disk_check = create_checkbox(L"Size on disk", IDC_SIZE_ON_DISK_CHECK);
+            m_show_tooltip_check = create_checkbox(L"Tooltips", IDC_SHOW_TOOLTIP_CHECK);
+            m_show_status_bar_check = create_checkbox(L"Status bar", IDC_SHOW_STATUS_BAR_CHECK);
 
-            m_depth_up_button = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"\x25B2",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_DEPTH_UP_BUTTON)),
-                nullptr,
-                nullptr);
-
-            m_depth_down_button = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"\x25BC",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_DEPTH_DOWN_BUTTON)),
-                nullptr,
-                nullptr);
-
-            m_show_tooltip_check = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"Tooltip",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_SHOW_TOOLTIP_CHECK)),
-                nullptr,
-                nullptr);
-
-            m_show_status_bar_check = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"Status bar",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_SHOW_STATUS_BAR_CHECK)),
-                nullptr,
-                nullptr);
-            m_color_by_file_type_check = CreateWindowExW(
-                0,
-                L"BUTTON",
-                L"Color by file type",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_CHECKBOX | BS_OWNERDRAW,
-                0,
-                0,
-                0,
-                0,
-                m_hwnd,
-                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COLOR_BY_FILE_TYPE_CHECK)),
-                nullptr,
-                nullptr);
-
-            if (m_path_edit)
+            for (HWND control : {m_path_edit, m_path_combo_edit, m_scan_button, m_browse_button,
+                m_depth_label, m_depth_edit, m_depth_up_button, m_depth_down_button,
+                m_home_button, m_clear_button, m_help_button, m_color_by_file_type_check,
+                m_size_on_disk_check, m_show_tooltip_check, m_show_status_bar_check})
             {
-                SendMessageW(m_path_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+                if (control)
+                {
+                    SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
+                }
             }
-            if (m_path_combo_edit)
-            {
-                SendMessageW(m_path_combo_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_scan_button)
-            {
-                SendMessageW(m_scan_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_browse_button)
-            {
-                SendMessageW(m_browse_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_home_button)
-            {
-                SendMessageW(m_home_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_clear_button)
-            {
-                SendMessageW(m_clear_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_help_button)
-            {
-                SendMessageW(m_help_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_about_button)
-            {
-                SendMessageW(m_about_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_depth_label)
-            {
-                SendMessageW(m_depth_label, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_depth_edit)
-            {
-                SendMessageW(m_depth_edit, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_depth_up_button)
-            {
-                SendMessageW(m_depth_up_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_depth_down_button)
-            {
-                SendMessageW(m_depth_down_button, WM_SETFONT, reinterpret_cast<WPARAM>(gui_font), TRUE);
-            }
-            if (m_show_tooltip_check)
-            {
-                SendMessageW(
-                    m_show_tooltip_check,
-                    WM_SETFONT,
-                    reinterpret_cast<WPARAM>(gui_font),
-                    TRUE);
-                SetCheckboxState(m_show_tooltip_check, m_show_tooltip);
-            }
-            if (m_show_status_bar_check)
-            {
-                SendMessageW(
-                    m_show_status_bar_check,
-                    WM_SETFONT,
-                    reinterpret_cast<WPARAM>(gui_font),
-                    TRUE);
-                SetCheckboxState(m_show_status_bar_check, m_show_status_bar);
-            }
-            if (m_color_by_file_type_check)
-            {
-                SendMessageW(
-                    m_color_by_file_type_check,
-                    WM_SETFONT,
-                    reinterpret_cast<WPARAM>(gui_font),
-                    TRUE);
-                SetCheckboxState(m_color_by_file_type_check, m_color_by_file_type);
-            }
-
+            SetCheckboxState(m_color_by_file_type_check, m_color_by_file_type);
+            SetCheckboxState(m_size_on_disk_check, m_layout_options.m_size_metric == SizeMetric::OnDisk);
+            SetCheckboxState(m_show_tooltip_check, m_show_tooltip);
+            SetCheckboxState(m_show_status_bar_check, m_show_status_bar);
             CreateControlHoverTracking();
+            CreateHeaderControlTooltips();
             UpdateHeaderControlsLayout();
+            UpdateTreemapActionControlsEnabled();
         }
 
         /**
-        Calculates the minimum width needed by both header control rows using
-        measured label widths and the same gaps used by the layout routine.
+        Computes shared dimensions for the scan row and the Treemap/Options/Help row.
+        All four Options checkboxes fit on one line with measured label widths.
+        **/
+        HeaderControlMetrics GetHeaderControlMetrics(float dpi_scale) const
+        {
+            HeaderControlMetrics metrics;
+            const int padding = ScaleIntForDpi(14.0f, dpi_scale);
+            metrics.m_action_width = std::max({
+                GetButtonControlWidth(m_browse_button, 0, padding),
+                GetButtonControlWidth(m_scan_button, 0, padding),
+                GetButtonControlWidth(m_home_button, 0, padding),
+                GetButtonControlWidth(m_clear_button, 0, padding),
+                GetButtonControlWidth(m_help_button, 0, padding)
+            });
+            metrics.m_depth_label_width =
+                std::max(MeasureControlTextWidth(m_depth_label), ScaleIntForDpi(32.0f, dpi_scale));
+            const int depth_width = metrics.m_depth_label_width + ScaleIntForDpi(2.0f, dpi_scale) +
+                ScaleIntForDpi(42.0f, dpi_scale) + ScaleIntForDpi(4.0f, dpi_scale) + ScaleIntForDpi(18.0f, dpi_scale);
+            metrics.m_treemap_width = (padding * 2) + depth_width + padding +
+                metrics.m_action_width + padding + metrics.m_action_width;
+            metrics.m_color_width = GetCheckboxControlWidth(m_color_by_file_type_check, 0, dpi_scale);
+            metrics.m_size_width = GetCheckboxControlWidth(m_size_on_disk_check, 0, dpi_scale);
+            metrics.m_tooltip_width = GetCheckboxControlWidth(m_show_tooltip_check, 0, dpi_scale);
+            metrics.m_status_bar_width = GetCheckboxControlWidth(m_show_status_bar_check, 0, dpi_scale);
+            const int checkbox_gap = ScaleIntForDpi(4.0f, dpi_scale);
+            const int checkbox_trailing_padding = ScaleIntForDpi(8.0f, dpi_scale);
+            metrics.m_options_width = padding * 2 + metrics.m_color_width + metrics.m_size_width +
+                metrics.m_tooltip_width + metrics.m_status_bar_width + checkbox_gap * 3 - checkbox_trailing_padding;
+            metrics.m_control_width = std::max(
+                ScaleIntForDpi(320.0f, dpi_scale) + 2 * metrics.m_action_width + 2 * padding,
+                metrics.m_treemap_width + metrics.m_options_width + metrics.m_action_width + 2 * padding);
+            metrics.m_path_width = metrics.m_control_width - 2 * metrics.m_action_width - 2 * padding;
+            return metrics;
+        }
 
-        Parameters:
-          dpi_scale: Current window DPI scale.
-
-        Returns: Required control-area width in physical pixels.
+        /**
+        Returns the width needed to keep the scan row and the Treemap/Options
+        groups separate from the summary, including at larger text sizes.
         **/
         int GetRequiredHeaderControlAreaWidth(float dpi_scale) const
         {
-            const int group_box_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
-            const int action_button_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
-            const int action_button_width = std::max({
-                GetButtonControlWidth(m_browse_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_scan_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_home_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_help_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_clear_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_about_button, 0, action_button_horizontal_padding)
-            });
-            const int button_gap = group_box_horizontal_padding;
-            const int scan_row_width =
-                ScaleIntForDpi(2.0f, dpi_scale) +
-                ScaleIntForDpi(180.0f, dpi_scale) +
-                button_gap +
-                action_button_width +
-                button_gap +
-                action_button_width;
-
-            const int display_checkbox_gap = ScaleIntForDpi(4.0f, dpi_scale);
-            const int checkbox_trailing_padding = ScaleIntForDpi(8.0f, dpi_scale);
-            const int show_group_right_padding = group_box_horizontal_padding - checkbox_trailing_padding;
-            const int show_tooltip_width = GetCheckboxControlWidth(m_show_tooltip_check, 0, dpi_scale);
-            const int show_status_bar_width = GetCheckboxControlWidth(m_show_status_bar_check, 0, dpi_scale);
-            const int checkbox_group_width =
-                show_tooltip_width + display_checkbox_gap + show_status_bar_width;
-            const int display_group_width =
-                group_box_horizontal_padding + checkbox_group_width + show_group_right_padding;
-            const int size_group_width = group_box_horizontal_padding +
-                GetCheckboxControlWidth(m_size_on_disk_check, 0, dpi_scale) + show_group_right_padding;
-
-            const int depth_label_width =
-                std::max(MeasureControlTextWidth(m_depth_label), ScaleIntForDpi(32.0f, dpi_scale));
-            const int depth_edit_width = ScaleIntForDpi(42.0f, dpi_scale);
-            const int depth_button_width = ScaleIntForDpi(18.0f, dpi_scale);
-            const int depth_button_gap = ScaleIntForDpi(4.0f, dpi_scale);
-            const int depth_label_gap = ScaleIntForDpi(2.0f, dpi_scale);
-            const int depth_group_width =
-                depth_label_width + depth_label_gap + depth_edit_width + depth_button_gap + depth_button_width;
-            const int color_by_file_type_width = GetCheckboxControlWidth(m_color_by_file_type_check, 0, dpi_scale);
-            const int treemap_control_gap = group_box_horizontal_padding;
-            const int treemap_group_width = (group_box_horizontal_padding * 2) +
-                depth_group_width + treemap_control_gap + action_button_width + button_gap + action_button_width +
-                treemap_control_gap + color_by_file_type_width - checkbox_trailing_padding;
-            const int lower_row_width =
-                ScaleIntForDpi(2.0f, dpi_scale) +
-                display_group_width +
-                group_box_horizontal_padding +
-                size_group_width +
-                group_box_horizontal_padding +
-                treemap_group_width +
-                group_box_horizontal_padding +
-                action_button_width +
-                button_gap +
-                action_button_width;
-
-            return std::max(scan_row_width, lower_row_width);
+            return GetHeaderControlMetrics(dpi_scale).m_control_width;
         }
 
         /**
@@ -2270,9 +2329,8 @@ namespace swift_disk::gui
         }
 
         /**
-        Measures and positions all header controls for the current client width
-        and DPI while keeping the summary, scan, display, and treemap groups from
-        overlapping.
+        Places the drive selector, Scan, and Browse on the scan row. The second
+        row contains Treemap, all four Options checkboxes, and the Help menu.
         **/
         void UpdateHeaderControlsLayout()
         {
@@ -2280,259 +2338,108 @@ namespace swift_disk::gui
             {
                 return;
             }
-
             RECT client = {};
             GetClientRect(m_hwnd, &client);
             const int width = std::max<LONG>(client.right - client.left, 1);
             const float dpi_scale = GetWindowDpiScale(m_hwnd);
-
+            const HeaderControlMetrics metrics = GetHeaderControlMetrics(dpi_scale);
+            UpdateHeaderTooltipStyle(dpi_scale);
             const int outer_padding = ScaleIntForDpi(kOuterPadding, dpi_scale);
             const int inner_padding = ScaleIntForDpi(22.0f, dpi_scale);
-            const int group_gap = ScaleIntForDpi(6.0f, dpi_scale);
+            const int padding = ScaleIntForDpi(14.0f, dpi_scale);
             const int group_top = outer_padding + ScaleIntForDpi(4.0f, dpi_scale);
-            const int control_area_right = width - outer_padding - inner_padding;
-            const int max_control_area_width = std::max(
-                ScaleIntForDpi(340.0f, dpi_scale),
-                width - (outer_padding * 2) - (inner_padding * 2));
-            const int min_control_area_width = std::min(ScaleIntForDpi(560.0f, dpi_scale), max_control_area_width);
-            const int nominal_control_area_width = std::clamp(
-                static_cast<int>((width - (outer_padding * 2) - (inner_padding * 2)) * 0.48f),
-                min_control_area_width,
-                std::min(ScaleIntForDpi(680.0f, dpi_scale), max_control_area_width));
             const int scan_group_height = ScaleIntForDpi(40.0f, dpi_scale);
-            const int lower_row_vertical_offset = ScaleIntForDpi(10.0f, dpi_scale);
-            const int lower_group_top = group_top + scan_group_height + group_gap + lower_row_vertical_offset;
+            const int lower_group_top = group_top + scan_group_height + ScaleIntForDpi(16.0f, dpi_scale);
             const int lower_group_height = ScaleIntForDpi(30.0f, dpi_scale);
-            const int header_text_vertical_offset = ScaleIntForDpi(-5.0f, dpi_scale);
-            const int header_text_top = group_top + header_text_vertical_offset;
-            const int group_box_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
-            const int group_box_top_padding = ScaleIntForDpi(10.0f, dpi_scale);
-            const int group_box_bottom_padding = ScaleIntForDpi(9.0f, dpi_scale);
-            const int action_button_horizontal_padding = ScaleIntForDpi(14.0f, dpi_scale);
-            const int action_button_width = std::max({
-                GetButtonControlWidth(m_browse_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_scan_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_home_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_help_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_clear_button, 0, action_button_horizontal_padding),
-                GetButtonControlWidth(m_about_button, 0, action_button_horizontal_padding)
-            });
-            const int browse_width = action_button_width;
-            const int scan_width = action_button_width;
-            const int home_width = action_button_width;
-            const int help_width = action_button_width;
-            const int clear_width = action_button_width;
-            const int about_width = action_button_width;
-            const int button_gap = group_box_horizontal_padding;
-
-            const int display_checkbox_gap = ScaleIntForDpi(4.0f, dpi_scale);
-            const int lower_group_gap = group_box_horizontal_padding;
-            const int checkbox_trailing_padding = ScaleIntForDpi(8.0f, dpi_scale);
-            const int show_group_right_padding = group_box_horizontal_padding - checkbox_trailing_padding;
-            const int show_tooltip_width = GetCheckboxControlWidth(m_show_tooltip_check, 0, dpi_scale);
-            const int show_status_bar_width = GetCheckboxControlWidth(m_show_status_bar_check, 0, dpi_scale);
-            const int checkbox_group_width =
-                show_tooltip_width + display_checkbox_gap + show_status_bar_width;
-            const int display_group_width =
-                group_box_horizontal_padding + checkbox_group_width + show_group_right_padding;
-
-            const int depth_label_width =
-                std::max(MeasureControlTextWidth(m_depth_label), ScaleIntForDpi(32.0f, dpi_scale));
-            const int depth_edit_width = ScaleIntForDpi(42.0f, dpi_scale);
-            const int depth_button_width = ScaleIntForDpi(18.0f, dpi_scale);
-            const int depth_button_gap = ScaleIntForDpi(4.0f, dpi_scale);
-            const int depth_label_gap = ScaleIntForDpi(2.0f, dpi_scale);
-            const int depth_group_width =
-                depth_label_width + depth_label_gap + depth_edit_width + depth_button_gap + depth_button_width;
-            const int color_by_file_type_width = GetCheckboxControlWidth(m_color_by_file_type_check, 0, dpi_scale);
-            const int treemap_control_gap = group_box_horizontal_padding;
-            const int desired_treemap_group_width = (group_box_horizontal_padding * 2) +
-                depth_group_width + treemap_control_gap + home_width + button_gap + clear_width +
-                treemap_control_gap + color_by_file_type_width - checkbox_trailing_padding;
-            const int required_control_area_width = GetRequiredHeaderControlAreaWidth(dpi_scale);
-            const int control_area_width = std::clamp(
-                std::max(nominal_control_area_width, required_control_area_width),
-                min_control_area_width,
-                max_control_area_width);
-            const int control_left = control_area_right - control_area_width;
-            const int scan_group_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
-            const int scan_group_top_inner = group_top + ScaleIntForDpi(10.0f, dpi_scale);
-            const int browse_left = control_left + control_area_width - browse_width;
-            const int scan_left = browse_left - button_gap - scan_width;
-            const int size_on_disk_width = GetCheckboxControlWidth(m_size_on_disk_check, 0, dpi_scale);
-            const int size_group_width = group_box_horizontal_padding + size_on_disk_width + show_group_right_padding;
-            const int edit_width = std::max(
-                ScaleIntForDpi(180.0f, dpi_scale),
-                scan_left - button_gap - scan_group_left);
-            const int lower_row_left = control_left + ScaleIntForDpi(2.0f, dpi_scale);
-            const int display_group_left = lower_row_left;
-            const int treemap_group_left = display_group_left + display_group_width + lower_group_gap;
-            const int size_group_left = treemap_group_left + desired_treemap_group_width + lower_group_gap;
-            const int size_on_disk_left = size_group_left + group_box_horizontal_padding;
-            const int about_left = browse_left;
-            const int help_left = about_left - button_gap - help_width;
-            const int treemap_group_width = desired_treemap_group_width;
-            const int depth_controls_left = treemap_group_left + group_box_horizontal_padding;
-            const int home_left = depth_controls_left + depth_group_width + treemap_control_gap;
-            const int clear_left = home_left + home_width + button_gap;
-            const int header_info_left = outer_padding + inner_padding;
-            const int header_info_right =
-                std::max(header_info_left + ScaleIntForDpi(1.0f, dpi_scale), control_left - ScaleIntForDpi(18.0f, dpi_scale));
+            const int button_height = ScaleIntForDpi(28.0f, dpi_scale);
+            const int right = width - outer_padding - inner_padding;
+            const int help_left = right - metrics.m_action_width;
+            const int browse_left = right - metrics.m_action_width;
+            const int scan_left = browse_left - padding - metrics.m_action_width;
+            const int path_left = scan_left - padding - metrics.m_path_width;
+            const int treemap_left = path_left;
+            const int options_left = treemap_left + metrics.m_treemap_width + padding;
+            const int depth_left = treemap_left + padding;
+            const int depth_edit_left = depth_left + metrics.m_depth_label_width + ScaleIntForDpi(2.0f, dpi_scale);
+            const int depth_button_left = depth_edit_left + ScaleIntForDpi(42.0f + 4.0f, dpi_scale);
+            const int home_left = depth_button_left + ScaleIntForDpi(18.0f, dpi_scale) + padding;
+            const int clear_left = home_left + metrics.m_action_width + padding;
+            const int scan_controls_top = group_top + ScaleIntForDpi(10.0f, dpi_scale);
+            const int lower_controls_top = lower_group_top + ScaleIntForDpi(1.0f, dpi_scale);
+            const int checkbox_top = lower_group_top + ScaleIntForDpi(5.0f, dpi_scale);
+            const int checkbox_gap = ScaleIntForDpi(4.0f, dpi_scale);
+            const int color_left = options_left + padding;
+            const int size_left = color_left + metrics.m_color_width + checkbox_gap;
+            const int tooltip_left = size_left + metrics.m_size_width + checkbox_gap;
+            const int status_bar_left = tooltip_left + metrics.m_tooltip_width + checkbox_gap;
+            const int content_left = right - metrics.m_control_width;
+            const int info_left = outer_padding + inner_padding;
+            const int info_right = std::max(info_left + ScaleIntForDpi(1.0f, dpi_scale),
+                content_left - ScaleIntForDpi(20.0f, dpi_scale));
+            const float group_box_top = static_cast<float>(lower_group_top - ScaleIntForDpi(10.0f, dpi_scale));
+            const float group_box_bottom = static_cast<float>(lower_group_top + lower_group_height + ScaleIntForDpi(9.0f, dpi_scale));
 
             m_header_info_rect = MakeRenderRect(
-                static_cast<float>(header_info_left),
-                static_cast<float>(header_text_top),
-                static_cast<float>(header_info_right),
-                static_cast<float>(outer_padding + ScaleIntForDpi(kHeaderHeight, dpi_scale) - ScaleIntForDpi(16.0f, dpi_scale)));
+                static_cast<float>(info_left), static_cast<float>(group_top + ScaleIntForDpi(-5.0f, dpi_scale)),
+                static_cast<float>(info_right),
+                static_cast<float>(outer_padding + ScaleIntForDpi(kHeaderHeight - 16.0f, dpi_scale)));
             m_scan_group_rect = MakeRenderRect(
-                static_cast<float>(control_left),
-                static_cast<float>(group_top),
-                static_cast<float>(control_left + control_area_width),
-                static_cast<float>(group_top + scan_group_height));
-            m_treemap_group_rect = MakeRenderRect(
-                static_cast<float>(treemap_group_left),
-                static_cast<float>(lower_group_top - group_box_top_padding),
-                static_cast<float>(treemap_group_left + treemap_group_width),
-                static_cast<float>(lower_group_top + lower_group_height + group_box_bottom_padding));
-            m_display_group_rect = MakeRenderRect(
-                static_cast<float>(display_group_left),
-                static_cast<float>(lower_group_top - group_box_top_padding),
-                static_cast<float>(display_group_left + display_group_width),
-                static_cast<float>(lower_group_top + lower_group_height + group_box_bottom_padding));
-            m_size_group_rect = MakeRenderRect(
-                static_cast<float>(size_group_left),
-                static_cast<float>(lower_group_top - group_box_top_padding),
-                static_cast<float>(size_group_left + size_group_width),
-                static_cast<float>(lower_group_top + lower_group_height + group_box_bottom_padding));
-
-            const int depth_controls_top = lower_group_top + ScaleIntForDpi(1.0f, dpi_scale);
-            const int depth_label_left = depth_controls_left;
-            const int depth_edit_left = depth_label_left + depth_label_width + depth_label_gap;
-            const int depth_button_left = depth_edit_left + depth_edit_width + depth_button_gap;
-
-            const int show_tooltip_top = lower_group_top + ScaleIntForDpi(5.0f, dpi_scale);
-            const int show_status_bar_top = show_tooltip_top;
-            const int show_tooltip_left = display_group_left + group_box_horizontal_padding;
-            const int show_status_bar_left = show_tooltip_left + show_tooltip_width + display_checkbox_gap;
+                static_cast<float>(content_left), static_cast<float>(group_top),
+                static_cast<float>(right), static_cast<float>(group_top + scan_group_height));
+            m_treemap_group_rect = MakeRenderRect(static_cast<float>(treemap_left), group_box_top,
+                static_cast<float>(treemap_left + metrics.m_treemap_width), group_box_bottom);
+            m_options_group_rect = MakeRenderRect(static_cast<float>(options_left), group_box_top,
+                static_cast<float>(options_left + metrics.m_options_width), group_box_bottom);
 
             if (m_path_edit)
             {
-                // A CBS_DROPDOWN window's height includes its expanded list, not
-                // only the visible edit row.
-                const int path_dropdown_height = ScaleIntForDpi(190.0f, dpi_scale);
-                MoveWindow(m_path_edit, scan_group_left, scan_group_top_inner, edit_width, path_dropdown_height, TRUE);
-                SendMessageW(m_path_edit, CB_SETDROPPEDWIDTH, static_cast<WPARAM>(edit_width), 0);
-                ApplyEditTextInsets(
-                    m_path_combo_edit,
-                    ScaleIntForDpi(8.0f, dpi_scale),
-                    ScaleIntForDpi(6.0f, dpi_scale),
-                    ScaleIntForDpi(8.0f, dpi_scale),
-                    ScaleIntForDpi(4.0f, dpi_scale));
+                MoveWindow(m_path_edit, path_left, scan_controls_top, metrics.m_path_width, ScaleIntForDpi(190.0f, dpi_scale), TRUE);
+                SendMessageW(m_path_edit, CB_SETDROPPEDWIDTH, static_cast<WPARAM>(metrics.m_path_width), 0);
+                ApplyEditTextInsets(m_path_combo_edit, ScaleIntForDpi(8.0f, dpi_scale),
+                    ScaleIntForDpi(6.0f, dpi_scale), ScaleIntForDpi(8.0f, dpi_scale), ScaleIntForDpi(4.0f, dpi_scale));
             }
-            if (m_size_on_disk_check)
+            MoveWindow(m_scan_button, scan_left, scan_controls_top, metrics.m_action_width, button_height, TRUE);
+            MoveWindow(m_browse_button, browse_left, scan_controls_top, metrics.m_action_width, button_height, TRUE);
+            MoveWindow(m_help_button, help_left, lower_controls_top, metrics.m_action_width, button_height, TRUE);
+            MoveWindow(m_home_button, home_left, lower_controls_top, metrics.m_action_width, button_height, TRUE);
+            MoveWindow(m_clear_button, clear_left, lower_controls_top, metrics.m_action_width, button_height, TRUE);
+            MoveWindow(m_depth_label, depth_left, lower_controls_top + ScaleIntForDpi(6.0f, dpi_scale),
+                metrics.m_depth_label_width, ScaleIntForDpi(18.0f, dpi_scale), TRUE);
+            MoveWindow(m_depth_edit, depth_edit_left, lower_controls_top, ScaleIntForDpi(42.0f, dpi_scale), button_height, TRUE);
+            ApplyEditTextInsets(m_depth_edit, ScaleIntForDpi(2.0f, dpi_scale), ScaleIntForDpi(5.0f, dpi_scale),
+                ScaleIntForDpi(2.0f, dpi_scale), ScaleIntForDpi(4.0f, dpi_scale));
+            MoveWindow(m_depth_up_button, depth_button_left, lower_controls_top,
+                ScaleIntForDpi(18.0f, dpi_scale), ScaleIntForDpi(13.0f, dpi_scale), TRUE);
+            MoveWindow(m_depth_down_button, depth_button_left, lower_controls_top + ScaleIntForDpi(14.0f, dpi_scale),
+                ScaleIntForDpi(18.0f, dpi_scale), ScaleIntForDpi(14.0f, dpi_scale), TRUE);
+            MoveWindow(m_color_by_file_type_check, color_left, checkbox_top,
+                metrics.m_color_width, ScaleIntForDpi(18.0f, dpi_scale), TRUE);
+            MoveWindow(m_size_on_disk_check, size_left, checkbox_top,
+                metrics.m_size_width, ScaleIntForDpi(18.0f, dpi_scale), TRUE);
+            MoveWindow(m_show_tooltip_check, tooltip_left, checkbox_top,
+                metrics.m_tooltip_width, ScaleIntForDpi(18.0f, dpi_scale), TRUE);
+            MoveWindow(m_show_status_bar_check, status_bar_left, checkbox_top,
+                metrics.m_status_bar_width, ScaleIntForDpi(18.0f, dpi_scale), TRUE);
+
+            if (m_header_tooltip)
             {
-                MoveWindow(m_size_on_disk_check, size_on_disk_left, show_tooltip_top,
-                    size_on_disk_width, ScaleIntForDpi(18.0f, dpi_scale), TRUE);
-            }
-            if (m_scan_button)
-            {
-                MoveWindow(m_scan_button, scan_left, scan_group_top_inner, scan_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
-            }
-            if (m_home_button)
-            {
-                MoveWindow(m_home_button, home_left, depth_controls_top, home_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
-            }
-            if (m_clear_button)
-            {
-                MoveWindow(m_clear_button, clear_left, depth_controls_top, clear_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
-            }
-            if (m_browse_button)
-            {
-                MoveWindow(m_browse_button, browse_left, scan_group_top_inner, browse_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
-            }
-            if (m_help_button)
-            {
-                MoveWindow(m_help_button, help_left, depth_controls_top, help_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
-            }
-            if (m_about_button)
-            {
-                MoveWindow(m_about_button, about_left, depth_controls_top, about_width, ScaleIntForDpi(28.0f, dpi_scale), TRUE);
-            }
-            if (m_depth_label)
-            {
-                MoveWindow(
-                    m_depth_label,
-                    depth_label_left,
-                    depth_controls_top + ScaleIntForDpi(6.0f, dpi_scale),
-                    depth_label_width,
-                    ScaleIntForDpi(18.0f, dpi_scale),
-                    TRUE);
-            }
-            if (m_depth_edit)
-            {
-                MoveWindow(
-                    m_depth_edit,
-                    depth_edit_left,
-                    depth_controls_top,
-                    depth_edit_width,
-                    ScaleIntForDpi(28.0f, dpi_scale),
-                    TRUE);
-                ApplyEditTextInsets(
-                    m_depth_edit,
-                    ScaleIntForDpi(2.0f, dpi_scale),
-                    ScaleIntForDpi(5.0f, dpi_scale),
-                    ScaleIntForDpi(2.0f, dpi_scale),
-                    ScaleIntForDpi(4.0f, dpi_scale));
-            }
-            if (m_depth_up_button)
-            {
-                MoveWindow(
-                    m_depth_up_button,
-                    depth_button_left,
-                    depth_controls_top,
-                    depth_button_width,
-                    ScaleIntForDpi(13.0f, dpi_scale),
-                    TRUE);
-            }
-            if (m_depth_down_button)
-            {
-                MoveWindow(
-                    m_depth_down_button,
-                    depth_button_left,
-                    depth_controls_top + ScaleIntForDpi(14.0f, dpi_scale),
-                    depth_button_width,
-                    ScaleIntForDpi(14.0f, dpi_scale),
-                    TRUE);
-            }
-            if (m_show_tooltip_check)
-            {
-                MoveWindow(
-                    m_show_tooltip_check,
-                    show_tooltip_left,
-                    show_tooltip_top,
-                    show_tooltip_width,
-                    ScaleIntForDpi(18.0f, dpi_scale),
-                    TRUE);
-            }
-            if (m_show_status_bar_check)
-            {
-                MoveWindow(
-                    m_show_status_bar_check,
-                    show_status_bar_left,
-                    show_status_bar_top,
-                    show_status_bar_width,
-                    ScaleIntForDpi(18.0f, dpi_scale),
-                    TRUE);
-            }
-            if (m_color_by_file_type_check)
-            {
-                MoveWindow(
-                    m_color_by_file_type_check,
-                    clear_left + clear_width + treemap_control_gap,
-                    show_tooltip_top,
-                    color_by_file_type_width,
-                    ScaleIntForDpi(18.0f, dpi_scale),
-                    TRUE);
+                for (HWND control : {m_path_edit, m_scan_button, m_browse_button,
+                    m_depth_label, m_depth_edit, m_depth_up_button, m_depth_down_button,
+                    m_home_button, m_clear_button, m_help_button, m_color_by_file_type_check,
+                    m_size_on_disk_check, m_show_tooltip_check, m_show_status_bar_check})
+                {
+                    if (!control)
+                    {
+                        continue;
+                    }
+                    TOOLINFOW tool = {};
+                    tool.cbSize = TTTOOLINFOW_V2_SIZE;
+                    tool.hwnd = m_hwnd;
+                    tool.uId = static_cast<UINT_PTR>(GetDlgCtrlID(control));
+                    GetWindowRect(control, &tool.rect);
+                    MapWindowPoints(nullptr, m_hwnd, reinterpret_cast<POINT*>(&tool.rect), 2);
+                    SendMessageW(m_header_tooltip, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&tool));
+                }
             }
         }
 
@@ -2700,62 +2607,24 @@ namespace swift_disk::gui
         }
 
         /**
-        Enables or disables controls that can mutate scan or layout state while
-        leaving Help and About available during a background scan.
-
-        Parameters:
-          enabled: Whether scan-dependent controls may accept input.
+        Disables scan and display controls during a background scan while keeping
+        the Help menu available.
         **/
         void SetScanControlsEnabled(bool enabled)
         {
-            if (m_size_on_disk_check)
+            for (HWND control : {m_path_edit, m_scan_button, m_browse_button, m_depth_edit,
+                m_depth_up_button, m_depth_down_button, m_show_tooltip_check,
+                m_show_status_bar_check, m_color_by_file_type_check, m_size_on_disk_check})
             {
-                EnableWindow(m_size_on_disk_check, enabled);
-            }
-            if (m_path_edit)
-            {
-                EnableWindow(m_path_edit, enabled);
-            }
-            if (m_scan_button)
-            {
-                EnableWindow(m_scan_button, enabled);
+                if (control)
+                {
+                    EnableWindow(control, enabled);
+                }
             }
             UpdateTreemapActionControlsEnabled(enabled);
-            if (m_depth_edit)
-            {
-                EnableWindow(m_depth_edit, enabled);
-            }
-            if (m_depth_up_button)
-            {
-                EnableWindow(m_depth_up_button, enabled);
-            }
-            if (m_depth_down_button)
-            {
-                EnableWindow(m_depth_down_button, enabled);
-            }
-            if (m_browse_button)
-            {
-                EnableWindow(m_browse_button, enabled);
-            }
             if (m_help_button)
             {
                 EnableWindow(m_help_button, TRUE);
-            }
-            if (m_about_button)
-            {
-                EnableWindow(m_about_button, TRUE);
-            }
-            if (m_show_tooltip_check)
-            {
-                EnableWindow(m_show_tooltip_check, enabled);
-            }
-            if (m_show_status_bar_check)
-            {
-                EnableWindow(m_show_status_bar_check, enabled);
-            }
-            if (m_color_by_file_type_check)
-            {
-                EnableWindow(m_color_by_file_type_check, enabled);
             }
             if (m_hovered_control && !IsWindowEnabled(m_hovered_control))
             {
@@ -3128,52 +2997,186 @@ namespace swift_disk::gui
         }
 
         /**
-        Handles header control notifications and keeps persisted settings,
-        control state, treemap layout, and focus behavior synchronized.
+        Focuses the Options checkboxes with Alt+O or opens Help with Alt+H.
+        Returns true when the access key was recognized.
+        **/
+        bool TryHandleHeaderAccessKey(WPARAM character)
+        {
+            if (character == L'o' || character == L'O')
+            {
+                if (IsWindowEnabled(m_color_by_file_type_check))
+                {
+                    SetFocus(m_color_by_file_type_check);
+                }
+                return true;
+            }
+            if (character == L'h' || character == L'H')
+            {
+                ShowHelpMenu();
+                return true;
+            }
+            return false;
+        }
 
-        Parameters:
-          control_id: Application identifier for the source control.
-          notification_code: Control-specific WM_COMMAND notification.
-          control: Source control window.
+        /**
+        Shows a native popup menu with the drive selector's dark palette.
+        Owns accessible menu-item text until the popup has been destroyed.
+        Returns the selected command, or zero when the menu is dismissed.
+        **/
+        UINT ShowHeaderMenu(HMENU menu, HWND button)
+        {
+            RECT button_rect = {};
+            if (!menu || !button || m_header_popup_menu || !GetWindowRect(button, &button_rect))
+            {
+                if (menu)
+                {
+                    DestroyMenu(menu);
+                }
+                return 0;
+            }
+            const int count = GetMenuItemCount(menu);
+            if (count <= 0)
+            {
+                DestroyMenu(menu);
+                return 0;
+            }
+            std::vector<HeaderMenuItem> items(static_cast<size_t>(count));
+            m_header_popup_menu = menu;
+            MENUINFO menu_info = {};
+            menu_info.cbSize = sizeof(menu_info);
+            menu_info.fMask = MIM_BACKGROUND;
+            menu_info.hbrBack = m_control_surface_brush;
+            SetMenuInfo(menu, &menu_info);
+            for (int index = 0; index < count; ++index)
+            {
+                wchar_t text[128] = {};
+                MENUITEMINFOW menu_item = {};
+                menu_item.cbSize = sizeof(menu_item);
+                menu_item.fMask = MIIM_FTYPE | MIIM_STRING;
+                menu_item.dwTypeData = text;
+                menu_item.cch = static_cast<UINT>(std::size(text));
+                if (!GetMenuItemInfoW(menu, index, TRUE, &menu_item))
+                {
+                    continue;
+                }
+                HeaderMenuItem& item = items[static_cast<size_t>(index)];
+                item.m_text = text;
+                item.m_separator = (menu_item.fType & MFT_SEPARATOR) != 0;
+                item.m_accessible_text = item.m_text;
+                const size_t marker = item.m_accessible_text.find(L'&');
+                if (marker != std::wstring::npos)
+                {
+                    item.m_accessible_text.erase(marker, 1);
+                }
+                item.m_accessibility.dwMSAASignature = MSAA_MENU_SIG;
+                item.m_accessibility.cchWText = static_cast<DWORD>(item.m_accessible_text.size());
+                item.m_accessibility.pszWText = item.m_accessible_text.data();
+                menu_item.fMask = MIIM_FTYPE | MIIM_DATA;
+                menu_item.fType |= MFT_OWNERDRAW;
+                menu_item.dwItemData = reinterpret_cast<ULONG_PTR>(&item);
+                SetMenuItemInfoW(menu, index, TRUE, &menu_item);
+            }
+            HidePathDropdown();
+            ClearHoverStateAndInvalidate();
+            SetForegroundWindow(m_hwnd);
+            SendMessageW(button, BM_SETSTATE, TRUE, 0);
+            TPMPARAMS parameters = {};
+            parameters.cbSize = sizeof(parameters);
+            parameters.rcExclude = button_rect;
+            const UINT command = static_cast<UINT>(TrackPopupMenuEx(
+                menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_VERTICAL | TPM_RETURNCMD | TPM_NONOTIFY,
+                button_rect.left, button_rect.bottom, m_hwnd, &parameters));
+            SendMessageW(button, BM_SETSTATE, FALSE, 0);
+            DestroyMenu(menu);
+            m_header_popup_menu = nullptr;
+            PostMessageW(m_hwnd, WM_NULL, 0, 0);
+            return command;
+        }
+
+        /**
+        Toggles a checkbox preference and immediately refreshes the view using
+        the existing persisted settings.
+        **/
+        void ToggleDisplayOption(int control_id, HWND control)
+        {
+            if (m_scan_in_progress)
+            {
+                return;
+            }
+            bool checked = false;
+            switch (control_id)
+            {
+            case IDC_SIZE_ON_DISK_CHECK:
+                m_layout_options.m_size_metric = m_layout_options.m_size_metric == SizeMetric::OnDisk
+                    ? SizeMetric::Logical : SizeMetric::OnDisk;
+                checked = m_layout_options.m_size_metric == SizeMetric::OnDisk;
+                break;
+            case IDC_SHOW_TOOLTIP_CHECK:
+                m_show_tooltip = !m_show_tooltip;
+                checked = m_show_tooltip;
+                break;
+            case IDC_SHOW_STATUS_BAR_CHECK:
+                m_show_status_bar = !m_show_status_bar;
+                checked = m_show_status_bar;
+                break;
+            case IDC_COLOR_BY_FILE_TYPE_CHECK:
+                m_color_by_file_type = !m_color_by_file_type;
+                checked = m_color_by_file_type;
+                break;
+            default:
+                return;
+            }
+            SetCheckboxState(control, checked);
+            SaveCurrentAppSettings();
+            ClearHoverState();
+            if (control_id == IDC_SHOW_TOOLTIP_CHECK)
+            {
+                InvalidateRect(m_hwnd, nullptr, FALSE);
+            }
+            else
+            {
+                RebuildAndRedraw();
+            }
+        }
+
+        /**
+        Opens the native Help menu and dispatches its Help and About commands.
+        **/
+        void ShowHelpMenu()
+        {
+            HMENU menu = CreatePopupMenu();
+            if (!menu)
+            {
+                return;
+            }
+            AppendMenuW(menu, MF_STRING, IDM_HELP_HELP, L"&Help");
+            AppendMenuW(menu, MF_STRING, IDM_HELP_ABOUT, L"&About SwiftDisk");
+            switch (ShowHeaderMenu(menu, m_help_button))
+            {
+            case IDM_HELP_HELP:
+                ShowHelpWindow(m_hwnd);
+                break;
+            case IDM_HELP_ABOUT:
+                ShowAboutWindow(m_hwnd);
+                break;
+            }
+        }
+
+        /**
+        Handles header commands, menu buttons, treemap depth, and scan actions.
         **/
         void OnCommand(int control_id, int notification_code, HWND control)
         {
-            if (control_id == IDC_SIZE_ON_DISK_CHECK && control == m_size_on_disk_check && notification_code == BN_CLICKED)
-            {
-                m_layout_options.m_size_metric = m_layout_options.m_size_metric == SizeMetric::OnDisk
-                    ? SizeMetric::Logical : SizeMetric::OnDisk;
-                SetCheckboxState(m_size_on_disk_check, m_layout_options.m_size_metric == SizeMetric::OnDisk);
-                SaveCurrentAppSettings();
-                ClearHoverState();
-                RebuildAndRedraw();
-                return;
-            }
-
             if (control_id == IDC_PATH_EDIT && control == m_path_edit)
             {
-                if (notification_code == CBN_DROPDOWN)
-                {
-                    return;
-                }
-
-                if (notification_code == CBN_SETFOCUS)
-                {
-                    return;
-                }
-
-                if (notification_code == CBN_SELCHANGE)
-                {
-                    return;
-                }
+                return;
             }
-
             if (control_id == IDC_DEPTH_EDIT && control == m_depth_edit && notification_code == EN_CHANGE)
             {
                 if (m_updating_depth_edit)
                 {
                     return;
                 }
-
                 int depth_limit = 0;
                 if (TryGetDepthLimitFromEdit(&depth_limit))
                 {
@@ -3181,66 +3184,39 @@ namespace swift_disk::gui
                 }
                 return;
             }
-
-            if (control_id == IDC_DEPTH_UP_BUTTON && control == m_depth_up_button && notification_code == BN_CLICKED)
+            if (notification_code != BN_CLICKED)
+            {
+                return;
+            }
+            if (control_id == IDC_DEPTH_UP_BUTTON && control == m_depth_up_button)
             {
                 AdjustDepthLimit(1);
                 return;
             }
-
-            if (control_id == IDC_DEPTH_DOWN_BUTTON && control == m_depth_down_button && notification_code == BN_CLICKED)
+            if (control_id == IDC_DEPTH_DOWN_BUTTON && control == m_depth_down_button)
             {
                 AdjustDepthLimit(-1);
                 return;
             }
-
-            if (control_id == IDC_SHOW_TOOLTIP_CHECK && control == m_show_tooltip_check && notification_code == BN_CLICKED)
+            if ((control_id == IDC_COLOR_BY_FILE_TYPE_CHECK && control == m_color_by_file_type_check) ||
+                (control_id == IDC_SIZE_ON_DISK_CHECK && control == m_size_on_disk_check) ||
+                (control_id == IDC_SHOW_TOOLTIP_CHECK && control == m_show_tooltip_check) ||
+                (control_id == IDC_SHOW_STATUS_BAR_CHECK && control == m_show_status_bar_check))
             {
-                m_show_tooltip = !m_show_tooltip;
-                SetCheckboxState(m_show_tooltip_check, m_show_tooltip);
-                SaveCurrentAppSettings();
-                if (!m_show_tooltip)
-                {
-                    StopTooltipAnimation();
-                    ResetTooltipRedrawBounds();
-                }
-                else if (m_hovered_index >= 0 || m_hovered_breadcrumb_index >= 0)
-                {
-                    m_tooltip_position = m_mouse_position;
-                    m_tooltip_target_position = m_mouse_position;
-                    m_tooltip_redraw_bounds = MeasureTooltipBoundsAt(m_tooltip_position);
-                    StartTooltipAnimation();
-                }
-                InvalidateRect(m_hwnd, nullptr, FALSE);
+                ToggleDisplayOption(control_id, control);
                 return;
             }
-
-            if (control_id == IDC_COLOR_BY_FILE_TYPE_CHECK && control == m_color_by_file_type_check && notification_code == BN_CLICKED)
+            if (control_id == IDC_HELP_BUTTON && control == m_help_button)
             {
-                m_color_by_file_type = !m_color_by_file_type;
-                SetCheckboxState(m_color_by_file_type_check, m_color_by_file_type);
-                SaveCurrentAppSettings();
-                RebuildAndRedraw();
+                ShowHelpMenu();
                 return;
             }
-
-            if (control_id == IDC_SHOW_STATUS_BAR_CHECK && control == m_show_status_bar_check && notification_code == BN_CLICKED)
-            {
-                m_show_status_bar = !m_show_status_bar;
-                SetCheckboxState(m_show_status_bar_check, m_show_status_bar);
-                SaveCurrentAppSettings();
-                RebuildLayout();
-                InvalidateCanvas();
-                return;
-            }
-
             if (control_id == IDC_SCAN_BUTTON && control == m_scan_button)
             {
                 HidePathDropdown();
                 BeginScanFromUiPath();
                 return;
             }
-
             if (control_id == IDC_HOME_BUTTON && control == m_home_button)
             {
                 HidePathDropdown();
@@ -3248,7 +3224,6 @@ namespace swift_disk::gui
                 SetFocus(m_hwnd);
                 return;
             }
-
             if (control_id == IDC_CLEAR_BUTTON && control == m_clear_button)
             {
                 HidePathDropdown();
@@ -3256,21 +3231,6 @@ namespace swift_disk::gui
                 SetFocus(m_hwnd);
                 return;
             }
-
-            if (control_id == IDC_HELP_BUTTON && control == m_help_button)
-            {
-                HidePathDropdown();
-                ShowHelpWindow(m_hwnd);
-                return;
-            }
-
-            if (control_id == IDC_ABOUT_BUTTON && control == m_about_button)
-            {
-                HidePathDropdown();
-                ShowAboutWindow(m_hwnd);
-                return;
-            }
-
             if (control_id == IDC_BROWSE_BUTTON && control == m_browse_button)
             {
                 HidePathDropdown();
@@ -3278,7 +3238,6 @@ namespace swift_disk::gui
                 {
                     return;
                 }
-
                 std::wstring selected_path;
                 if (BrowseForFolder(&selected_path) && m_path_edit)
                 {
@@ -4534,8 +4493,7 @@ namespace swift_disk::gui
             state.header_info_rect = m_header_info_rect;
             state.scan_group_rect = m_scan_group_rect;
             state.treemap_group_rect = m_treemap_group_rect;
-            state.display_group_rect = m_display_group_rect;
-            state.m_size_group_rect = m_size_group_rect;
+            state.m_options_group_rect = m_options_group_rect;
             return state;
         }
 
@@ -4595,21 +4553,24 @@ namespace swift_disk::gui
         GuiOptions m_options;
         HWND m_hwnd = nullptr;
         HWND m_path_edit = nullptr;
-        HWND m_size_on_disk_check = nullptr;
         HWND m_path_combo_edit = nullptr;
         HWND m_scan_button = nullptr;
         HWND m_browse_button = nullptr;
         HWND m_home_button = nullptr;
         HWND m_clear_button = nullptr;
         HWND m_help_button = nullptr;
-        HWND m_about_button = nullptr;
+        HWND m_color_by_file_type_check = nullptr;
+        HWND m_size_on_disk_check = nullptr;
+        HWND m_show_tooltip_check = nullptr;
+        HWND m_show_status_bar_check = nullptr;
+        HWND m_header_tooltip = nullptr;
+        HFONT m_header_tooltip_font = nullptr;
+        float m_header_tooltip_font_scale = 0.0f;
+        HMENU m_header_popup_menu = nullptr;
         HWND m_depth_label = nullptr;
         HWND m_depth_edit = nullptr;
         HWND m_depth_up_button = nullptr;
         HWND m_depth_down_button = nullptr;
-        HWND m_show_tooltip_check = nullptr;
-        HWND m_show_status_bar_check = nullptr;
-        HWND m_color_by_file_type_check = nullptr;
         HBRUSH m_header_background_brush = nullptr;
         HBRUSH m_control_panel_brush = nullptr;
         HBRUSH m_control_surface_brush = nullptr;
@@ -4653,8 +4614,7 @@ namespace swift_disk::gui
         RenderRect m_header_info_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect m_scan_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect m_treemap_group_rect = MakeRenderRect(0, 0, 0, 0);
-        RenderRect m_display_group_rect = MakeRenderRect(0, 0, 0, 0);
-        RenderRect m_size_group_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_options_group_rect = MakeRenderRect(0, 0, 0, 0);
         std::vector<std::pair<HWND, WNDPROC>> m_subclassed_controls;
     };
 

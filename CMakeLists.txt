@@ -91,9 +91,11 @@ set_target_properties(swift_disk_gui PROPERTIES
 target_link_libraries(swift_disk_gui PRIVATE
     swift_disk_core
     advapi32
+    comctl32
     d2d1
     dwrite
     shell32
+    uxtheme
 )
 
 target_include_directories(swift_disk_gui PRIVATE

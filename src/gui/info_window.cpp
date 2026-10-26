@@ -71,6 +71,7 @@ namespace
             L"- Browse... opens a folder picker and puts the selected folder in the path field.\r\n"
             L"- Scan starts scanning the selected path. You can also press Enter while the path field has focus.\r\n"
             L"- The last scanned path is remembered for the next time you open the app.\r\n"
+            L"- Hover over a button, checkbox, or other header control to see what it does. These descriptions remain available when treemap tooltips are turned off.\r\n"
             L"\r\n"
             L"Why the scan is fast\r\n"
             L"- On NTFS drives, SwiftDisk is very fast because it reads the MFT.\r\n"
@@ -78,7 +79,7 @@ namespace
             L"- Reading the MFT is much faster than scanning each folder one by one.\r\n"
             L"\r\n"
             L"Treemap basics\r\n"
-            L"- Each rectangle represents a file or folder. Larger rectangles have a larger size in the selected size mode.\r\n"
+            L"- Each rectangle represents a file or folder. Larger rectangles have a larger size.\r\n"
             L"- Folder tiles can contain smaller child rectangles.\r\n"
             L"- The parent folder bars at the top of the treemap show the folder path you have drilled into.\r\n"
             L"\r\n"
@@ -99,16 +100,21 @@ namespace
             L"- If you drill into a folder that is deeper than the current depth limit, SwiftDisk remembers that path as intentionally expanded and shows it even if is deeper than the depth limit\r\n"
             L"- Changing Depth, starting a fresh scan, or using Clear removes those remembered expanded folders\r\n"
             L"\r\n"
-            L"Display options\r\n"
-            L"- Check Size on disk to use allocated storage for tile areas and displayed totals; uncheck it to use Size. No rescan is needed, and the choice is remembered.\r\n"
-            L"- Size is the length of file contents. Size on disk is the storage allocated to those contents, including compression and sparse-file savings.\r\n"
-            L"- File sizes cover the main data stream; alternate streams and filesystem metadata are excluded. Folder sizes sum their files. Size on disk is not a guarantee of space freed by deletion.\r\n"
-            L"- Tooltip shows the full path, Size, and Size on disk for the tile or parent folder bar under the mouse cursor. Approximately marks an allocation estimate when Windows could not provide an exact value.\r\n"
-            L"- Status bar shows scan and selection details at the bottom of the window.\r\n"
+            L"Treemap controls\r\n"
             L"- Depth controls how many folder levels are visible at once. Lower values keep the view simpler; higher values show more nested folders.\r\n"
             L"- Home returns to the root of the current scan without clearing remembered expanded folders.\r\n"
             L"- Clear removes remembered expanded folders without changing the current scan.\r\n"
-            L"- Color by file type gives files with the same filename extension the same tile color and adds clearer tile outlines.";
+            L"\r\n"
+            L"Options\r\n"
+            L"- Color by file type gives files with the same filename extension the same tile color and adds clearer tile outlines.\r\n"
+            L"- Size on disk selects the size used for tile areas, labels, and totals. When checked, it shows allocated storage, including compression and sparse-file savings. When unchecked, it shows Size, the length of file contents.\r\n"
+            L"- Tooltips shows the full path and the size for the tile or parent folder bar under the mouse cursor. It shows Size on disk when that option is checked, otherwise Size.\r\n"
+            L"- Status bar shows scan and selection details at the bottom of the window.\r\n"
+            L"\r\n"
+            L"Help menu\r\n"
+            L"- Click Help, or press Alt+H, to open the Help menu.\r\n"
+            L"- Help -> Help opens these instructions.\r\n" 
+            L"- Help -> About SwiftDisk shows the version and license information.";
     }
 
     /**
@@ -489,6 +495,66 @@ namespace
     }
 
     /**
+    Increases an information window's height to fit its wrapped text, limited to
+    the monitor's work area so the window and Close button remain accessible.
+
+    Parameters:
+      hwnd: Information window with its text control already laid out.
+    **/
+    void FitInfoWindowHeightToText(HWND hwnd)
+    {
+        HWND info_text = GetDlgItem(hwnd, IDC_INFO_TEXT);
+        if (!info_text)
+        {
+            return;
+        }
+        HDC hdc = GetDC(info_text);
+        if (!hdc)
+        {
+            return;
+        }
+
+        const HFONT font = reinterpret_cast<HFONT>(SendMessageW(info_text, WM_GETFONT, 0, 0));
+        const HGDIOBJ old_font = font ? SelectObject(hdc, font) : nullptr;
+        TEXTMETRICW metrics = {};
+        const bool measured = GetTextMetricsW(hdc, &metrics) != FALSE;
+        if (old_font)
+        {
+            SelectObject(hdc, old_font);
+        }
+        ReleaseDC(info_text, hdc);
+        if (!measured)
+        {
+            return;
+        }
+
+        RECT window_rect = {};
+        RECT text_rect = {};
+        GetWindowRect(hwnd, &window_rect);
+        SendMessageW(info_text, EM_GETRECT, 0, reinterpret_cast<LPARAM>(&text_rect));
+        const int line_count = static_cast<int>(SendMessageW(info_text, EM_GETLINECOUNT, 0, 0));
+        const LONG current_height = window_rect.bottom - window_rect.top;
+        const LONG extra_height = std::max(0L, line_count * metrics.tmHeight - (text_rect.bottom - text_rect.top));
+        LONG height = current_height + extra_height;
+        LONG top = window_rect.top;
+
+        MONITORINFO monitor = {};
+        monitor.cbSize = sizeof(monitor);
+        if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor))
+        {
+            const LONG screen_padding = 14;
+            height = std::min(height, std::max(1L,
+                monitor.rcWork.bottom - monitor.rcWork.top - screen_padding * 2));
+            const LONG min_top = monitor.rcWork.top + screen_padding;
+            const LONG max_top = std::max(min_top, monitor.rcWork.bottom - screen_padding - height);
+            top = std::clamp(top, min_top, max_top);
+        }
+
+        SetWindowPos(hwnd, nullptr, window_rect.left, top,
+            window_rect.right - window_rect.left, height, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    /**
     Creates a modeless native window and runs a local message loop that gives it
     modal behavior relative to its disabled owner.
 
@@ -498,13 +564,15 @@ namespace
       text: Read-only text displayed in the window.
       width: Initial outer window width in pixels.
       height: Initial outer window height in pixels.
+      fit_text_height: Whether to grow the window to fit all text when screen space allows.
     **/
     void ShowInfoWindow(
         HWND owner,
         const wchar_t* title,
         const std::wstring& text,
         int width,
-        int height)
+        int height,
+        bool fit_text_height = false)
     {
         HINSTANCE instance = GetModuleHandleW(nullptr);
         if (!RegisterInfoWindowClass(instance))
@@ -530,6 +598,10 @@ namespace
         if (!info_window)
         {
             return;
+        }
+        if (fit_text_height)
+        {
+            FitInfoWindowHeightToText(info_window);
         }
 
         // Disabling the owner and running this nested loop provides the modal
@@ -574,7 +646,7 @@ namespace
     **/
     void ShowHelpWindow(HWND owner)
     {
-        ShowInfoWindow(owner, L"SwiftDisk Help", BuildHelpText(), 680, 740);
+        ShowInfoWindow(owner, L"SwiftDisk Help", BuildHelpText(), 680, 740, true);
     }
 
     /**

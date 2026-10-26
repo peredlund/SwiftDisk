@@ -31,6 +31,17 @@ namespace swift_disk::gui
     inline constexpr float kTooltipOffsetY = 22.0f;
     inline constexpr float kTooltipPaddingX = 10.0f;
     inline constexpr float kTooltipPaddingY = 8.0f;
+    inline constexpr const wchar_t* kTooltipFontFamily = L"Segoe UI";
+    inline constexpr float kTooltipFontSize = 12.0f;
+    inline constexpr BYTE kTooltipBackgroundRed = 255;
+    inline constexpr BYTE kTooltipBackgroundGreen = 255;
+    inline constexpr BYTE kTooltipBackgroundBlue = 255;
+    inline constexpr BYTE kTooltipTextRed = 42;
+    inline constexpr BYTE kTooltipTextGreen = 42;
+    inline constexpr BYTE kTooltipTextBlue = 42;
+    inline constexpr COLORREF kTooltipBackgroundColor =
+        RGB(kTooltipBackgroundRed, kTooltipBackgroundGreen, kTooltipBackgroundBlue);
+    inline constexpr COLORREF kTooltipTextColor = RGB(kTooltipTextRed, kTooltipTextGreen, kTooltipTextBlue);
     inline constexpr float kTooltipLineGap = 4.0f;
     inline constexpr float kTooltipCornerRadius = 4.0f;
     inline constexpr float kTooltipInnerMargin = 6.0f;
@@ -71,8 +82,7 @@ namespace swift_disk::gui
         RenderRect header_info_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect scan_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect treemap_group_rect = MakeRenderRect(0, 0, 0, 0);
-        RenderRect display_group_rect = MakeRenderRect(0, 0, 0, 0);
-        RenderRect m_size_group_rect = MakeRenderRect(0, 0, 0, 0);
+        RenderRect m_options_group_rect = MakeRenderRect(0, 0, 0, 0);
         RenderRect paint_rect = MakeRenderRect(0, 0, 0, 0);
     };
 

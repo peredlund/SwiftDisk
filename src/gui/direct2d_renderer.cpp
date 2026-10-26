@@ -256,16 +256,18 @@ namespace swift_disk::gui
     }
 
     /**
-    Formats both file-size metrics for tile and breadcrumb hover tooltips.
+    Formats the selected size metric for tile and breadcrumb hover tooltips.
     **/
-    std::wstring FormatSizeDetails(const Node* node)
+    std::wstring FormatSizeDetails(const Node* node, SizeMetric size_metric)
     {
+        const bool size_on_disk = size_metric == SizeMetric::OnDisk;
+        const std::wstring label = size_on_disk ? L"Size on disk: " : L"Size: ";
         if (!node)
         {
-            return L"Size: -\nSize on disk: -";
+            return label + L"-";
         }
-        return L"Size: " + HumanizeBytes(node->size) + L"\nSize on disk: " +
-            (node->m_size_on_disk_estimated ? L"approximately " : L"") + HumanizeBytes(node->m_size_on_disk);
+        return label + HumanizeBytes(node->GetSize(size_metric)) +
+            (size_on_disk && node->m_size_on_disk_estimated ? L" (approximately)" : L"");
     }
 
     D2D1_COLOR_F ParseHexColor(const std::string& value, float alpha = 1.0f)
@@ -485,7 +487,8 @@ namespace swift_disk::gui
             {
                 return hr;
             }
-            hr = CreateBrush(m_tooltip_background_brush, MakeD2DColor(255, 255, 255, 0.98f));
+            hr = CreateBrush(m_tooltip_background_brush, MakeD2DColor(
+                kTooltipBackgroundRed, kTooltipBackgroundGreen, kTooltipBackgroundBlue, 0.98f));
             if (FAILED(hr))
             {
                 return hr;
@@ -495,7 +498,8 @@ namespace swift_disk::gui
             {
                 return hr;
             }
-            hr = CreateBrush(m_tooltip_text_brush, MakeD2DColor(42, 42, 42, 0.96f));
+            hr = CreateBrush(m_tooltip_text_brush, MakeD2DColor(
+                kTooltipTextRed, kTooltipTextGreen, kTooltipTextBlue, 0.96f));
             if (FAILED(hr))
             {
                 return hr;
@@ -930,12 +934,12 @@ namespace swift_disk::gui
         }
 
         hr = m_dwrite_factory->CreateTextFormat(
-            L"Segoe UI",
+            kTooltipFontFamily,
             nullptr,
             DWRITE_FONT_WEIGHT_NORMAL,
             DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
-            Scale(12.0f),
+            Scale(kTooltipFontSize),
             L"",
             m_small_format.GetAddressOf());
         if (FAILED(hr))
@@ -1778,7 +1782,7 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
         const float separator_top = std::min(header_rect.bottom - Scale(8.0f), state.scan_group_rect.top);
         const float separator_bottom = std::min(
             header_rect.bottom - Scale(8.0f),
-            std::max(state.display_group_rect.bottom, state.treemap_group_rect.bottom) + Scale(1.0f));
+            std::max(state.treemap_group_rect.bottom, state.m_options_group_rect.bottom) + Scale(1.0f));
         DrawLine(
             MakeRenderPoint(separator_x + Scale(1.0f), separator_top),
             MakeRenderPoint(separator_x + Scale(1.0f), separator_bottom),
@@ -1786,9 +1790,8 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
             Scale(2.0f));
     }
 
-    DrawHeaderGroupBox(state.display_group_rect, L"Show");
     DrawHeaderGroupBox(state.treemap_group_rect, L"Treemap");
-    DrawHeaderGroupBox(state.m_size_group_rect, L"Size");
+    DrawHeaderGroupBox(state.m_options_group_rect, L"Options");
 
     DrawTextLine(
         L"SwiftDisk",
@@ -1894,12 +1897,12 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
             const Node* node = state.tree->GetNode(strip.node_id);
             const std::wstring path = state.tree->BuildPath(strip.node_id);
             *name_text = path.empty() ? strip.text : path;
-            *size_text = FormatSizeDetails(node);
+            *size_text = FormatSizeDetails(node, state.layout_options.m_size_metric);
         }
         else
         {
             *name_text = strip.text;
-            *size_text = FormatSizeDetails(nullptr);
+            *size_text = FormatSizeDetails(nullptr, state.layout_options.m_size_metric);
         }
         return true;
     }
@@ -1916,7 +1919,7 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
         {
             *name_text = rect.label;
         }
-        *size_text = FormatSizeDetails(state.tree->GetNode(rect.node_id));
+        *size_text = FormatSizeDetails(state.tree->GetNode(rect.node_id), state.layout_options.m_size_metric);
         return true;
     }
 
@@ -2162,11 +2165,6 @@ void Direct2DRenderer::DrawStatusBar(const MainWindowDrawingState& state)
         return;
     }
 
-    const size_t line_break = size_text.find(L'\n');
-    if (line_break != std::wstring::npos)
-    {
-        size_text.replace(line_break, 1, L"  |  ");
-    }
     const std::wstring status_text = name_text + L" - " + size_text;
     const RenderRect text_rect = MakeRenderRect(
         state.status_bar_rect.left + Scale(12.0f),
