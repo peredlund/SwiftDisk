@@ -27,13 +27,12 @@ The first time you start SwiftDisk, Microsoft Defender SmartScreen may display a
    - Or type a folder path or click `Browse...` to select a folder.
 3. Click `Scan`, or press Enter to start the scan.
 4. Use the treemap to find large folders and files:
-   - The Options group has checkboxes for Color by file type, Size on disk, Tooltips, and Status bar. Changes apply immediately and are remembered.
    - Larger rectangles use more disk space.
-   - Hover over a rectangle to see its path and the selected size: Size on disk when enabled, otherwise Size.
+   - Hover over a rectangle to see its name and size.
    - Click a folder rectangle to drill into it.
    - Use the parent folder bars at the top of the treemap to go back up.
    - Right-click a rectangle to open it, show it in File Explorer, copy its path, or view properties.
-5. Choose `Help -> Help` for detailed instructions.
+5. Click `Help` to see more detailed instructions.
 
 ## Why the scan is fast
 - On NTFS drives, SwiftDisk is very fast because it reads the MFT.
