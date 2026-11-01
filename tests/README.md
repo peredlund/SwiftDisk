@@ -22,6 +22,11 @@ stored separately. They verify one file entry and correct directory totals in bo
 size modes, either scan order, names or DATA sizes supplied by an extension, and
 zero-byte DATA overriding stale FILE_NAME sizes across records.
 
+WOF checks cover compressed backing data in either record order and continuation
+records. They verify correct disk-size totals and tile areas without changing the
+primary file's logical size. Unrelated named streams remain excluded. A regression
+record for the volume-sized virtual $BadClus:$Bad stream must not inflate totals.
+
 To compare both sizes with Windows metadata for every file in a small, quiet
 test folder, run from an administrator PowerShell on NTFS:
 

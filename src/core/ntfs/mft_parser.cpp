@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <string_view>
 
 namespace swift_disk::ntfs
 {
@@ -220,6 +221,7 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
     out->in_use = in_use;
     out->size = 0;
     out->m_size_on_disk = 0;
+    out->m_wof_size_on_disk = 0;
     out->has_data_attribute = false;
     out->m_name_preference = 0;
     if (!in_use)
@@ -233,6 +235,7 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
     uint64_t parent_frn = 0;
     uint64_t data_size = 0;
     uint64_t size_on_disk = 0;
+    uint64_t wof_size_on_disk = 0;
     uint64_t name_real_size = 0;
 
     while (attr_offset + sizeof(AttrHeaderCommon) <= record_size)
@@ -277,9 +280,17 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
         }
         else if (attr->type == kAttrTypeData)
         {
-            if (attr->name_length == 0)
+            const bool unnamed = attr->name_length == 0;
+            const size_t name_bytes = static_cast<size_t>(attr->name_length) * sizeof(wchar_t);
+            const bool wof_backing = !unnamed && attr->name_offset >= sizeof(AttrHeaderCommon) &&
+                attr->name_offset + name_bytes <= attr->length &&
+                std::wstring_view(reinterpret_cast<const wchar_t*>(
+                    reinterpret_cast<const uint8_t*>(attr) + attr->name_offset), attr->name_length) == L"WofCompressedData";
+            if (unnamed || wof_backing)
             {
-                // Only unnamed $DATA is counted as file primary content size.
+                // WOF stores file content in this backing stream. Other named
+                // streams, including NTFS's virtual $Bad stream, are not content
+                // allocation for the primary file-size view.
                 if (attr->non_resident == 0)
                 {
                     if (attr->length < sizeof(AttrHeaderResident))
@@ -287,8 +298,11 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
                         break;
                     }
                     auto* resident = reinterpret_cast<AttrHeaderResident*>(attr);
-                    out->has_data_attribute = true;
-                    data_size = std::max<uint64_t>(data_size, resident->value_length);
+                    if (unnamed)
+                    {
+                        out->has_data_attribute = true;
+                        data_size = std::max<uint64_t>(data_size, resident->value_length);
+                    }
                     // Resident content shares its MFT record; no data clusters are allocated.
                 }
                 else
@@ -304,8 +318,11 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
                         attr_offset = static_cast<uint16_t>(attr_offset + attr->length);
                         continue;
                     }
-                    out->has_data_attribute = true;
-                    data_size = std::max<uint64_t>(data_size, non_res->data_size);
+                    if (unnamed)
+                    {
+                        out->has_data_attribute = true;
+                        data_size = std::max<uint64_t>(data_size, non_res->data_size);
+                    }
                     uint64_t allocated = non_res->allocated_size;
                     if ((attr->flags & 0x80FF) != 0)
                     {
@@ -317,7 +334,14 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
                         }
                         allocated = non_res->compressed_size;
                     }
-                    size_on_disk = std::max(size_on_disk, allocated);
+                    if (unnamed)
+                    {
+                        size_on_disk = std::max(size_on_disk, allocated);
+                    }
+                    else
+                    {
+                        wof_size_on_disk += allocated;
+                    }
                 }
             }
         }
@@ -339,7 +363,8 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
             data_size = name_real_size;
         }
         out->size = data_size;
-        out->m_size_on_disk = size_on_disk;
+        out->m_wof_size_on_disk = wof_size_on_disk;
+        out->m_size_on_disk = size_on_disk + wof_size_on_disk;
     }
     return true;
 }

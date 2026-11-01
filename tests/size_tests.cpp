@@ -347,6 +347,171 @@ void TestSplitMftRecords()
         BuildRecord(false, 0, logical, allocated, 0), logical, allocated);
 }
 
+/**
+Appends a named DATA attribute to an in-memory record. Header sizes and name
+offsets cover ordinary, compressed, sparse, resident, and continuation streams.
+**/
+void AddNamedData(std::vector<uint8_t>& record, const std::wstring& name,
+    uint64_t logical_size, uint64_t allocated_size, uint16_t flags = 0,
+    uint64_t physical_size = 0, uint64_t start_vcn = 0, bool resident = false)
+{
+    size_t offset = 56;
+    uint32_t type = 0;
+    std::memcpy(&type, record.data() + offset, sizeof(type));
+    while (type != 0xFFFFFFFF)
+    {
+        uint32_t length = 0;
+        std::memcpy(&length, record.data() + offset + 4, sizeof(length));
+        Require(length > 0 && offset + length + 4 <= record.size(), "Invalid synthetic DATA attribute");
+        offset += length;
+        std::memcpy(&type, record.data() + offset, sizeof(type));
+    }
+    const uint16_t header_size = resident ? 24 : (flags == 0 ? 64 : 72);
+    const uint16_t payload_offset = static_cast<uint16_t>((header_size + name.size() * sizeof(wchar_t) + 7) & ~7ULL);
+    const uint32_t length = static_cast<uint32_t>((payload_offset + (resident ? logical_size : 8) + 7) & ~7ULL);
+    Require(offset + length + 4 <= record.size(), "Synthetic named DATA does not fit");
+    std::fill(record.begin() + offset, record.begin() + offset + length + 4, uint8_t{0});
+    Put<uint32_t>(record, offset, 0x80);
+    Put<uint32_t>(record, offset + 4, length);
+    Put<uint8_t>(record, offset + 8, resident ? 0 : 1);
+    Put<uint8_t>(record, offset + 9, static_cast<uint8_t>(name.size()));
+    Put<uint16_t>(record, offset + 10, header_size);
+    Put<uint16_t>(record, offset + 12, flags);
+    std::memcpy(record.data() + offset + header_size, name.data(), name.size() * sizeof(wchar_t));
+    if (resident)
+    {
+        Put<uint32_t>(record, offset + 16, static_cast<uint32_t>(logical_size));
+        Put<uint16_t>(record, offset + 20, payload_offset);
+    }
+    else
+    {
+        Put<uint64_t>(record, offset + 16, start_vcn);
+        Put<uint16_t>(record, offset + 32, payload_offset);
+        Put<uint64_t>(record, offset + 40, allocated_size);
+        Put<uint64_t>(record, offset + 48, logical_size);
+        if (flags != 0)
+        {
+            Put<uint64_t>(record, offset + 64, physical_size);
+        }
+    }
+    Put<uint32_t>(record, offset + length, 0xFFFFFFFF);
+}
+
+/**
+Checks WOF backing storage and exclusion of unrelated named streams. The
+reported DLL sizes reproduce a sparse primary stream backed by compressed data.
+**/
+void TestWofBackingSizes()
+{
+    using namespace swift_disk;
+    using namespace swift_disk::ntfs;
+    constexpr uint64_t logical = 146376504;
+    constexpr uint64_t backing = 48447488;
+    const auto check = [&](std::vector<uint8_t> base, std::vector<uint8_t> extension,
+        uint64_t expected_logical, uint64_t expected_disk)
+    {
+        AddFileName(base, L"Microsoft.Graph.Beta.dll", 1, expected_logical);
+        Put<uint64_t>(extension, 32, 42);
+        for (bool extension_first : {false, true})
+        {
+            FileTree tree;
+            Node root;
+            root.id = 5;
+            root.is_dir = true;
+            root.name = L"C:";
+            tree.AddNode(root);
+            tree.SetRootId(5);
+            MftScanStats stats;
+            MftRecordMerger merger(tree, stats);
+            const auto add = [&](std::vector<uint8_t> bytes, uint64_t frn)
+            {
+                // Protect sector trailers even if an appended attribute crosses one.
+                for (size_t sector = 1; sector <= 2; ++sector)
+                {
+                    uint16_t trailer = 0;
+                    std::memcpy(&trailer, bytes.data() + sector * 512 - 2, sizeof(trailer));
+                    Put<uint16_t>(bytes, 48 + sector * 2, trailer);
+                    Put<uint16_t>(bytes, sector * 512 - 2, 0x1234);
+                }
+                ParsedRecord parsed;
+                Require(ParseFileRecord(bytes.data(), bytes.size(), 512, frn, &parsed), "Named stream record rejected");
+                merger.AddRecord(std::move(parsed));
+            };
+            if (extension_first)
+            {
+                add(extension, 99);
+                add(base, 42);
+            }
+            else
+            {
+                add(base, 42);
+                add(extension, 99);
+            }
+            merger.Finalize();
+            const Node* file = tree.GetNode(42);
+            Require(file && !tree.GetNode(99) && file->size == expected_logical && file->m_size_on_disk == expected_disk,
+                "WOF storage was lost, duplicated, or added to logical size");
+            Require(tree.GetNode(5)->size == expected_logical && tree.GetNode(5)->m_size_on_disk == expected_disk,
+                "Directory did not aggregate WOF backing allocation");
+            visualization::TreemapLayoutOptions options;
+            options.m_size_metric = SizeMetric::OnDisk;
+            const auto rects = visualization::BuildTreemapLayout(tree, options);
+            Require(rects.size() == 1 && rects[0].size == expected_disk &&
+                rects[0].node_id == (expected_disk > 0 ? 42 : 5),
+                "Incorrect tile after WOF backing allocation");
+        }
+    };
+    auto empty_extension = BuildRecord(true, 0, 0, 0, 0);
+    Put<uint32_t>(empty_extension, 56, 0xFFFFFFFF);
+    auto base = BuildRecord(false, 0x8000, logical, logical, 0);
+    AddNamedData(base, L"WofCompressedData", backing, backing);
+    check(base, empty_extension, logical, backing);
+
+    auto extension = empty_extension;
+    AddNamedData(extension, L"WofCompressedData", backing, backing);
+    check(BuildRecord(false, 0x8000, logical, logical, 0), extension, logical, backing);
+
+    // Unrelated named streams and noninitial WOF segments do not add allocation.
+    base = BuildRecord(false, 0, 5120, 8192, 0);
+    AddNamedData(base, L"extra", 1000, 4096);
+    extension = empty_extension;
+    AddNamedData(extension, L"compressed", 1048576, 1048576, 1, 16384);
+    AddNamedData(extension, L"sparse", 1048576, 1048576, 0x8000, 4096);
+    AddNamedData(extension, L"extra", 999999, 999999, 0, 0, 16);
+    AddNamedData(extension, L"WofCompressedData", 999999, 999999, 0, 0, 16);
+    AddNamedData(extension, L"resident", 42, 0, 0, 0, 0, true);
+    check(base, extension, 5120, 8192);
+
+    // A real empty primary stream stays empty while WOF backing still counts.
+    base = BuildRecord(true, 0, 0, 0, 0);
+    extension = empty_extension;
+    AddNamedData(extension, L"WofCompressedData", 4096, 4096);
+    check(base, extension, 0, 4096);
+}
+
+/**
+Reproduces the special bad-cluster stream: a volume-sized virtual mapping can
+have holes without the ordinary sparse-attribute flag. It is not file content
+or WOF backing storage and must not inflate displayed disk usage.
+**/
+void TestBadClusterStream()
+{
+    using namespace swift_disk::ntfs;
+    constexpr uint64_t volume_size = 232ULL * 1024 * 1024 * 1024;
+    auto record = BuildRecord(true, 0, 0, 0, 0);
+    AddNamedData(record, L"$Bad", volume_size, volume_size);
+    // The named attribute follows the empty resident DATA attribute at byte 80.
+    constexpr size_t run_offset = 80 + 72;
+    Put<uint8_t>(record, run_offset, 0x04);
+    Put<uint32_t>(record, run_offset + 1, static_cast<uint32_t>(volume_size / 4096));
+    Put<uint8_t>(record, run_offset + 5, 0);
+    AddFileName(record, L"$BadClus", 3, 0);
+    ParsedRecord parsed;
+    Require(ParseFileRecord(record.data(), record.size(), 512, 8, &parsed), "Bad-cluster record rejected");
+    Require(parsed.size == 0 && parsed.m_size_on_disk == 0,
+        "Virtual $BadClus stream inflated displayed disk usage");
+}
+
 } // namespace
 
 /**
@@ -354,9 +519,11 @@ Runs all in-memory logical/allocation size regression checks.
 **/
 void RunSizeTests()
 {
+    TestBadClusterStream();
     TestParsedSizes();
     TestTreeAndLayoutSizes();
     TestSplitMftRecords();
+    TestWofBackingSizes();
 }
 
 /**

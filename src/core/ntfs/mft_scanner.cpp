@@ -139,9 +139,13 @@ bool TryGetDriveLetterFromPath(const std::wstring& path, wchar_t* drive_letter)
 /**
 Combines metadata for one base file, preferring its long filename and actual
 unnamed DATA sizes over FILE_NAME size fallbacks, including valid zero sizes.
+WOF backing allocations are added independently; only their first segments
+contribute, so continuation records do not count the same storage again.
 **/
 void MergeRecordMetadata(ParsedRecord& target, const ParsedRecord& source)
 {
+    uint64_t primary_allocation = target.m_size_on_disk - target.m_wof_size_on_disk;
+    const uint64_t source_primary_allocation = source.m_size_on_disk - source.m_wof_size_on_disk;
     if (!source.name.empty() && (target.name.empty() || source.m_name_preference > target.m_name_preference))
     {
         target.name = source.name;
@@ -151,14 +155,16 @@ void MergeRecordMetadata(ParsedRecord& target, const ParsedRecord& source)
     if (source.has_data_attribute && !target.has_data_attribute)
     {
         target.size = source.size;
-        target.m_size_on_disk = source.m_size_on_disk;
+        primary_allocation = source_primary_allocation;
         target.has_data_attribute = true;
     }
     else if (source.has_data_attribute == target.has_data_attribute)
     {
         target.size = std::max(target.size, source.size);
-        target.m_size_on_disk = std::max(target.m_size_on_disk, source.m_size_on_disk);
+        primary_allocation = std::max(primary_allocation, source_primary_allocation);
     }
+    target.m_wof_size_on_disk += source.m_wof_size_on_disk;
+    target.m_size_on_disk = primary_allocation + target.m_wof_size_on_disk;
 }
 
 } // namespace
@@ -222,6 +228,7 @@ void MftRecordMerger::AddRecord(ParsedRecord record)
         merged.has_data_attribute = existing->m_mft_has_data_attribute;
         merged.size = existing->size;
         merged.m_size_on_disk = existing->m_size_on_disk;
+        merged.m_wof_size_on_disk = existing->m_mft_wof_size_on_disk;
         MergeRecordMetadata(merged, record);
         Node updated = *existing;
         updated.name = std::move(merged.name);
@@ -230,6 +237,7 @@ void MftRecordMerger::AddRecord(ParsedRecord record)
         updated.m_mft_has_data_attribute = merged.has_data_attribute;
         updated.size = merged.size;
         updated.m_size_on_disk = merged.m_size_on_disk;
+        updated.m_mft_wof_size_on_disk = merged.m_wof_size_on_disk;
         m_tree.AddNode(std::move(updated));
         return;
     }
@@ -249,6 +257,7 @@ void MftRecordMerger::AddRecord(ParsedRecord record)
     node.m_mft_has_data_attribute = record.has_data_attribute;
     node.size = record.size;
     node.m_size_on_disk = record.m_size_on_disk;
+    node.m_mft_wof_size_on_disk = record.m_wof_size_on_disk;
     m_tree.AddNode(std::move(node));
     ++m_stats.records_added;
 }

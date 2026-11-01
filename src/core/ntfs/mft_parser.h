@@ -21,6 +21,7 @@ struct ParsedRecord
     uint8_t m_name_preference = 0;
     uint64_t size = 0;
     uint64_t m_size_on_disk = 0;
+    uint64_t m_wof_size_on_disk = 0;
 };
 
 bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sector, uint64_t frn, ParsedRecord* out);
