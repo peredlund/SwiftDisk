@@ -136,12 +136,142 @@ bool TryGetDriveLetterFromPath(const std::wstring& path, wchar_t* drive_letter)
     return true;
 }
 
+/**
+Combines metadata for one base file, preferring its long filename and actual
+unnamed DATA sizes over FILE_NAME size fallbacks, including valid zero sizes.
+**/
+void MergeRecordMetadata(ParsedRecord& target, const ParsedRecord& source)
+{
+    if (!source.name.empty() && (target.name.empty() || source.m_name_preference > target.m_name_preference))
+    {
+        target.name = source.name;
+        target.parent_frn = source.parent_frn;
+        target.m_name_preference = source.m_name_preference;
+    }
+    if (source.has_data_attribute && !target.has_data_attribute)
+    {
+        target.size = source.size;
+        target.m_size_on_disk = source.m_size_on_disk;
+        target.has_data_attribute = true;
+    }
+    else if (source.has_data_attribute == target.has_data_attribute)
+    {
+        target.size = std::max(target.size, source.size);
+        target.m_size_on_disk = std::max(target.m_size_on_disk, source.m_size_on_disk);
+    }
+}
+
 } // namespace
 
 /**
+Creates a merger that adds one tree node per base MFT record. Only extension
+records encountered before their base need temporary storage.
+**/
+MftRecordMerger::MftRecordMerger(FileTree& tree, MftScanStats& stats)
+    : m_tree(tree), m_stats(stats)
+{
+}
+
+/**
+Adds parsed base or extension metadata using the base record's identity. An
+extension can supply a name or sizes, but cannot create a separate file entry.
+**/
+void MftRecordMerger::AddRecord(ParsedRecord record)
+{
+    if (!record.in_use)
+    {
+        return;
+    }
+    const bool is_extension = record.base_frn != 0 && record.base_frn != record.frn;
+    const uint64_t base_frn = is_extension ? record.base_frn : record.frn;
+    if (record.name.empty())
+    {
+        ++m_stats.records_no_name;
+        if (!is_extension && !record.is_dir && record.size > 0)
+        {
+            ++m_stats.records_no_name_with_size;
+            m_stats.records_no_name_size += record.size;
+        }
+    }
+    if (is_extension && !record.is_dir && (record.size > 0 || record.m_size_on_disk > 0))
+    {
+        ++m_stats.extension_size_records;
+        m_stats.extension_size_total += record.size;
+    }
+    if (base_frn == m_tree.RootId())
+    {
+        return;
+    }
+
+    Node* existing = m_tree.GetNodeMutable(base_frn);
+    if (is_extension && !existing)
+    {
+        auto [pending, inserted] = m_pending_records.try_emplace(base_frn, std::move(record));
+        if (!inserted)
+        {
+            MergeRecordMetadata(pending->second, record);
+        }
+        return;
+    }
+    if (existing)
+    {
+        ParsedRecord merged;
+        merged.name = existing->name;
+        merged.parent_frn = existing->parent_id;
+        merged.m_name_preference = existing->m_mft_name_preference;
+        merged.has_data_attribute = existing->m_mft_has_data_attribute;
+        merged.size = existing->size;
+        merged.m_size_on_disk = existing->m_size_on_disk;
+        MergeRecordMetadata(merged, record);
+        Node updated = *existing;
+        updated.name = std::move(merged.name);
+        updated.parent_id = merged.parent_frn;
+        updated.m_mft_name_preference = merged.m_name_preference;
+        updated.m_mft_has_data_attribute = merged.has_data_attribute;
+        updated.size = merged.size;
+        updated.m_size_on_disk = merged.m_size_on_disk;
+        m_tree.AddNode(std::move(updated));
+        return;
+    }
+
+    auto pending = m_pending_records.find(base_frn);
+    if (pending != m_pending_records.end())
+    {
+        MergeRecordMetadata(record, pending->second);
+        m_pending_records.erase(pending);
+    }
+    Node node;
+    node.id = base_frn;
+    node.parent_id = record.parent_frn;
+    node.name = std::move(record.name);
+    node.is_dir = record.is_dir;
+    node.m_mft_name_preference = record.m_name_preference;
+    node.m_mft_has_data_attribute = record.has_data_attribute;
+    node.size = record.size;
+    node.m_size_on_disk = record.m_size_on_disk;
+    m_tree.AddNode(std::move(node));
+    ++m_stats.records_added;
+}
+
+/**
+Discards extension metadata whose base was not scanned, then builds paths and
+aggregates each file once into its directory's logical and allocated totals.
+**/
+void MftRecordMerger::Finalize()
+{
+    for (const auto& entry : m_pending_records)
+    {
+        ++m_stats.extension_missing_base_records;
+        m_stats.extension_missing_base_total += entry.second.size;
+    }
+    m_pending_records.clear();
+    m_tree.Finalize();
+}
+
+/**
  Scans an NTFS volume by enumerating and parsing MFT records.
- Builds a FileTree keyed by FRN and merges extension-record sizes back
- to base records using non-additive max semantics.
+ Builds a FileTree keyed by base FRN and merges extension-record metadata
+ without counting aliases or continuation records as separate files.
  
  Parameters:
    drive_letter: Volume letter to scan.
@@ -213,7 +343,7 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
     tree->SetRootId(kRootFrn);
 
     const uint32_t bytes_per_sector = volume.Info().bytes_per_sector;
-    std::unordered_map<uint64_t, std::pair<uint64_t, uint64_t>> pending_sizes;
+    MftRecordMerger merger(*tree, stats);
     bool ok = volume.EnumerateMftRecords(
         [&](uint8_t* record, size_t record_size, uint64_t frn)
         {
@@ -230,70 +360,7 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
                 return;
             }
             stats.records_in_use++;
-            if (parsed.name.empty())
-            {
-                stats.records_no_name++;
-                if (!parsed.is_dir && (parsed.size > 0 || parsed.m_size_on_disk > 0))
-                {
-                    if (parsed.base_frn != 0 && parsed.base_frn != parsed.frn)
-                    {
-                        // Extension record for a base file: merge using max to avoid
-                        // double counting overlapping size metadata across segments.
-                        if (Node* existing = tree->GetNodeMutable(parsed.base_frn))
-                        {
-                            existing->size = std::max(existing->size, parsed.size);
-                            existing->m_size_on_disk = std::max(existing->m_size_on_disk, parsed.m_size_on_disk);
-                        }
-                        else
-                        {
-                            // Base record may appear later in scan order; store pending merge.
-                            auto& pending = pending_sizes[parsed.base_frn];
-                            pending.first = std::max(pending.first, parsed.size);
-                            pending.second = std::max(pending.second, parsed.m_size_on_disk);
-                        }
-                        stats.extension_size_records++;
-                        stats.extension_size_total += parsed.size;
-                    }
-                    else
-                    {
-                        stats.records_no_name_with_size++;
-                        stats.records_no_name_size += parsed.size;
-                    }
-                }
-                return;
-            }
-
-            if (frn == kRootFrn)
-            {
-                Node* root = tree->GetNodeMutable(kRootFrn);
-                if (root)
-                {
-                    root->name = std::wstring(1, drive_letter) + L":";
-                }
-                return;
-            }
-
-            Node node;
-            node.id = parsed.frn;
-            node.parent_id = parsed.parent_frn;
-            node.name = std::move(parsed.name);
-            node.is_dir = parsed.is_dir;
-            node.size = parsed.size;
-            node.m_size_on_disk = parsed.m_size_on_disk;
-            tree->AddNode(std::move(node));
-            stats.records_added++;
-
-            auto pending = pending_sizes.find(node.id);
-            if (pending != pending_sizes.end())
-            {
-                Node* existing = tree->GetNodeMutable(node.id);
-                if (existing)
-                {
-                    existing->size = std::max(existing->size, pending->second.first);
-                    existing->m_size_on_disk = std::max(existing->m_size_on_disk, pending->second.second);
-                }
-                pending_sizes.erase(pending);
-            }
+            merger.AddRecord(std::move(parsed));
         },
         nullptr);
 
@@ -306,16 +373,7 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
         return false;
     }
 
-    if (!pending_sizes.empty())
-    {
-        for (const auto& entry : pending_sizes)
-        {
-            stats.extension_missing_base_records++;
-            stats.extension_missing_base_total += entry.second.first;
-        }
-    }
-
-    tree->Finalize();
+    merger.Finalize();
     if (out_stats)
     {
         *out_stats = stats;

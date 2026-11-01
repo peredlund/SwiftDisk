@@ -10,6 +10,7 @@
 #include <windows.h>
 #include <winioctl.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -214,6 +215,138 @@ void TestTreeAndLayoutSizes()
         "Switching metrics changed stored totals or lost resident content");
 }
 
+/**
+Appends a FILE_NAME attribute to a synthetic MFT record, including its namespace
+and cached logical size. All bytes remain in memory.
+**/
+void AddFileName(std::vector<uint8_t>& record, const std::wstring& name,
+    uint8_t name_type, uint64_t cached_size, uint64_t parent_frn = 5)
+{
+    size_t offset = 56;
+    uint32_t type = 0;
+    std::memcpy(&type, record.data() + offset, sizeof(type));
+    while (type != 0xFFFFFFFF)
+    {
+        uint32_t length = 0;
+        std::memcpy(&length, record.data() + offset + 4, sizeof(length));
+        Require(length > 0 && offset + length + 4 <= record.size(), "Invalid synthetic attribute");
+        offset += length;
+        std::memcpy(&type, record.data() + offset, sizeof(type));
+    }
+    const uint32_t value_size = static_cast<uint32_t>(66 + name.size() * sizeof(wchar_t));
+    const uint32_t length = (24 + value_size + 7) & ~7U;
+    Require(offset + length + 4 <= record.size(), "Synthetic FILE_NAME does not fit");
+    Put<uint32_t>(record, offset, 0x30);
+    Put<uint32_t>(record, offset + 4, length);
+    Put<uint32_t>(record, offset + 16, value_size);
+    Put<uint16_t>(record, offset + 20, 24);
+    Put<uint64_t>(record, offset + 24, parent_frn);
+    Put<uint64_t>(record, offset + 24 + 48, cached_size);
+    Put<uint8_t>(record, offset + 24 + 64, static_cast<uint8_t>(name.size()));
+    Put<uint8_t>(record, offset + 24 + 65, name_type);
+    std::memcpy(record.data() + offset + 24 + 66, name.data(), name.size() * sizeof(wchar_t));
+    Put<uint32_t>(record, offset + length, 0xFFFFFFFF);
+}
+
+/**
+Reproduces a long filename and DOS alias split across MFT records. Verifies one
+file, correct names/parents and both size totals, regardless of scan order.
+**/
+void TestSplitMftRecords()
+{
+    using namespace swift_disk;
+    using namespace swift_disk::ntfs;
+    constexpr uint64_t logical = 11054304;
+    constexpr uint64_t allocated = 11055104;
+    const auto name_record = [](const std::wstring& name, uint8_t name_type, uint64_t cached_size,
+        uint64_t parent_frn = 5)
+    {
+        auto record = BuildRecord(true, 0, 0, 0, 0);
+        Put<uint32_t>(record, 56, 0xFFFFFFFF);
+        AddFileName(record, name, name_type, cached_size, parent_frn);
+        return record;
+    };
+    const auto check = [&](std::vector<uint8_t> base, std::vector<uint8_t> extension,
+        uint64_t expected_logical, uint64_t expected_allocated, uint64_t expected_parent = 5)
+    {
+        Put<uint64_t>(extension, 32, 42);
+        for (bool extension_first : {false, true})
+        {
+            FileTree tree;
+            Node root;
+            root.id = 5;
+            root.name = L"C:";
+            root.is_dir = true;
+            tree.AddNode(root);
+            tree.SetRootId(root.id);
+            Node folder;
+            folder.id = 7;
+            folder.parent_id = 5;
+            folder.name = L"folder";
+            folder.is_dir = true;
+            tree.AddNode(folder);
+            MftScanStats stats;
+            MftRecordMerger merger(tree, stats);
+            const auto add = [&](std::vector<uint8_t> bytes, uint64_t frn)
+            {
+                ParsedRecord record;
+                Require(ParseFileRecord(bytes.data(), bytes.size(), 512, frn, &record), "Split record rejected");
+                merger.AddRecord(std::move(record));
+            };
+            if (extension_first)
+            {
+                add(extension, 99);
+                add(base, 42);
+            }
+            else
+            {
+                add(base, 42);
+                add(extension, 99);
+            }
+            merger.Finalize();
+            const Node* file = tree.GetNode(42);
+            Require(file && !tree.GetNode(99) && tree.ComputeStats().file_count == 1,
+                "Extension became a duplicate file");
+            Require(file->name == L"VoiceClarity.dll" && file->parent_id == expected_parent,
+                "Long filename or parent was lost across records");
+            Require(file->size == expected_logical && file->m_size_on_disk == expected_allocated,
+                "Split DATA metadata lost authoritative sizes");
+            Require(tree.GetNode(5)->size == expected_logical && tree.GetNode(5)->m_size_on_disk == expected_allocated,
+                "Split record was counted twice in directory totals");
+            const auto* children = tree.GetChildIds(expected_parent);
+            Require(children && std::count(children->begin(), children->end(), 42) == 1,
+                "Merged file appeared twice in its parent index");
+            for (SizeMetric metric : {SizeMetric::Logical, SizeMetric::OnDisk})
+            {
+                visualization::TreemapLayoutOptions options;
+                options.max_depth = 0;
+                options.m_size_metric = metric;
+                const auto rects = visualization::BuildTreemapLayout(tree, options);
+                const uint64_t expected = metric == SizeMetric::Logical ? expected_logical : expected_allocated;
+                Require(rects.size() == 1 && rects[0].size == expected,
+                    "Duplicate tile or incorrect area after split record merge");
+            }
+        }
+    };
+
+    auto base = BuildRecord(false, 0, logical, allocated, 0);
+    AddFileName(base, L"VoiceClarity.dll", 1, logical);
+    check(base, name_record(L"VOICEC~1.DLL", 2, logical), logical, allocated);
+
+    base = BuildRecord(false, 0, logical, allocated, 0);
+    AddFileName(base, L"VOICEC~1.DLL", 2, logical);
+    check(base, name_record(L"VoiceClarity.dll", 1, logical, 7), logical, allocated, 7);
+    check(BuildRecord(false, 0, logical, allocated, 0),
+        name_record(L"VoiceClarity.dll", 1, logical), logical, allocated);
+
+    base = BuildRecord(true, 0, 0, 0, 0);
+    AddFileName(base, L"VoiceClarity.dll", 1, logical);
+    check(base, name_record(L"VOICEC~1.DLL", 2, logical), 0, 0);
+    check(name_record(L"VoiceClarity.dll", 1, logical), BuildRecord(true, 0, 0, 0, 0), 0, 0);
+    check(name_record(L"VoiceClarity.dll", 1, logical),
+        BuildRecord(false, 0, logical, allocated, 0), logical, allocated);
+}
+
 } // namespace
 
 /**
@@ -223,6 +356,7 @@ void RunSizeTests()
 {
     TestParsedSizes();
     TestTreeAndLayoutSizes();
+    TestSplitMftRecords();
 }
 
 /**

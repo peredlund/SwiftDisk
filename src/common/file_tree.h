@@ -24,6 +24,9 @@ struct Node
     std::wstring name;
     bool is_dir = false;
     bool m_size_on_disk_estimated = false;
+    // Retained while merging split MFT metadata; not part of displayed sizes.
+    bool m_mft_has_data_attribute = false;
+    uint8_t m_mft_name_preference = 0;
     uint64_t size = 0;
     uint64_t m_size_on_disk = 0;
     uint64_t path_hash = 0;

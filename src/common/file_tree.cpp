@@ -67,7 +67,8 @@ uint64_t Node::GetSize(SizeMetric size_metric) const
 
 /**
  Inserts or replaces a node. For non-root nodes, appends the node id to the
- supplied parent's child index; existing child-index entries are not rewritten.
+ supplied parent's child index. Replacements update the index when the parent
+ changes and do not add duplicate child entries.
  
  Parameters:
    node: Node to insert or replace.
@@ -78,8 +79,18 @@ uint64_t FileTree::AddNode(Node node)
 {
     const uint64_t node_id = node.id;
     const uint64_t parent_id = node.parent_id;
+    auto existing = m_nodes.find(node_id);
+    const bool parent_changed = existing == m_nodes.end() || existing->second.parent_id != parent_id;
+    if (existing != m_nodes.end() && parent_changed)
+    {
+        auto previous_children = m_children.find(existing->second.parent_id);
+        if (previous_children != m_children.end())
+        {
+            std::erase(previous_children->second, node_id);
+        }
+    }
     m_nodes.insert_or_assign(node_id, std::move(node));
-    if (parent_id != 0 && parent_id != node_id)
+    if (parent_changed && parent_id != 0 && parent_id != node_id)
     {
         m_children[parent_id].push_back(node_id);
     }

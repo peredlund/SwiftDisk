@@ -17,6 +17,11 @@ ordinary, compressed, sparse, empty and preallocated data, continuation segments
 nested folder totals, and mode-dependent treemap selection and area. These default
 regression checks are entirely in memory and do not open or write a volume.
 
+Split-record checks parse synthetic MFT records with long names and DOS aliases
+stored separately. They verify one file entry and correct directory totals in both
+size modes, either scan order, names or DATA sizes supplied by an extension, and
+zero-byte DATA overriding stale FILE_NAME sizes across records.
+
 To compare both sizes with Windows metadata for every file in a small, quiet
 test folder, run from an administrator PowerShell on NTFS:
 

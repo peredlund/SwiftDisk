@@ -18,6 +18,7 @@ struct ParsedRecord
     bool is_dir = false;
     bool in_use = false;
     bool has_data_attribute = false;
+    uint8_t m_name_preference = 0;
     uint64_t size = 0;
     uint64_t m_size_on_disk = 0;
 };

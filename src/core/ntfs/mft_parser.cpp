@@ -221,6 +221,7 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
     out->size = 0;
     out->m_size_on_disk = 0;
     out->has_data_attribute = false;
+    out->m_name_preference = 0;
     if (!in_use)
     {
         return true;
@@ -326,6 +327,7 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
 
     out->parent_frn = parent_frn;
     out->name = std::move(best_name);
+    out->m_name_preference = best_name_score;
     if (is_dir)
     {
         out->size = 0;
