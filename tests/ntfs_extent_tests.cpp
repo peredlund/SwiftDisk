@@ -17,7 +17,7 @@
 #include <vector>
 
 void RunSizeTests();
-int VerifyFileSizes(const wchar_t* path, bool use_mft);
+int VerifyFileSizes(const wchar_t* path, bool use_mft, bool logical_only);
 
 namespace
 {
@@ -215,13 +215,15 @@ int wmain(int argument_count, wchar_t** arguments)
             return ScanVolume(static_cast<char>(arguments[2][0]));
         }
         if (argument_count == 3 && (std::wcscmp(arguments[1], L"--sizes") == 0 ||
-            std::wcscmp(arguments[1], L"--directory-sizes") == 0))
+            std::wcscmp(arguments[1], L"--directory-sizes") == 0 ||
+            std::wcscmp(arguments[1], L"--logical-sizes") == 0))
         {
-            return VerifyFileSizes(arguments[2], std::wcscmp(arguments[1], L"--sizes") == 0);
+            return VerifyFileSizes(arguments[2], std::wcscmp(arguments[1], L"--directory-sizes") != 0,
+                std::wcscmp(arguments[1], L"--logical-sizes") == 0);
         }
         if (argument_count != 1)
         {
-            std::cerr << "Usage: ntfs_extent_tests [--scan DRIVE_LETTER | --sizes FOLDER | --directory-sizes FOLDER]\n";
+            std::cerr << "Usage: ntfs_extent_tests [--scan DRIVE_LETTER | --sizes FOLDER | --directory-sizes FOLDER | --logical-sizes FOLDER]\n";
             return 2;
         }
         TestFragmentedPages();

@@ -41,6 +41,7 @@ class MftRecordMerger
     FileTree& m_tree;
     MftScanStats& m_stats;
     std::unordered_map<uint64_t, ParsedRecord> m_pending_records;
+    std::unordered_map<uint64_t, std::vector<ParsedFileName>> m_hard_links;
 };
 
 bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, MftScanStats* out_stats);

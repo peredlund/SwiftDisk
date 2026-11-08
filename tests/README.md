@@ -22,6 +22,11 @@ stored separately. They verify one file entry and correct directory totals in bo
 size modes, either scan order, names or DATA sizes supplied by an extension, and
 zero-byte DATA overriding stale FILE_NAME sizes across records.
 
+Hard-link checks retain distinct filenames in the same or different folders,
+including POSIX and combined Win32/DOS names. All permutations of base and
+extension scan order must give every real path the authoritative logical size,
+without adding DOS aliases or counting allocated storage more than once.
+
 WOF checks cover compressed backing data in either record order and continuation
 records. They verify correct disk-size totals and tile areas without changing the
 primary file's logical size. Unrelated named streams remain excluded. A regression
@@ -48,6 +53,17 @@ a 5 KiB file, an empty file, a tiny resident file, compressible text compressed
 with `compact /c`, and a sparse file with a large unwritten region. Creating
 these fixtures is a separate, deliberate file-writing step; neither verification
 command creates them. Avoid links and alternate streams in this basic test set.
+
+To verify logical sizes and completeness in a folder containing hard links,
+compare every MFT path against an independent Windows directory enumeration:
+
+```powershell
+.\build\Release\ntfs_extent_tests.exe --logical-sizes "C:\Windows\WinSxS\Catalogs"
+```
+
+This read-only check requires administrator access. Allocated sizes are excluded
+from this comparison because the MFT tree attributes shared allocation to one
+path per file. Each real hard-link path contributes its full logical size.
 
 In the GUI, hover over each header control (including the drive field, depth controls,
 buttons, and checkboxes) and check its description. Check that descriptions also appear

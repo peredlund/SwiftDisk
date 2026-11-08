@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstring>
 #include <string_view>
+#include <utility>
 
 namespace swift_disk::ntfs
 {
@@ -174,6 +175,52 @@ uint8_t NamePreference(uint8_t name_type)
 } // namespace
 
 /**
+Retains distinct hard-link paths while choosing the same preferred display name
+as before. DOS-only names are fallbacks, not additional directory entries.
+
+Returns: True when the preferred name changes.
+**/
+bool ParsedRecord::AddFileName(std::wstring file_name, uint64_t file_parent_frn, uint8_t name_preference)
+{
+    if (file_name.empty() || name_preference == 0)
+    {
+        return false;
+    }
+    const bool same_path = name == file_name && parent_frn == file_parent_frn;
+    const auto additional = std::find_if(m_additional_names.begin(), m_additional_names.end(),
+        [&](const ParsedFileName& entry)
+        {
+            return entry.m_parent_frn == file_parent_frn && entry.m_name == file_name;
+        });
+    if (name_preference > m_name_preference)
+    {
+        if (additional != m_additional_names.end())
+        {
+            m_additional_names.erase(additional);
+        }
+        if (m_name_preference > 1 && !same_path)
+        {
+            m_additional_names.push_back(
+            {
+                std::move(name), parent_frn, m_name_preference
+            });
+        }
+        name = std::move(file_name);
+        parent_frn = file_parent_frn;
+        m_name_preference = name_preference;
+        return true;
+    }
+    if (name_preference > 1 && !same_path && additional == m_additional_names.end())
+    {
+        m_additional_names.push_back(
+        {
+            std::move(file_name), file_parent_frn, name_preference
+        });
+    }
+    return false;
+}
+
+/**
  Parses one FILE record and extracts core node metadata.
  Pulls name, parent FRN, base FRN, in-use flags, and primary stream size.
  
@@ -224,15 +271,13 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
     out->m_wof_size_on_disk = 0;
     out->has_data_attribute = false;
     out->m_name_preference = 0;
+    out->m_additional_names.clear();
     if (!in_use)
     {
         return true;
     }
 
     uint16_t attr_offset = header->first_attr_offset;
-    uint8_t best_name_score = 0;
-    std::wstring best_name;
-    uint64_t parent_frn = 0;
     uint64_t data_size = 0;
     uint64_t size_on_disk = 0;
     uint64_t wof_size_on_disk = 0;
@@ -264,14 +309,10 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
                 // `FileNameAttr` declares `name[1]`; subtract one wchar to get fixed part size.
                 if (sizeof(FileNameAttr) - sizeof(wchar_t) + name_bytes <= name_available)
                 {
-                    // Prefer Win32-style names over DOS/other namespaces.
-                    uint8_t score = NamePreference(name_attr->name_type);
-                    if (score > best_name_score)
+                    // Keep all real paths, including names stored in extensions.
+                    if (out->AddFileName(std::wstring(name_attr->name, name_attr->name_length),
+                        name_attr->parent_ref & 0x0000FFFFFFFFFFFFULL, NamePreference(name_attr->name_type)))
                     {
-                        best_name_score = score;
-                        best_name.assign(name_attr->name, name_attr->name + name_attr->name_length);
-                        // Parent reference packs FRN + sequence; low 48 bits are the FRN.
-                        parent_frn = name_attr->parent_ref & 0x0000FFFFFFFFFFFFULL;
                         // Keep FILE_NAME real size as fallback when DATA size is missing here.
                         name_real_size = name_attr->real_size;
                     }
@@ -349,9 +390,6 @@ bool ParseFileRecord(uint8_t* record, size_t record_size, uint32_t bytes_per_sec
         attr_offset = static_cast<uint16_t>(attr_offset + attr->length);
     }
 
-    out->parent_frn = parent_frn;
-    out->name = std::move(best_name);
-    out->m_name_preference = best_name_score;
     if (is_dir)
     {
         out->size = 0;

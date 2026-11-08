@@ -146,11 +146,10 @@ void MergeRecordMetadata(ParsedRecord& target, const ParsedRecord& source)
 {
     uint64_t primary_allocation = target.m_size_on_disk - target.m_wof_size_on_disk;
     const uint64_t source_primary_allocation = source.m_size_on_disk - source.m_wof_size_on_disk;
-    if (!source.name.empty() && (target.name.empty() || source.m_name_preference > target.m_name_preference))
+    target.AddFileName(source.name, source.parent_frn, source.m_name_preference);
+    for (const ParsedFileName& entry : source.m_additional_names)
     {
-        target.name = source.name;
-        target.parent_frn = source.parent_frn;
-        target.m_name_preference = source.m_name_preference;
+        target.AddFileName(entry.m_name, entry.m_parent_frn, entry.m_preference);
     }
     if (source.has_data_attribute && !target.has_data_attribute)
     {
@@ -170,8 +169,8 @@ void MergeRecordMetadata(ParsedRecord& target, const ParsedRecord& source)
 } // namespace
 
 /**
-Creates a merger that adds one tree node per base MFT record. Only extension
-records encountered before their base need temporary storage.
+Creates a merger that combines split records by file identity and retains
+additional hard-link paths separately until the file's final sizes are known.
 **/
 MftRecordMerger::MftRecordMerger(FileTree& tree, MftScanStats& stats)
     : m_tree(tree), m_stats(stats)
@@ -179,8 +178,9 @@ MftRecordMerger::MftRecordMerger(FileTree& tree, MftScanStats& stats)
 }
 
 /**
-Adds parsed base or extension metadata using the base record's identity. An
-extension can supply a name or sizes, but cannot create a separate file entry.
+Adds parsed base or extension metadata using the base record's identity.
+Extension records can supply sizes and legitimate hard-link paths; DOS aliases
+do not create additional entries.
 **/
 void MftRecordMerger::AddRecord(ParsedRecord record)
 {
@@ -229,6 +229,11 @@ void MftRecordMerger::AddRecord(ParsedRecord record)
         merged.size = existing->size;
         merged.m_size_on_disk = existing->m_size_on_disk;
         merged.m_wof_size_on_disk = existing->m_mft_wof_size_on_disk;
+        auto links = m_hard_links.find(base_frn);
+        if (links != m_hard_links.end())
+        {
+            merged.m_additional_names = std::move(links->second);
+        }
         MergeRecordMetadata(merged, record);
         Node updated = *existing;
         updated.name = std::move(merged.name);
@@ -239,6 +244,10 @@ void MftRecordMerger::AddRecord(ParsedRecord record)
         updated.m_size_on_disk = merged.m_size_on_disk;
         updated.m_mft_wof_size_on_disk = merged.m_wof_size_on_disk;
         m_tree.AddNode(std::move(updated));
+        if (!merged.m_additional_names.empty())
+        {
+            m_hard_links[base_frn] = std::move(merged.m_additional_names);
+        }
         return;
     }
 
@@ -259,12 +268,17 @@ void MftRecordMerger::AddRecord(ParsedRecord record)
     node.m_size_on_disk = record.m_size_on_disk;
     node.m_mft_wof_size_on_disk = record.m_wof_size_on_disk;
     m_tree.AddNode(std::move(node));
+    if (!record.m_additional_names.empty())
+    {
+        m_hard_links[base_frn] = std::move(record.m_additional_names);
+    }
     ++m_stats.records_added;
 }
 
 /**
-Discards extension metadata whose base was not scanned, then builds paths and
-aggregates each file once into its directory's logical and allocated totals.
+Discards orphan extension metadata and adds each distinct hard-link path with
+the file's full logical size. Allocation stays on the preferred path so shared
+storage is counted once. Additional IDs lie outside the 48-bit MFT FRN range.
 **/
 void MftRecordMerger::Finalize()
 {
@@ -274,13 +288,35 @@ void MftRecordMerger::Finalize()
         m_stats.extension_missing_base_total += entry.second.size;
     }
     m_pending_records.clear();
+    uint64_t link_id = uint64_t{1} << 63;
+    for (const auto& [base_frn, names] : m_hard_links)
+    {
+        const Node* file = m_tree.GetNode(base_frn);
+        if (!file || file->is_dir)
+        {
+            continue;
+        }
+        const Node original = *file;
+        for (const ParsedFileName& entry : names)
+        {
+            Node link = original;
+            link.id = link_id++;
+            link.parent_id = entry.m_parent_frn;
+            link.name = entry.m_name;
+            link.m_mft_name_preference = entry.m_preference;
+            link.m_size_on_disk = 0;
+            link.m_mft_wof_size_on_disk = 0;
+            m_tree.AddNode(std::move(link));
+        }
+    }
+    m_hard_links.clear();
     m_tree.Finalize();
 }
 
 /**
  Scans an NTFS volume by enumerating and parsing MFT records.
- Builds a FileTree keyed by base FRN and merges extension-record metadata
- without counting aliases or continuation records as separate files.
+ Builds a FileTree with each hard-link path, merging extension-record metadata
+ without counting DOS aliases or continuation records as separate files.
  
  Parameters:
    drive_letter: Volume letter to scan.

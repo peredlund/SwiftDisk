@@ -15,6 +15,7 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 namespace
@@ -348,6 +349,135 @@ void TestSplitMftRecords()
 }
 
 /**
+Verifies logical sizes for hard links in the same or different folders, with
+names split across records in any scan order. DOS aliases and repeated names
+must not add entries, and late DATA metadata must reach every real path.
+**/
+void TestHardLinkSizes()
+{
+    using namespace swift_disk;
+    using namespace swift_disk::ntfs;
+    constexpr uint64_t logical = 945024;
+    constexpr uint64_t allocated = 946176;
+    for (bool names_in_base : {false, true})
+    {
+        for (bool data_in_base : {false, true})
+        {
+            for (uint8_t other_namespace : {uint8_t{0}, uint8_t{1}, uint8_t{3}})
+            {
+                auto names = BuildRecord(true, 0, 0, 0, 0);
+                Put<uint32_t>(names, 56, 0xFFFFFFFF);
+                AddFileName(names, L"CATALO~1.CAT", 2, logical, 7);
+                AddFileName(names, L"catalog.cat", 1, logical, 7);
+                AddFileName(names, L"catalog.cat", 1, logical, 7);
+                AddFileName(names, L"catalog.cat", 1, logical, 8);
+                AddFileName(names, L"another.cat", other_namespace, logical, 8);
+                auto data = BuildRecord(false, 0, logical, allocated, 0);
+                // Cached filename sizes can be stale; DATA is authoritative.
+                AddFileName(data, L"catalog.cat", 1, logical + 4096, 7);
+                std::vector<std::vector<uint8_t>> records(3, BuildRecord(true, 0, 0, 0, 0));
+                for (auto& record : records)
+                {
+                    Put<uint32_t>(record, 56, 0xFFFFFFFF);
+                }
+                records[names_in_base ? 0 : 1] = names;
+                if (data_in_base && names_in_base)
+                {
+                    records[0] = data;
+                    // Exercise multiple names in the same record as DATA too.
+                    AddFileName(records[0], L"CATALO~1.CAT", 2, logical, 7);
+                    AddFileName(records[0], L"catalog.cat", 1, logical, 8);
+                    AddFileName(records[0], L"another.cat", other_namespace, logical, 8);
+                    records[1] = names;
+                }
+                else
+                {
+                    records[data_in_base ? 0 : 2] = data;
+                }
+                Put<uint64_t>(records[1], 32, 42);
+                Put<uint64_t>(records[2], 32, 42);
+                std::vector<size_t> order = {0, 1, 2};
+                do
+                {
+                    FileTree tree;
+                    Node root;
+                    root.id = 5;
+                    root.is_dir = true;
+                    root.name = L"C:";
+                    tree.AddNode(root);
+                    tree.SetRootId(5);
+                    for (uint64_t folder_id : {7ULL, 8ULL})
+                    {
+                        Node folder;
+                        folder.id = folder_id;
+                        folder.parent_id = 5;
+                        folder.is_dir = true;
+                        folder.name = folder_id == 7 ? L"Catalogs" : L"Packages";
+                        tree.AddNode(folder);
+                    }
+                    MftScanStats stats;
+                    MftRecordMerger merger(tree, stats);
+                    for (size_t index : order)
+                    {
+                        auto bytes = records[index];
+                        for (size_t sector = 1; sector <= 2; ++sector)
+                        {
+                            uint16_t trailer = 0;
+                            std::memcpy(&trailer, bytes.data() + sector * 512 - 2, sizeof(trailer));
+                            Put<uint16_t>(bytes, 48 + sector * 2, trailer);
+                            Put<uint16_t>(bytes, sector * 512 - 2, 0x1234);
+                        }
+                        ParsedRecord parsed;
+                        Require(ParseFileRecord(bytes.data(), bytes.size(), 512,
+                            index == 0 ? 42 : 98 + index, &parsed), "Hard-link record rejected");
+                        merger.AddRecord(std::move(parsed));
+                    }
+                    merger.Finalize();
+                    Require(tree.ComputeStats().file_count == 3 && !tree.GetNode(99) && !tree.GetNode(100),
+                        "Hard link missing or DOS/extension entry counted twice");
+                    Require(tree.GetNode(7)->size == logical && tree.GetNode(8)->size == logical * 2,
+                        "Folder did not receive every hard link's full logical size");
+                    Require(tree.GetNode(5)->size == logical * 3 && tree.GetNode(5)->m_size_on_disk == allocated,
+                        "Hard-link totals lost logical content or duplicated allocation");
+                    std::vector<std::wstring> paths;
+                    size_t allocated_paths = 0;
+                    for (const Node* file : tree.GetAllNodes())
+                    {
+                        if (file->is_dir)
+                        {
+                            continue;
+                        }
+                        Require(file->size == logical, "Hard link retained a stale FILE_NAME size");
+                        paths.push_back(tree.BuildPath(file->id));
+                        allocated_paths += file->m_size_on_disk != 0 ? 1 : 0;
+                    }
+                    std::sort(paths.begin(), paths.end());
+                    Require(paths == std::vector<std::wstring>
+                    {
+                        L"C:\\Catalogs\\catalog.cat", L"C:\\Packages\\another.cat", L"C:\\Packages\\catalog.cat"
+                    } && allocated_paths == 1, "Hard-link paths or allocation owner are incorrect");
+                    for (SizeMetric metric : {SizeMetric::Logical, SizeMetric::OnDisk})
+                    {
+                        visualization::TreemapLayoutOptions options;
+                        options.max_depth = 1;
+                        options.m_size_metric = metric;
+                        const auto rects = visualization::BuildTreemapLayout(tree, options);
+                        const auto file_tiles = std::count_if(rects.begin(), rects.end(),
+                            [](const visualization::TreemapRect& rect)
+                            {
+                                return !rect.is_dir;
+                            });
+                        Require(file_tiles == (metric == SizeMetric::Logical ? 3 : 1),
+                            "Treemap lost a logical hard link or duplicated allocated storage");
+                    }
+                }
+                while (std::next_permutation(order.begin(), order.end()));
+            }
+        }
+    }
+}
+
+/**
 Appends a named DATA attribute to an in-memory record. Header sizes and name
 offsets cover ordinary, compressed, sparse, resident, and continuation streams.
 **/
@@ -523,6 +653,7 @@ void RunSizeTests()
     TestParsedSizes();
     TestTreeAndLayoutSizes();
     TestSplitMftRecords();
+    TestHardLinkSizes();
     TestWofBackingSizes();
 }
 
@@ -531,7 +662,7 @@ Checks a user-selected test folder against Windows file metadata. This optional
 integration check only reads existing files; it creates or modifies nothing.
 MFT mode requires an administrator terminal and a local NTFS path.
 **/
-int VerifyFileSizes(const wchar_t* path, bool use_mft)
+int VerifyFileSizes(const wchar_t* path, bool use_mft, bool logical_only)
 {
     using namespace swift_disk;
     const std::wstring normalized_path = NormalizeSizeTestPath(path);
@@ -555,6 +686,46 @@ int VerifyFileSizes(const wchar_t* path, bool use_mft)
     {
         Require(ScanDirectory(normalized_path, &tree, nullptr), "Directory scan failed");
         tree.Finalize();
+    }
+
+    if (logical_only)
+    {
+        // Enumerate independently so missing hard-link paths cannot pass just
+        // because every file retained by the MFT scanner has the right size.
+        FileTree expected;
+        Require(ScanDirectory(normalized_path, &expected, nullptr), "Reference directory scan failed");
+        expected.Finalize();
+        std::unordered_map<std::wstring, uint64_t> actual_sizes;
+        for (const Node* node : tree.GetAllNodes())
+        {
+            if (!node->is_dir)
+            {
+                Require(actual_sizes.emplace(tree.BuildPath(node->id), node->size).second,
+                    "MFT scan returned a duplicate path");
+            }
+        }
+        uint64_t file_count = 0;
+        for (const Node* node : expected.GetAllNodes())
+        {
+            if (node->is_dir)
+            {
+                continue;
+            }
+            const std::wstring file_path = expected.BuildPath(node->id);
+            const auto actual = actual_sizes.find(file_path);
+            if (actual == actual_sizes.end() || actual->second != node->size)
+            {
+                std::wcerr << L"Missing path or incorrect logical size: " << file_path << L'\n';
+                return 1;
+            }
+            ++file_count;
+        }
+        const Node* root = tree.GetNode(tree.RootId());
+        const Node* expected_root = expected.GetNode(expected.RootId());
+        Require(file_count == actual_sizes.size() && root && expected_root && root->size == expected_root->size,
+            "Unexpected MFT entries or incorrect logical folder total");
+        std::cout << "Verified " << file_count << " file paths: logical=" << root->size << '\n';
+        return 0;
     }
 
     uint64_t file_count = 0;
