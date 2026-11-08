@@ -65,6 +65,19 @@ This read-only check requires administrator access. Allocated sizes are excluded
 from this comparison because the MFT tree attributes shared allocation to one
 path per file. Each real hard-link path contributes its full logical size.
 
+To check allocated sizes and attribution across all hard links of the files in
+a folder, run from an administrator PowerShell:
+
+```powershell
+.\build\Release\ntfs_extent_tests.exe --allocations "C:\Windows\WinSxS\Catalogs"
+```
+
+This performs a read-only whole-volume MFT scan and independently queries Windows
+file identities, allocation and hard-link paths for the selected folder's files.
+It checks that every listed path exists in the scan, allocation matches Windows,
+and exactly one path carries each nonzero allocation. The output separates bytes
+attributed inside and outside the folder. No log or fixture files are created.
+
 In the GUI, hover over each header control (including the drive field, depth controls,
 buttons, and checkboxes) and check its description. Check that descriptions also appear
 over disabled controls, and still work after resizing or moving the app between displays.
