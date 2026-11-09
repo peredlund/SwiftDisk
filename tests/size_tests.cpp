@@ -349,6 +349,70 @@ void TestSplitMftRecords()
 }
 
 /**
+Checks the app's shared-file view for a full scan and two folder scopes.
+The original tree is grouped last so projected folders can still use its
+full-volume allocation data.
+**/
+void CheckSharedFileTreemap(swift_disk::FileTree& tree, const std::vector<std::wstring>& paths,
+    uint64_t logical, uint64_t allocated)
+{
+    using namespace swift_disk;
+    visualization::TreemapLayoutOptions options;
+    options.m_size_metric = SizeMetric::OnDisk;
+    options.max_depth = 1;
+    for (uint64_t folder_id : {7ULL, 8ULL})
+    {
+        FileTree scoped;
+        Node root = *tree.GetNode(folder_id);
+        root.parent_id = 0;
+        root.name = tree.BuildPath(folder_id);
+        scoped.SetRootId(folder_id);
+        scoped.AddNode(std::move(root));
+        for (uint64_t child_id : *tree.GetChildIds(folder_id))
+        {
+            scoped.AddNode(*tree.GetNode(child_id));
+        }
+        scoped.GroupSharedFiles(tree);
+        Require(scoped.GetNode(folder_id)->m_size_on_disk == allocated, "Folder scan lost shared allocation");
+        const auto tiles = visualization::BuildTreemapLayout(scoped, options);
+        const size_t expected_tiles = folder_id == 7 ? 1 : 2;
+        Require(tiles.size() == expected_tiles && !tiles.back().is_dir && tiles.back().size == allocated,
+            "Folder scan did not count the file exactly once");
+        const auto* links = scoped.GetSharedFilePaths(tiles.back().node_id);
+        Require(folder_id == 7 ? links == nullptr : links && links->size() == 2,
+            "Folder scan grouped paths outside its scope");
+    }
+
+    const size_t real_nodes = tree.NodeCount();
+    tree.GroupSharedFiles(tree);
+    Require(tree.NodeCount() == real_nodes && tree.ComputeStats().file_count == paths.size(),
+        "Shared display nodes inflated scan counts");
+    Require(tree.GetNode(5)->size == logical * paths.size() && tree.GetNode(5)->m_size_on_disk == allocated &&
+        tree.GetNode(7)->m_size_on_disk == 0 && tree.GetNode(8)->m_size_on_disk == 0,
+        "Shared display changed logical totals or counted allocated bytes twice");
+    const auto tiles = visualization::BuildTreemapLayout(tree, options);
+    Require(tiles.size() == 2 && tiles.front().is_dir && tiles.front().label.starts_with(L"Shared files") &&
+        !tiles.back().is_dir && tiles.back().size == allocated,
+        "Allocated view did not show one file under Shared files");
+    const auto* links = tree.GetSharedFilePaths(tiles.back().node_id);
+    Require(links && tree.BuildPath(tiles.back().node_id).empty(), "Shared tile exposed a virtual filesystem path");
+    std::vector<std::wstring> shared_paths;
+    for (uint64_t path_id : *links)
+    {
+        shared_paths.push_back(tree.BuildPath(path_id));
+    }
+    std::sort(shared_paths.begin(), shared_paths.end());
+    Require(shared_paths == paths, "Shared tile lost paths for its tooltip");
+    options.m_size_metric = SizeMetric::Logical;
+    const auto logical_tiles = visualization::BuildTreemapLayout(tree, options);
+    Require(logical_tiles.size() == paths.size() + 2 &&
+        std::none_of(logical_tiles.begin(), logical_tiles.end(), [&](const visualization::TreemapRect& tile)
+        {
+            return tree.GetNode(tile.node_id)->m_is_shared_storage;
+        }), "Logical view did not retain only the actual folders and file paths");
+}
+
+/**
 Verifies logical sizes for hard links in the same or different folders, with
 names split across records in any scan order. DOS aliases and repeated names
 must not add entries, and late DATA metadata must reach every real path.
@@ -470,6 +534,7 @@ void TestHardLinkSizes()
                         Require(file_tiles == (metric == SizeMetric::Logical ? 3 : 1),
                             "Treemap lost a logical hard link or duplicated allocated storage");
                     }
+                    CheckSharedFileTreemap(tree, paths, logical, allocated);
                 }
                 while (std::next_permutation(order.begin(), order.end()));
             }

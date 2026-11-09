@@ -297,6 +297,12 @@ void MftRecordMerger::Finalize()
             continue;
         }
         const Node original = *file;
+        std::vector<uint64_t> paths;
+        if (original.m_size_on_disk != 0)
+        {
+            paths.reserve(names.size() + 1);
+            paths.push_back(base_frn);
+        }
         for (const ParsedFileName& entry : names)
         {
             Node link = original;
@@ -306,8 +312,13 @@ void MftRecordMerger::Finalize()
             link.m_mft_name_preference = entry.m_preference;
             link.m_size_on_disk = 0;
             link.m_mft_wof_size_on_disk = 0;
-            m_tree.AddNode(std::move(link));
+            const uint64_t path_id = m_tree.AddNode(std::move(link));
+            if (!paths.empty())
+            {
+                paths.push_back(path_id);
+            }
         }
+        m_tree.AddHardLinkGroup(std::move(paths));
     }
     m_hard_links.clear();
     m_tree.Finalize();
@@ -435,10 +446,12 @@ bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, Mf
    tree: Destination file tree.
    error: Optional error message output.
    out_stats: Optional scan statistics output for the underlying volume scan.
+   group_shared_files: Group allocations shared by multiple paths in scope.
  
  Returns: true on success, otherwise false.
  **/
-bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* error, MftScanStats* out_stats)
+bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* error,
+    MftScanStats* out_stats, bool group_shared_files)
 {
     if (!tree)
     {
@@ -462,7 +475,12 @@ bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* er
 
     if (normalized_root == std::wstring(1, drive_letter) + L":")
     {
-        return ScanVolumeMft(drive_letter, tree, error, out_stats);
+        const bool ok = ScanVolumeMft(drive_letter, tree, error, out_stats);
+        if (ok && group_shared_files)
+        {
+            tree->GroupSharedFiles(*tree);
+        }
+        return ok;
     }
 
     FileTree full_tree;
@@ -528,6 +546,10 @@ bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* er
     }
 
     tree->RefreshPathHashes();
+    if (group_shared_files)
+    {
+        tree->GroupSharedFiles(full_tree);
+    }
     if (out_stats)
     {
         *out_stats = stats;

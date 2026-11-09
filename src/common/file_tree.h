@@ -27,6 +27,7 @@ struct Node
     // Retained while merging split MFT metadata; not part of displayed sizes.
     bool m_mft_has_data_attribute = false;
     uint8_t m_mft_name_preference = 0;
+    bool m_is_shared_storage = false;
     uint64_t size = 0;
     uint64_t m_size_on_disk = 0;
     uint64_t m_mft_wof_size_on_disk = 0;
@@ -65,6 +66,9 @@ class FileTree
     uint64_t RootId() const;
 
     void Finalize();
+    void AddHardLinkGroup(std::vector<uint64_t> path_ids);
+    void GroupSharedFiles(const FileTree& source);
+    const std::vector<uint64_t>* GetSharedFilePaths(uint64_t id) const;
     void RefreshPathHashes();
     TreeStats ComputeStats() const;
     std::vector<const Node*> GetAllNodes() const;
@@ -73,12 +77,16 @@ class FileTree
     std::wstring BuildPath(uint64_t id) const;
 
   private:
+    bool IsUnderRoot(uint64_t id) const;
+    void SetFileAllocation(uint64_t id, uint64_t allocation);
     size_t GetDepth(uint64_t id, std::unordered_map<uint64_t, size_t>& cache) const;
     void RefreshPathHashesFromOrderedIds(const std::vector<uint64_t>& ids, bool deepest_first);
 
     uint64_t m_root_id = 0;
     std::unordered_map<uint64_t, Node> m_nodes;
     std::unordered_map<uint64_t, std::vector<uint64_t>> m_children;
+    std::vector<std::vector<uint64_t>> m_hard_link_groups;
+    std::unordered_map<uint64_t, std::vector<uint64_t>> m_shared_file_paths;
 };
 
 } // namespace swift_disk

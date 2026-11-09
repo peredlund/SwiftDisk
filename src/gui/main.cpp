@@ -59,7 +59,7 @@ namespace swift_disk::gui
     constexpr int IDM_HELP_HELP = 2201;
     constexpr int IDM_HELP_ABOUT = 2202;
     constexpr int IDM_TREEMAP_OPEN_IN_EXPLORER = 2001;
-    constexpr int IDM_TREEMAP_COPY_FULL_PATH = 2002;
+    constexpr int IDM_TREEMAP_COPY_PATHS = 2002;
     constexpr int IDM_TREEMAP_PROPERTIES = 2003;
     constexpr int IDM_TREEMAP_OPEN = 2004;
     constexpr int IDM_TREEMAP_OPEN_WITH = 2005;
@@ -3110,6 +3110,15 @@ namespace swift_disk::gui
                 m_layout_options.m_size_metric = m_layout_options.m_size_metric == SizeMetric::OnDisk
                     ? SizeMetric::Logical : SizeMetric::OnDisk;
                 checked = m_layout_options.m_size_metric == SizeMetric::OnDisk;
+                if (!checked && m_tree)
+                {
+                    const Node* focused = m_tree->GetNode(m_view_root_id);
+                    if (focused && focused->m_is_shared_storage)
+                    {
+                        m_expanded_reveal_nodes.erase(focused->id);
+                        m_view_root_id = m_tree->RootId();
+                    }
+                }
                 break;
             case IDC_SHOW_TOOLTIP_CHECK:
                 m_show_tooltip = !m_show_tooltip;
@@ -3283,7 +3292,7 @@ namespace swift_disk::gui
 
                     if (IsNtfsPath(path))
                     {
-                        ok = ntfs::ScanPathMft(path, payload->tree.get(), &error, &stats);
+                        ok = ntfs::ScanPathMft(path, payload->tree.get(), &error, &stats, true);
                     }
                     else
                     {
@@ -3976,8 +3985,8 @@ namespace swift_disk::gui
         }
 
         /**
-        Resolves a tree node to its full path, converts the click to screen
-        coordinates, and opens the appropriate file or directory context menu.
+        Resolves a tree node to its filesystem path or list of shared paths,
+        converts the click to screen coordinates, and opens its context menu.
 
         Parameters:
           node_id: Selected tree node.
@@ -3997,28 +4006,42 @@ namespace swift_disk::gui
                 return;
             }
 
-            std::wstring path = m_tree->BuildPath(node_id);
-            if (path.empty())
+            const std::wstring path = m_tree->BuildPath(node_id);
+            std::wstring shared_paths;
+            if (const auto* path_ids = m_tree->GetSharedFilePaths(node_id))
+            {
+                for (uint64_t path_id : *path_ids)
+                {
+                    if (!shared_paths.empty())
+                    {
+                        shared_paths += L"\r\n";
+                    }
+                    shared_paths += m_tree->BuildPath(path_id);
+                }
+            }
+            if (path.empty() && shared_paths.empty())
             {
                 return;
             }
 
             POINT menu_position = { x, y };
             ClientToScreen(m_hwnd, &menu_position);
-            ShowTreemapContextMenu(menu_position, path, node->is_dir);
+            ShowTreemapContextMenu(menu_position, path, node->is_dir, shared_paths);
         }
 
         /**
-        Builds and displays the context menu for a scanned path, dispatches the
-        selected shell action, and protects the treemap from the click that can
+        Displays the context menu for a scanned path or shared file, dispatches
+        the selected action, and protects the treemap from the click that can
         follow mouse-based popup cancellation.
 
         Parameters:
           menu_position: Popup location in screen coordinates.
           path: Full filesystem path represented by the clicked node.
           is_dir: Whether the path is a directory.
+          shared_paths: Clipboard text for a shared file, with one path per line.
         **/
-        void ShowTreemapContextMenu(const POINT& menu_position, const std::wstring& path, bool is_dir)
+        void ShowTreemapContextMenu(const POINT& menu_position, const std::wstring& path, bool is_dir,
+            const std::wstring& shared_paths)
         {
             HMENU menu = CreatePopupMenu();
             if (!menu)
@@ -4026,16 +4049,24 @@ namespace swift_disk::gui
                 return;
             }
 
-            AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN_IN_EXPLORER, L"Open in File Explorer");
-            AppendMenuW(menu, MF_STRING, IDM_TREEMAP_COPY_FULL_PATH, L"Copy full path");
-            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-            if (!is_dir)
+            const bool is_shared_file = !shared_paths.empty();
+            if (is_shared_file)
             {
-                AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN, L"Open");
-                AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN_WITH, L"Open with...");
-                AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+                AppendMenuW(menu, MF_STRING, IDM_TREEMAP_COPY_PATHS, L"Copy paths");
             }
-            AppendMenuW(menu, MF_STRING, IDM_TREEMAP_PROPERTIES, L"Properties");
+            else
+            {
+                AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN_IN_EXPLORER, L"Open in File Explorer");
+                AppendMenuW(menu, MF_STRING, IDM_TREEMAP_COPY_PATHS, L"Copy full path");
+                AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+                if (!is_dir)
+                {
+                    AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN, L"Open");
+                    AppendMenuW(menu, MF_STRING, IDM_TREEMAP_OPEN_WITH, L"Open with...");
+                    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+                }
+                AppendMenuW(menu, MF_STRING, IDM_TREEMAP_PROPERTIES, L"Properties");
+            }
 
             SetForegroundWindow(m_hwnd);
             const UINT command = TrackPopupMenu(
@@ -4070,13 +4101,14 @@ namespace swift_disk::gui
             {
                 OpenPathInFileExplorer(path, is_dir);
             }
-            else if (command == IDM_TREEMAP_COPY_FULL_PATH)
+            else if (command == IDM_TREEMAP_COPY_PATHS)
             {
-                if (!CopyTextToClipboard(path))
+                if (!CopyTextToClipboard(is_shared_file ? shared_paths : path))
                 {
                     MessageBoxW(
                         m_hwnd,
-                        L"The selected path could not be copied to the clipboard.",
+                        is_shared_file ? L"The shared file's paths could not be copied to the clipboard."
+                                       : L"The selected path could not be copied to the clipboard.",
                         L"SwiftDisk",
                         MB_OK | MB_ICONERROR);
                 }

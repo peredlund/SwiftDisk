@@ -107,7 +107,7 @@ namespace
             L"\r\n"
             L"Options\r\n"
             L"- Color by file type gives files with the same filename extension the same tile color and adds clearer tile outlines.\r\n"
-            L"- Size on disk selects the size used for tile areas, labels, and totals. When checked, it shows allocated storage, including compression and sparse-file savings. When unchecked, it shows Size, the length of file contents.\r\n"
+            L"- Size on disk selects the size used for tile areas, labels, and totals. When checked, it shows allocated storage, including compression and sparse-file savings. When checked, hard-linked files with multiple links are shown under Shared files in the treemap. When unchecked, it shows Size, the length of file contents.\r\n"
             L"- Tooltips shows the full path and the size for the tile or parent folder bar under the mouse cursor. It shows Size on disk when that option is checked, otherwise Size.\r\n"
             L"- Status bar shows scan and selection details at the bottom of the window.";
     }

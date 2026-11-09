@@ -4,7 +4,9 @@
 #include "common/file_tree.h"
 
 #include <algorithm>
+#include <limits>
 #include <unordered_set>
+#include <utility>
 
 namespace swift_disk
 {
@@ -135,7 +137,7 @@ Node* FileTree::GetNodeMutable(uint64_t id)
 
 size_t FileTree::NodeCount() const
 {
-    return m_nodes.size();
+    return m_nodes.size() - (m_shared_file_paths.empty() ? 0 : m_shared_file_paths.size() + 1);
 }
 
 void FileTree::Reserve(size_t node_count)
@@ -236,6 +238,144 @@ void FileTree::Finalize()
 }
 
 /**
+Records the paths of one underlying file. The first ID identifies the path
+that initially carries the file's allocation.
+**/
+void FileTree::AddHardLinkGroup(std::vector<uint64_t> path_ids)
+{
+    if (path_ids.size() > 1)
+    {
+        m_hard_link_groups.push_back(std::move(path_ids));
+    }
+}
+
+/**
+Checks whether a path belongs to the scan, stopping at broken parent chains.
+**/
+bool FileTree::IsUnderRoot(uint64_t id) const
+{
+    for (size_t depth = 0; id != 0 && depth < 1024; ++depth)
+    {
+        if (id == m_root_id)
+        {
+            return true;
+        }
+        const Node* node = GetNode(id);
+        if (!node || node->parent_id == id)
+        {
+            return false;
+        }
+        id = node->parent_id;
+    }
+    return false;
+}
+
+/**
+Changes a file's allocation and updates the already aggregated ancestor totals.
+**/
+void FileTree::SetFileAllocation(uint64_t id, uint64_t allocation)
+{
+    Node* node = GetNodeMutable(id);
+    if (!node || node->m_size_on_disk == allocation)
+    {
+        return;
+    }
+    const uint64_t previous = node->m_size_on_disk;
+    for (size_t depth = 0; node && depth < 1024; ++depth)
+    {
+        node->m_size_on_disk = node->m_size_on_disk - previous + allocation;
+        if (node->id == m_root_id || node->id == node->parent_id)
+        {
+            break;
+        }
+        node = GetNodeMutable(node->parent_id);
+    }
+}
+
+/**
+Moves shared allocations into one virtual group below the scan root. Only
+paths in the displayed tree participate. With one path in scope, that path
+carries the allocation itself. The source may be this tree or the full volume
+tree used to project a folder scan. Call once after sizes have been aggregated.
+**/
+void FileTree::GroupSharedFiles(const FileTree& source)
+{
+    Node* root = GetNodeMutable(m_root_id);
+    if (!root || !m_shared_file_paths.empty())
+    {
+        return;
+    }
+    // MFT file IDs and hard-link path IDs grow upward from their own ranges.
+    uint64_t next_id = std::numeric_limits<uint64_t>::max();
+    Node* group = nullptr;
+    std::vector<uint64_t> paths;
+    for (const auto& all_paths : source.m_hard_link_groups)
+    {
+        const uint64_t owner_id = all_paths.front();
+        const Node* owner = source.GetNode(owner_id);
+        if (!owner || owner->m_size_on_disk == 0)
+        {
+            continue;
+        }
+        const uint64_t allocation = owner->m_size_on_disk;
+        paths.clear();
+        for (uint64_t path_id : all_paths)
+        {
+            if (IsUnderRoot(path_id))
+            {
+                paths.push_back(path_id);
+            }
+        }
+        if (paths.empty() || (paths.size() == 1 && paths.front() == owner_id))
+        {
+            continue;
+        }
+        if (paths.front() == owner_id)
+        {
+            SetFileAllocation(owner_id, 0);
+        }
+        if (paths.size() == 1)
+        {
+            SetFileAllocation(paths.front(), allocation);
+            continue;
+        }
+        if (!group)
+        {
+            Node directory;
+            directory.id = next_id--;
+            directory.parent_id = m_root_id;
+            directory.name = L"Shared files";
+            directory.is_dir = true;
+            directory.m_is_shared_storage = true;
+            directory.path_hash = HashPathComponent(directory.name);
+            group = GetNodeMutable(AddNode(std::move(directory)));
+        }
+        const Node* representative = GetNode(paths.front());
+        Node tile;
+        tile.id = next_id--;
+        tile.parent_id = group->id;
+        tile.name = representative->name;
+        tile.m_is_shared_storage = true;
+        tile.m_size_on_disk = allocation;
+        tile.path_hash = representative->path_hash;
+        const uint64_t tile_id = AddNode(std::move(tile));
+        m_shared_file_paths.emplace(tile_id, paths);
+        group->m_size_on_disk += allocation;
+        root->m_size_on_disk += allocation;
+    }
+    m_hard_link_groups.clear();
+}
+
+/**
+Returns the real path IDs represented by a shared allocation tile.
+**/
+const std::vector<uint64_t>* FileTree::GetSharedFilePaths(uint64_t id) const
+{
+    const auto entry = m_shared_file_paths.find(id);
+    return entry == m_shared_file_paths.end() ? nullptr : &entry->second;
+}
+
+/**
  Refreshes compact full-path hashes for every node without building full path
  strings. The hashes let treemap layout keep stable per-path colors without a
  retained full-path cache.
@@ -331,6 +471,10 @@ FileTree::TreeStats FileTree::ComputeStats() const
     for (const auto& entry : m_nodes)
     {
         const Node& node = entry.second;
+        if (node.m_is_shared_storage)
+        {
+            continue;
+        }
         if (node.is_dir)
         {
             stats.dir_count++;
@@ -367,6 +511,10 @@ FileTree::TreeStats FileTree::ComputeStats() const
                 continue;
             }
             const Node& node = it->second;
+            if (node.m_is_shared_storage)
+            {
+                continue;
+            }
             if (!node.is_dir)
             {
                 stats.reachable_file_count++;
@@ -472,6 +620,11 @@ std::vector<const Node*> FileTree::TopN(size_t n) const
  **/
 std::wstring FileTree::BuildPath(uint64_t id) const
 {
+    const Node* selected = GetNode(id);
+    if (selected && selected->m_is_shared_storage)
+    {
+        return {};
+    }
     std::vector<std::wstring> parts;
     uint64_t current = id;
     size_t guard = 0;

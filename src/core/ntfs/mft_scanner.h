@@ -45,6 +45,7 @@ class MftRecordMerger
 };
 
 bool ScanVolumeMft(wchar_t drive_letter, FileTree* tree, std::wstring* error, MftScanStats* out_stats);
-bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* error, MftScanStats* out_stats);
+bool ScanPathMft(const std::wstring& root_path, FileTree* tree, std::wstring* error,
+    MftScanStats* out_stats, bool group_shared_files = false);
 
 } // namespace swift_disk::ntfs

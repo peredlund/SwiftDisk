@@ -1389,7 +1389,7 @@ void Direct2DRenderer::DrawTreemap(const MainWindowDrawingState& state)
     const auto& breadcrumbs = *state.breadcrumbs;
     const Node* focused_node = state.tree->GetNode(state.view_root_id);
     const std::wstring focused_path = focused_node
-        ? state.tree->BuildPath(state.view_root_id)
+        ? (focused_node->m_is_shared_storage ? focused_node->name : state.tree->BuildPath(state.view_root_id))
         : (state.selected_path.empty() ? L"(no path selected)" : state.selected_path);
     const std::wstring focused_name = focused_node
         ? (focused_node->name.empty() ? focused_path : focused_node->name)
@@ -1807,7 +1807,7 @@ void Direct2DRenderer::DrawHeader(const MainWindowDrawingState& state)
         ? state.tree->GetNode(state.view_root_id)
         : nullptr;
     const std::wstring focused_path = focused_node
-        ? state.tree->BuildPath(state.view_root_id)
+        ? (focused_node->m_is_shared_storage ? focused_node->name : state.tree->BuildPath(state.view_root_id))
         : (state.selected_path.empty() ? L"(no path selected)" : state.selected_path);
     const std::wstring focused_size = focused_node
         ? HumanizeBytes(focused_node->GetSize(state.layout_options.m_size_metric))
@@ -1896,7 +1896,7 @@ bool Direct2DRenderer::TryGetHoverDisplayInfo(const MainWindowDrawingState& stat
         {
             const Node* node = state.tree->GetNode(strip.node_id);
             const std::wstring path = state.tree->BuildPath(strip.node_id);
-            *name_text = path.empty() ? strip.text : path;
+            *name_text = node && node->m_is_shared_storage ? node->name : (path.empty() ? strip.text : path);
             *size_text = FormatSizeDetails(node, state.layout_options.m_size_metric);
         }
         else
@@ -2002,31 +2002,92 @@ bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& sta
     const float available_tooltip_width =
         std::max(Scale(48.0f), (state.canvas_rect.right - state.canvas_rect.left) - Scale(12.0f));
     const float max_tooltip_width =
-        std::min(Scale(420.0f), std::max(Scale(28.0f), available_tooltip_width - (tooltip_padding_x * 2.0f)));
-    const float max_tooltip_height =
+        std::min(Scale(520.0f), std::max(Scale(28.0f), available_tooltip_width - (tooltip_padding_x * 2.0f)));
+    float max_tooltip_height =
         std::max(Scale(48.0f), (state.canvas_rect.bottom - state.canvas_rect.top) - Scale(24.0f));
 
-    ComPtr<IDWriteTextLayout> name_layout = CreateTextLayout(
-        name_text,
-        RenderTextFormat::Small,
-        MakeRenderRect(0.0f, 0.0f, max_tooltip_width, max_tooltip_height),
-        DWRITE_WORD_WRAPPING_WRAP);
+    std::vector<std::wstring> shared_paths;
+    size_t shared_path_count = 0;
+    if (state.hovered_breadcrumb_index < 0 && state.hovered_index >= 0 &&
+        state.hovered_index < static_cast<int>(state.rects->size()))
+    {
+        const auto& rect = (*state.rects)[static_cast<size_t>(state.hovered_index)];
+        if (const auto* path_ids = state.tree->GetSharedFilePaths(rect.node_id))
+        {
+            shared_path_count = path_ids->size();
+            name_text += L"\n" + std::to_wstring(shared_path_count) + L" hard-linked paths";
+            constexpr size_t max_listed_paths = 10;
+            const float treemap_height = state.treemap_content_rect.bottom - state.treemap_content_rect.top;
+            max_tooltip_height = std::min(max_tooltip_height, treemap_height * 0.5f);
+            for (size_t i = 0; i < std::min(shared_path_count, max_listed_paths); ++i)
+            {
+                shared_paths.push_back(state.tree->BuildPath((*path_ids)[i]));
+            }
+        }
+    }
+
     ComPtr<IDWriteTextLayout> size_layout = CreateTextLayout(
         size_text,
         RenderTextFormat::Small,
         MakeRenderRect(0.0f, 0.0f, max_tooltip_width, Scale(64.0f)),
         DWRITE_WORD_WRAPPING_WRAP);
-    if (!name_layout || !size_layout)
+    DWRITE_TEXT_METRICS raw_size_metrics = {};
+    if (!size_layout || FAILED(size_layout->GetMetrics(&raw_size_metrics)))
     {
         return false;
     }
 
     DWRITE_TEXT_METRICS raw_name_metrics = {};
-    DWRITE_TEXT_METRICS raw_size_metrics = {};
-    if (FAILED(name_layout->GetMetrics(&raw_name_metrics)) ||
-        FAILED(size_layout->GetMetrics(&raw_size_metrics)))
+    ComPtr<IDWriteTextLayout> name_layout;
+    const float size_height = std::max(raw_size_metrics.height, Scale(14.0f));
+    const float max_name_height =
+        max_tooltip_height - tooltip_padding_y * 2.0f - tooltip_line_gap - size_height;
+    if (shared_path_count > 0 && max_name_height < Scale(16.0f))
     {
         return false;
+    }
+    size_t visible_paths = shared_paths.size();
+    for (;;)
+    {
+        std::wstring text = name_text;
+        for (size_t i = 0; i < visible_paths; ++i)
+        {
+            text += L"\n" + shared_paths[i];
+        }
+        if (visible_paths < shared_path_count)
+        {
+            if (!text.empty())
+            {
+                text += L"\n";
+            }
+            text += L"+ " + std::to_wstring(shared_path_count - visible_paths) + L" more";
+        }
+        name_layout = CreateTextLayout(
+            text,
+            RenderTextFormat::Small,
+            MakeRenderRect(0.0f, 0.0f, max_tooltip_width, max_tooltip_height),
+            DWRITE_WORD_WRAPPING_WRAP);
+        if (!name_layout || FAILED(name_layout->GetMetrics(&raw_name_metrics)))
+        {
+            return false;
+        }
+        if (shared_path_count == 0 || raw_name_metrics.height <= max_name_height)
+        {
+            break;
+        }
+        if (visible_paths > 0)
+        {
+            --visible_paths;
+        }
+        else if (!name_text.empty())
+        {
+            // Keep the overflow count when even the full header cannot fit.
+            name_text.clear();
+        }
+        else
+        {
+            return false;
+        }
     }
 
     const RenderTextMetrics name_metrics = RenderTextMetrics{
@@ -2043,7 +2104,6 @@ bool Direct2DRenderer::BuildHoverTooltipLayout(const MainWindowDrawingState& sta
             size_metrics.width_including_trailing_whitespace),
         Scale(96.0f));
     const float name_height = std::max(name_metrics.height, Scale(16.0f));
-    const float size_height = std::max(size_metrics.height, Scale(14.0f));
     const float tooltip_width = std::min(available_tooltip_width, text_width + (tooltip_padding_x * 2.0f));
     const float tooltip_height = (tooltip_padding_y * 2.0f) + name_height + tooltip_line_gap + size_height;
     const RenderPoint tooltip_origin = ResolveTooltipPosition(state, 
